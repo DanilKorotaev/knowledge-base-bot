@@ -17,6 +17,8 @@
 - Docker конфигурация
 - Документация по Git Flow (docs/GIT_FLOW.md)
 - Скрипты автоматизации Git Flow (scripts/git_flow_*.sh)
+- Система задач (docs/todo.md, docs/completed.md)
+- Инициализация Git репозитория согласно Git Flow
 
 ### TODO
 - Реализация интеграции с Cursor CLI
