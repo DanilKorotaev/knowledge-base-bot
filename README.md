@@ -49,11 +49,29 @@ cp .env.example .env
 python bot.py
 ```
 
-Подробные инструкции по установке и настройке см. в [docs/SETUP.md](docs/SETUP.md).
+### Локальное тестирование с Docker
+
+1. Создайте `.env` файл (см. `.env.example`)
+2. Настройте NextCloud (см. [docs/SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md))
+3. Запустите скрипт настройки:
+```bash
+./scripts/setup_local_testing.sh
+```
+4. Запустите бота:
+```bash
+docker-compose up -d
+```
+5. Проверьте логи:
+```bash
+docker-compose logs -f bot
+```
+
+Подробные инструкции по установке и настройке см. в [docs/SETUP.md](docs/SETUP.md) и [docs/SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md).
 
 ## Документация
 
 - [SETUP.md](docs/SETUP.md) - Инструкции по установке и настройке
+- [SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md) - Настройка NextCloud для бота
 - [DEVELOPMENT.md](docs/DEVELOPMENT.md) - Руководство для разработчиков
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Инструкции по развертыванию
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Описание архитектуры

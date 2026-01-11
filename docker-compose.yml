@@ -8,12 +8,19 @@ services:
     env_file:
       - .env
     volumes:
+      # Локальная копия базы знаний (синхронизируется с NextCloud)
       - ./local_kb:/var/knowledge-base-bot/kb
+      # Логи бота
       - ./logs:/app/logs
+      # Для локальной разработки: монтировать код (опционально)
+      # - .:/app
     depends_on:
       - postgres
     networks:
       - bot-network
+    # Для отладки: раскомментируйте для доступа к контейнеру
+    # stdin_open: true
+    # tty: true
 
   postgres:
     image: postgres:15-alpine
