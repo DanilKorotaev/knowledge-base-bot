@@ -15,6 +15,7 @@ _Нет задач в процессе_
 - [ ] [Интеграция с Cursor CLI](tasks/pending/task-feature-cursor-cli-integration.md)
 - [ ] [Интеграция с NextCloud](tasks/pending/task-feature-nextcloud-integration.md)
 - [ ] [Реализация базовой структуры проекта](tasks/pending/task-setup-project-structure.md) - _перемещено в pending для дальнейшей работы_
+- [ ] [Управление сессиями](tasks/pending/task-feature-session-management.md)
 - [ ] [Обработка текстовых сообщений](tasks/pending/task-feature-text-messages.md)
 - [ ] [Обработка голосовых сообщений](tasks/pending/task-feature-voice-messages.md)
 - [ ] [Обработка файлов и фото](tasks/pending/task-feature-media-handling.md)
