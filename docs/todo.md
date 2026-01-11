@@ -33,6 +33,11 @@
 - [ ] [Внедрение процессов тестирования](tasks/pending/task-testing-implementation.md)
 - [ ] [Оптимизация работы с базой знаний](tasks/pending/task-tech-kb-optimization.md)
 
+### Интеграции и расширения
+
+- [ ] [Интеграция с Google Calendar](tasks/pending/task-feature-google-calendar-integration.md)
+- [ ] [Скачивание видео из различных сервисов](tasks/pending/task-feature-video-download.md)
+
 ### Документация
 
 - [ ] [Создать API документацию](tasks/pending/task-doc-api-documentation.md)
