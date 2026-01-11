@@ -32,8 +32,9 @@ async def main():
         dp = Dispatcher()
         
         # Регистрация обработчиков
-        from handlers import commands, messages, voice, media
+        from handlers import commands, messages, voice, media, callbacks
         dp.include_router(commands.router)
+        dp.include_router(callbacks.router)  # Обработка inline-кнопок
         dp.include_router(voice.router)
         dp.include_router(media.router)
         dp.include_router(messages.router)  # В конце, чтобы обрабатывать все остальные сообщения
