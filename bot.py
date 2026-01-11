@@ -39,6 +39,18 @@ async def main():
         dp.include_router(media.router)
         dp.include_router(messages.router)  # В конце, чтобы обрабатывать все остальные сообщения
         
+        # Инициализация синхронизации с NextCloud
+        from services.sync_service import SyncService
+        sync_service = SyncService()
+        logger.info("Инициализация синхронизации с NextCloud...")
+        await sync_service.initialize()
+        logger.info("Синхронизация инициализирована")
+        
+        # Запуск периодической синхронизации (если включена)
+        if config.ENABLE_SYNC and config.AUTO_SYNC:
+            sync_task = asyncio.create_task(sync_service.start_periodic_sync())
+            logger.info("Периодическая синхронизация запущена")
+        
         logger.info("Бот запущен")
         
         # Запуск polling

@@ -9,9 +9,9 @@ Telegram-бот для удобного взаимодействия с базо
 ## Основные возможности
 
 - ✅ Обработка текстовых запросов с контекстом базы знаний
+- ✅ Автоматическая синхронизация с NextCloud (скачивание при первом запуске, загрузка после изменений)
 - ✅ Транскрибация голосовых сообщений (Whisper API)
 - ✅ Обработка фото и файлов
-- ✅ Интеграция с NextCloud для синхронизации
 - ✅ Отслеживание изменений с возможностью отката
 - ✅ Режим "пустого чата" и режим работы с базой знаний
 - ✅ Универсальность: можно развернуть на любую базу знаний
@@ -72,6 +72,8 @@ docker-compose logs -f bot
 
 - [SETUP.md](docs/SETUP.md) - Инструкции по установке и настройке
 - [SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md) - Настройка NextCloud для бота
+- [SETUP_NEXTCLOUD_SCENARIO.md](docs/SETUP_NEXTCLOUD_SCENARIO.md) - Сценарий с расшариванием папки
+- [SYNC_AUTOMATIC.md](docs/SYNC_AUTOMATIC.md) - Автоматическая синхронизация
 - [DEVELOPMENT.md](docs/DEVELOPMENT.md) - Руководство для разработчиков
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Инструкции по развертыванию
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Описание архитектуры

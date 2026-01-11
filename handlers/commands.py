@@ -1,12 +1,14 @@
 """
 Обработчики команд бота
 """
+import logging
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @router.message(Command("start"))
@@ -104,6 +106,30 @@ async def revert_session_handler(message: Message):
 @router.message(Command("sync"))
 async def sync_handler(message: Message):
     """Принудительная синхронизация с NextCloud"""
-    # TODO: Реализовать синхронизацию
-    await message.answer("🔄 Синхронизация будет реализована позже.")
+    from services.sync_service import SyncService
+    
+    sync_message = await message.answer("🔄 Синхронизация с NextCloud...")
+    
+    try:
+        sync_service = SyncService()
+        
+        if not sync_service.enabled:
+            await sync_message.edit_text("❌ Синхронизация отключена. Проверьте настройки в .env")
+            return
+        
+        # Синхронизировать в обе стороны
+        sync_to = await sync_service.sync_to_nextcloud()
+        sync_from = await sync_service.sync_from_nextcloud()
+        
+        if sync_to and sync_from:
+            await sync_message.edit_text("✅ Синхронизация завершена успешно")
+        elif sync_to:
+            await sync_message.edit_text("✅ Изменения загружены в NextCloud\n⚠️ Не удалось загрузить изменения из NextCloud")
+        elif sync_from:
+            await sync_message.edit_text("✅ Изменения загружены из NextCloud\n⚠️ Не удалось загрузить изменения в NextCloud")
+        else:
+            await sync_message.edit_text("❌ Ошибка при синхронизации. Проверьте логи.")
+    except Exception as e:
+        logger.error(f"Ошибка при синхронизации: {e}", exc_info=True)
+        await sync_message.edit_text(f"❌ Ошибка при синхронизации: {str(e)}")
 
