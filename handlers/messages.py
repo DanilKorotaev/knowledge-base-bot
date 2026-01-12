@@ -109,7 +109,7 @@ async def text_message_handler(message: Message, state: FSMContext):
                 except TelegramBadRequest as e2:
                     # Если и Markdown V2 не работает, отправляем без форматирования
                     logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
-                    await message.answer(part)
+                await message.answer(part)
         
         # Если были изменения файлов, синхронизировать с NextCloud
         if changes:

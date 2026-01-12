@@ -25,8 +25,77 @@ class CursorCLIService:
             logger.warning(f"Директория базы знаний не существует: {self.kb_path}")
             self.kb_path.mkdir(parents=True, exist_ok=True)
         
+        # Создать .cursorignore для оптимизации производительности
+        self._ensure_cursorignore()
+        
+        # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
+        self._ensure_cursor_rules()
+        
         # Загрузить системный промпт один раз при инициализации
         self.system_prompt = self._load_system_prompt()
+    
+    def _ensure_cursorignore(self) -> None:
+        """
+        Скопировать .cursorignore в базу знаний для оптимизации сканирования
+        
+        Приоритет загрузки:
+        1. Путь из переменной окружения CURSOR_IGNORE_PATH (если указан)
+        2. Файл из проекта: .cursorignore
+        3. Если не найден, не создавать (пользователь может создать свой)
+        """
+        cursorignore_dest = self.kb_path / ".cursorignore"
+        
+        # Если файл уже существует в БЗ, не перезаписываем его (пользователь мог настроить свой)
+        if cursorignore_dest.exists():
+            logger.debug(f".cursorignore уже существует в БЗ: {cursorignore_dest}")
+            return
+        
+        # Проверяем, указан ли путь в переменной окружения
+        custom_path = os.getenv("CURSOR_IGNORE_PATH")
+        if custom_path:
+            ignore_source = Path(custom_path)
+            if not ignore_source.is_absolute():
+                # Относительный путь - от проекта
+                project_root = Path(__file__).parent.parent
+                ignore_source = project_root / ignore_source
+            if ignore_source.exists():
+                import shutil
+                shutil.copy2(ignore_source, cursorignore_dest)
+                logger.info(f"Скопирован .cursorignore из указанного пути: {ignore_source}")
+                return
+            else:
+                logger.warning(f"Указанный путь к .cursorignore не найден: {ignore_source}")
+        
+        # Пробуем загрузить из проекта
+        project_root = Path(__file__).parent.parent
+        project_ignore_path = project_root / ".cursorignore"
+        if project_ignore_path.exists():
+            import shutil
+            shutil.copy2(project_ignore_path, cursorignore_dest)
+            logger.info(f"Скопирован .cursorignore из проекта: {project_ignore_path}")
+        else:
+            logger.debug("Файл .cursorignore не найден в проекте (это нормально, можно создать свой)")
+    
+    def _ensure_cursor_rules(self) -> None:
+        """Создать .cursor/rules/ и скопировать системные промпты"""
+        rules_dir = self.kb_path / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Загрузить промпт бота
+        bot_prompt = self._load_bot_prompt()
+        if bot_prompt:
+            bot_prompt_file = rules_dir / "bot-system-prompt.md"
+            if not bot_prompt_file.exists() or bot_prompt_file.read_text(encoding="utf-8") != bot_prompt:
+                bot_prompt_file.write_text(bot_prompt, encoding="utf-8")
+                logger.info(f"Промпт бота скопирован в .cursor/rules/")
+        
+        # Загрузить промпт БЗ
+        kb_prompt = self._load_kb_prompt()
+        if kb_prompt:
+            kb_prompt_file = rules_dir / "kb-system-prompt.md"
+            if not kb_prompt_file.exists() or kb_prompt_file.read_text(encoding="utf-8") != kb_prompt:
+                kb_prompt_file.write_text(kb_prompt, encoding="utf-8")
+                logger.info(f"Промпт БЗ скопирован в .cursor/rules/")
     
     def _load_system_prompt(self) -> str:
         """
@@ -105,19 +174,6 @@ class CursorCLIService:
             else:
                 logger.warning(f"Указанный путь к промпту БЗ не найден: {prompt_path}")
         
-        # Пробуем стандартные пути в базе знаний
-        # Вариант 1: Документация/Системный промпт.md
-        kb_prompt_path = self.kb_path / "Документация" / "Системный промпт.md"
-        if kb_prompt_path.exists():
-            logger.info(f"Загружен промпт БЗ из стандартного пути: {kb_prompt_path}")
-            return kb_prompt_path.read_text(encoding="utf-8")
-        
-        # Вариант 2: Documentation/System Prompt.md (английский вариант)
-        kb_prompt_path_en = self.kb_path / "Documentation" / "System Prompt.md"
-        if kb_prompt_path_en.exists():
-            logger.info(f"Загружен промпт БЗ из стандартного пути (EN): {kb_prompt_path_en}")
-            return kb_prompt_path_en.read_text(encoding="utf-8")
-        
         logger.debug("Промпт базы знаний не найден (это нормально, если БЗ не имеет системного промпта)")
         return ""
     
@@ -148,17 +204,12 @@ class CursorCLIService:
         # Сохранить состояние файлов до выполнения (для отслеживания изменений)
         file_states_before = await self._save_file_states()
         
-        # Подготовить запрос с системным промптом
-        # Если есть системный промпт, добавляем его в начало запроса
+        # Подготовить запрос
+        # Системные промпты теперь в .cursor/rules/, поэтому не добавляем их в запрос
+        # Это оптимизирует производительность - Cursor CLI автоматически загружает промпты из .cursor/rules/
         full_query = query
         if self.system_prompt:
-            # Форматируем запрос: системный промпт + разделитель + запрос пользователя
-            full_query = f"""{self.system_prompt}
-
----
-
-Запрос пользователя: {query}"""
-            logger.debug(f"Системный промпт добавлен к запросу ({len(self.system_prompt)} символов)")
+            logger.debug(f"Системные промпты доступны в .cursor/rules/ ({len(self.system_prompt)} символов)")
         
         # Подготовить команду
         cmd = ["cursor-agent", "-p", "--force"]
