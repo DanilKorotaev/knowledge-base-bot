@@ -2,14 +2,16 @@
 Обработчики текстовых сообщений
 """
 import logging
+import time
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.enums import ParseMode
 
 from services.cursor_cli_service import CursorCLIService
 from services.sync_service import SyncService
-from utils.message_helpers import split_long_message
+from utils.message_helpers import split_long_message, markdown_to_html, escape_markdown_v2
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -36,11 +38,14 @@ async def text_message_handler(message: Message, state: FSMContext):
     # Отправить индикатор "печатает..."
     typing_message = await message.answer("⏳ Обрабатываю запрос...")
     
+    start_time = time.time()
+    
     try:
         # Проверить актуальность базы знаний (быстрая синхронизация из NextCloud)
         sync_service = SyncService()
         sync_updated = False
         
+        sync_start = time.time()
         if sync_service.enabled:
             try:
                 # Быстрая синхронизация (показываем уведомление только если синхронизация долгая)
@@ -62,7 +67,12 @@ async def text_message_handler(message: Message, state: FSMContext):
             except Exception as e:
                 logger.warning(f"Ошибка при проверке синхронизации: {e}")
         
+        sync_time = time.time() - sync_start
+        if sync_time > 1.0:
+            logger.info(f"⏱️ Синхронизация заняла: {sync_time:.2f}с")
+        
         # Инициализировать сервис Cursor CLI
+        cursor_start = time.time()
         cursor_service = CursorCLIService()
         
         # Обработать запрос через Cursor CLI
@@ -70,6 +80,9 @@ async def text_message_handler(message: Message, state: FSMContext):
             query=query,
             session_id=None  # Пока без сессий, будет реализовано позже
         )
+        
+        cursor_time = time.time() - cursor_start
+        logger.info(f"⏱️ Cursor CLI обработка заняла: {cursor_time:.2f}с")
         
         # Удалить индикатор "печатает..."
         try:
@@ -83,14 +96,20 @@ async def text_message_handler(message: Message, state: FSMContext):
         
         for i, part in enumerate(response_parts):
             try:
-                if i == 0:
-                    await message.answer(part, parse_mode="Markdown")
-                else:
-                    await message.answer(part, parse_mode="Markdown")
+                # Используем HTML для более надежного форматирования
+                # Конвертируем Markdown в HTML
+                html_part = markdown_to_html(part)
+                await message.answer(html_part, parse_mode=ParseMode.HTML)
             except TelegramBadRequest as e:
-                # Если ошибка форматирования Markdown, отправить без форматирования
-                logger.warning(f"Ошибка форматирования Markdown: {e}")
-                await message.answer(part)
+                # Если ошибка форматирования HTML, пробуем Markdown V2
+                logger.warning(f"Ошибка форматирования HTML: {e}, пробую Markdown V2")
+                try:
+                    md_part = escape_markdown_v2(part)
+                    await message.answer(md_part, parse_mode=ParseMode.MARKDOWN_V2)
+                except TelegramBadRequest as e2:
+                    # Если и Markdown V2 не работает, отправляем без форматирования
+                    logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
+                    await message.answer(part)
         
         # Если были изменения файлов, синхронизировать с NextCloud
         if changes:
@@ -115,7 +134,8 @@ async def text_message_handler(message: Message, state: FSMContext):
             except Exception as e:
                 logger.warning(f"Не удалось отправить информацию об изменениях: {e}")
         
-        logger.info(f"Запрос от пользователя {user_id} обработан успешно")
+        total_time = time.time() - start_time
+        logger.info(f"✅ Запрос от пользователя {user_id} обработан успешно за {total_time:.2f}с")
         
     except Exception as e:
         # Удалить индикатор "печатает..."
