@@ -23,8 +23,9 @@ async def start_handler(message: Message):
 @router.message(Command("help"))
 async def help_handler(message: Message):
     """Обработчик команды /help"""
-    help_text = """
-📚 **Доступные команды:**
+    from aiogram.enums import ParseMode
+    
+    help_text = """📚 <b>Доступные команды:</b>
 
 /start - Начать работу с ботом
 /help - Показать эту справку
@@ -36,9 +37,9 @@ async def help_handler(message: Message):
 /history - Показать историю изменений текущей сессии
 /revert [change_id] - Откатить конкретное изменение
 /revert_session - Откатить все изменения текущей сессии
-/sync - Принудительная синхронизация с NextCloud
-    """
-    await message.answer(help_text)
+/sync - Принудительная синхронизация с NextCloud"""
+    
+    await message.answer(help_text, parse_mode=ParseMode.HTML)
 
 
 @router.message(Command("new_query"))

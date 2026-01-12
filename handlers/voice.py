@@ -3,13 +3,17 @@
 """
 from aiogram import Router
 from aiogram.types import Message
-from aiogram.filters import F
 from aiogram.fsm.context import FSMContext
 
 router = Router()
 
 
-@router.message(F.voice)
+async def voice_filter(message: Message) -> bool:
+    """Фильтр для голосовых сообщений"""
+    return message.voice is not None
+
+
+@router.message(voice_filter)
 async def voice_handler(message: Message, state: FSMContext):
     """Обработчик голосовых сообщений"""
     # TODO: Реализовать обработку голосовых сообщений

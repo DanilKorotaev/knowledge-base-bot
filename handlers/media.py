@@ -3,13 +3,17 @@
 """
 from aiogram import Router
 from aiogram.types import Message
-from aiogram.filters import F
 from aiogram.fsm.context import FSMContext
 
 router = Router()
 
 
-@router.message(F.photo)
+async def photo_filter(message: Message) -> bool:
+    """Фильтр для фото"""
+    return message.photo is not None
+
+
+@router.message(photo_filter)
 async def photo_handler(message: Message, state: FSMContext):
     """Обработчик фото"""
     # TODO: Реализовать обработку фото
@@ -27,7 +31,12 @@ async def photo_handler(message: Message, state: FSMContext):
     )
 
 
-@router.message(F.document)
+async def document_filter(message: Message) -> bool:
+    """Фильтр для документов"""
+    return message.document is not None
+
+
+@router.message(document_filter)
 async def document_handler(message: Message, state: FSMContext):
     """Обработчик документов"""
     # TODO: Реализовать обработку документов
