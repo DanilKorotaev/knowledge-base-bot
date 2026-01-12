@@ -9,7 +9,8 @@ services:
       - .env
     volumes:
       # Локальная копия базы знаний (синхронизируется с NextCloud)
-      - ./local_kb:/var/knowledge-base-bot/kb
+      # Используется абсолютный путь вне базы знаний, чтобы избежать рекурсии
+      - ~/.local/share/knowledge-base-bot/kb:/var/knowledge-base-bot/kb
       # Логи бота
       - ./logs:/app/logs
       # Для локальной разработки: монтировать код (опционально)

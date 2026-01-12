@@ -44,7 +44,6 @@ ENV/
 *.sqlite3
 /tmp/
 /logs/
-/local_kb/
 
 # OS
 .DS_Store

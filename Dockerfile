@@ -4,11 +4,13 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     curl \
     git \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Установить Cursor CLI (опционально, если нужен)
-# RUN curl https://cursor.com/install -fsS | bash
-# ENV PATH="/root/.local/bin:${PATH}"
+# Установить Cursor CLI
+# Cursor CLI устанавливается через curl скрипт
+RUN curl https://cursor.com/install -fsS | bash || echo "Warning: Cursor CLI installation failed, but continuing..."
+ENV PATH="/root/.local/bin:${PATH}"
 
 # Рабочая директория
 WORKDIR /app
