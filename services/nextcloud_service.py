@@ -252,13 +252,23 @@ class NextCloudService:
                 
                 # Получить относительный путь
                 # href имеет формат: /remote.php/dav/files/username/path/to/file
-                # Нужно извлечь только path/to/file
+                # Нужно извлечь только path/to/file (относительно base_path)
                 webdav_prefix = f"/remote.php/dav/files/{self.username}/"
                 if webdav_prefix in href:
-                    relative_path = href.split(webdav_prefix, 1)[1]
+                    full_path = href.split(webdav_prefix, 1)[1]
                 else:
                     # Fallback: использовать href как есть
-                    relative_path = href.lstrip('/')
+                    full_path = href.lstrip('/')
+                
+                # Убрать base_path из начала пути, если он там есть
+                # base_path уже учтен в webdav_url, поэтому нужно получить путь относительно base_path
+                relative_path = full_path
+                if self.base_path:
+                    base_path_normalized = self.base_path.lstrip('/').rstrip('/')
+                    if relative_path.startswith(base_path_normalized + '/'):
+                        relative_path = relative_path[len(base_path_normalized) + 1:]
+                    elif relative_path == base_path_normalized:
+                        relative_path = ""
                 
                 # Получить метаданные
                 propstat = response.find('d:propstat', namespaces)
