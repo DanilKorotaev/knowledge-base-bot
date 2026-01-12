@@ -25,45 +25,100 @@ class CursorCLIService:
             logger.warning(f"Директория базы знаний не существует: {self.kb_path}")
             self.kb_path.mkdir(parents=True, exist_ok=True)
         
-        # Убедиться, что системный промпт скопирован в .cursor/rules/
-        self._ensure_system_prompt()
-    
-    def _ensure_system_prompt(self) -> None:
-        """Убедиться, что системный промпт бота скопирован в .cursor/rules/"""
-        rules_dir = self.kb_path / ".cursor" / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Путь к системному промпту в проекте
-        project_root = Path(__file__).parent.parent
-        system_prompt_source = project_root / "agent" / "system_prompt.md"
-        
-        # Путь назначения
-        system_prompt_dest = rules_dir / "telegram-bot-prompt.md"
-        
-        # Копировать системный промпт, если он существует и еще не скопирован
-        if system_prompt_source.exists():
-            if not system_prompt_dest.exists() or system_prompt_source.stat().st_mtime > system_prompt_dest.stat().st_mtime:
-                import shutil
-                shutil.copy2(system_prompt_source, system_prompt_dest)
-                logger.info(f"Системный промпт скопирован в {system_prompt_dest}")
-        else:
-            logger.warning(f"Системный промпт не найден: {system_prompt_source}")
+        # Загрузить системный промпт один раз при инициализации
+        self.system_prompt = self._load_system_prompt()
     
     def _load_system_prompt(self) -> str:
-        """Загрузить системный промпт из файла"""
-        # Сначала пробуем загрузить из проекта
+        """
+        Загрузить системные промпты (промпт бота + промпт БЗ)
+        
+        Приоритет загрузки промпта бота:
+        1. Путь из переменной окружения BOT_SYSTEM_PROMPT_PATH (если указан)
+        2. Файл из проекта: agent/system_prompt.md
+        
+        Приоритет загрузки промпта БЗ:
+        1. Путь из переменной окружения KB_SYSTEM_PROMPT_PATH (если указан)
+        2. Файл из базы знаний: Документация/Системный промпт.md
+        3. Другие возможные пути (можно расширить)
+        
+        Returns:
+            str: Объединенный системный промпт (промпт бота + промпт БЗ)
+        """
+        prompts = []
+        
+        # 1. Загрузить промпт бота
+        bot_prompt = self._load_bot_prompt()
+        if bot_prompt:
+            prompts.append(bot_prompt)
+        
+        # 2. Загрузить промпт базы знаний
+        kb_prompt = self._load_kb_prompt()
+        if kb_prompt:
+            prompts.append("---")
+            prompts.append("# Системный промпт базы знаний")
+            prompts.append("")
+            prompts.append(kb_prompt)
+        
+        if not prompts:
+            logger.warning("Системные промпты не найдены, будет использоваться только запрос пользователя")
+            return ""
+        
+        return "\n\n".join(prompts)
+    
+    def _load_bot_prompt(self) -> str:
+        """Загрузить системный промпт бота"""
+        # Проверяем, указан ли путь в переменной окружения
+        custom_path = os.getenv("BOT_SYSTEM_PROMPT_PATH")
+        if custom_path:
+            prompt_path = Path(custom_path)
+            if not prompt_path.is_absolute():
+                # Относительный путь - от проекта
+                project_root = Path(__file__).parent.parent
+                prompt_path = project_root / prompt_path
+            if prompt_path.exists():
+                logger.info(f"Загружен промпт бота из указанного пути: {prompt_path}")
+                return prompt_path.read_text(encoding="utf-8")
+            else:
+                logger.warning(f"Указанный путь к промпту бота не найден: {prompt_path}")
+        
+        # Загрузить из проекта
         project_root = Path(__file__).parent.parent
-        system_prompt_path = project_root / "agent" / "system_prompt.md"
+        project_prompt_path = project_root / "agent" / "system_prompt.md"
+        if project_prompt_path.exists():
+            logger.info(f"Загружен промпт бота из проекта: {project_prompt_path}")
+            return project_prompt_path.read_text(encoding="utf-8")
         
-        if system_prompt_path.exists():
-            return system_prompt_path.read_text(encoding="utf-8")
+        return ""
+    
+    def _load_kb_prompt(self) -> str:
+        """Загрузить системный промпт базы знаний"""
+        # Проверяем, указан ли путь в переменной окружения
+        custom_path = os.getenv("KB_SYSTEM_PROMPT_PATH")
+        if custom_path:
+            prompt_path = Path(custom_path)
+            if not prompt_path.is_absolute():
+                # Относительный путь - от базы знаний
+                prompt_path = self.kb_path / prompt_path
+            if prompt_path.exists():
+                logger.info(f"Загружен промпт БЗ из указанного пути: {prompt_path}")
+                return prompt_path.read_text(encoding="utf-8")
+            else:
+                logger.warning(f"Указанный путь к промпту БЗ не найден: {prompt_path}")
         
-        # Если не найден, пробуем из .cursor/rules/
-        rules_prompt_path = self.kb_path / ".cursor" / "rules" / "telegram-bot-prompt.md"
-        if rules_prompt_path.exists():
-            return rules_prompt_path.read_text(encoding="utf-8")
+        # Пробуем стандартные пути в базе знаний
+        # Вариант 1: Документация/Системный промпт.md
+        kb_prompt_path = self.kb_path / "Документация" / "Системный промпт.md"
+        if kb_prompt_path.exists():
+            logger.info(f"Загружен промпт БЗ из стандартного пути: {kb_prompt_path}")
+            return kb_prompt_path.read_text(encoding="utf-8")
         
-        logger.warning("Системный промпт не найден, используется пустая строка")
+        # Вариант 2: Documentation/System Prompt.md (английский вариант)
+        kb_prompt_path_en = self.kb_path / "Documentation" / "System Prompt.md"
+        if kb_prompt_path_en.exists():
+            logger.info(f"Загружен промпт БЗ из стандартного пути (EN): {kb_prompt_path_en}")
+            return kb_prompt_path_en.read_text(encoding="utf-8")
+        
+        logger.debug("Промпт базы знаний не найден (это нормально, если БЗ не имеет системного промпта)")
         return ""
     
     async def process_query(
@@ -93,6 +148,18 @@ class CursorCLIService:
         # Сохранить состояние файлов до выполнения (для отслеживания изменений)
         file_states_before = await self._save_file_states()
         
+        # Подготовить запрос с системным промптом
+        # Если есть системный промпт, добавляем его в начало запроса
+        full_query = query
+        if self.system_prompt:
+            # Форматируем запрос: системный промпт + разделитель + запрос пользователя
+            full_query = f"""{self.system_prompt}
+
+---
+
+Запрос пользователя: {query}"""
+            logger.debug(f"Системный промпт добавлен к запросу ({len(self.system_prompt)} символов)")
+        
         # Подготовить команду
         cmd = ["cursor-agent", "-p", "--force"]
         
@@ -101,8 +168,8 @@ class CursorCLIService:
         if model_to_use:
             cmd.extend(["--model", model_to_use])
         
-        # Добавить запрос
-        cmd.append(query)
+        # Добавить полный запрос (с системным промптом, если есть)
+        cmd.append(full_query)
         
         # Подготовить окружение с API ключом
         env = os.environ.copy()
@@ -111,10 +178,15 @@ class CursorCLIService:
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
         
+        # Таймаут из конфига (по умолчанию 10 минут)
+        timeout = int(os.getenv("CURSOR_CLI_TIMEOUT", "600"))
+        
         try:
             # Выполнить команду в директории базы знаний
-            logger.debug(f"Выполнение команды: {' '.join(cmd)}")
-            logger.debug(f"Рабочая директория: {self.kb_path}")
+            logger.info(f"Выполнение команды: {' '.join(cmd)}")
+            logger.info(f"Рабочая директория: {self.kb_path}")
+            logger.info(f"Таймаут: {timeout} секунд")
+            logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")
             
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -124,31 +196,85 @@ class CursorCLIService:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            # Ждать завершения с таймаутом (5 минут)
+            logger.info(f"Процесс Cursor CLI запущен (PID: {process.pid})")
+            
+            # Собирать вывод в реальном времени
+            stdout_chunks = []
+            stderr_chunks = []
+            
+            async def read_stream(stream, chunks_list, stream_name):
+                """Читать поток и логировать в реальном времени"""
+                try:
+                    while True:
+                        chunk = await stream.read(1024)
+                        if not chunk:
+                            break
+                        decoded = chunk.decode('utf-8', errors='ignore')
+                        chunks_list.append(decoded)
+                        # Логировать важные сообщения
+                        if decoded.strip():
+                            logger.debug(f"Cursor CLI {stream_name}: {decoded.strip()[:200]}")
+                except Exception as e:
+                    logger.warning(f"Ошибка при чтении {stream_name}: {e}")
+            
+            # Читать потоки параллельно
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=300.0
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        read_stream(process.stdout, stdout_chunks, "stdout"),
+                        read_stream(process.stderr, stderr_chunks, "stderr"),
+                        process.wait()
+                    ),
+                    timeout=timeout
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                await process.wait()
-                error_msg = "Превышено время ожидания ответа от Cursor CLI (5 минут)"
+                logger.error(f"Превышен таймаут ({timeout} секунд). Завершение процесса...")
+                try:
+                    process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (ProcessLookupError, asyncio.TimeoutError) as e:
+                    logger.warning(f"Ошибка при завершении процесса: {e}")
+                
+                # Собрать весь вывод до таймаута
+                stdout_text = ''.join(stdout_chunks)
+                stderr_text = ''.join(stderr_chunks)
+                
+                logger.error(f"Вывод Cursor CLI (stdout): {stdout_text[:500]}")
+                logger.error(f"Вывод Cursor CLI (stderr): {stderr_text[:500]}")
+                
+                error_msg = f"Превышено время ожидания ответа от Cursor CLI ({timeout} секунд)"
+                if stderr_text:
+                    error_msg += f"\n\nПоследние сообщения:\n{stderr_text[-500:]}"
                 logger.error(error_msg)
                 return f"❌ {error_msg}", []
             
+            # Получить код возврата
+            returncode = await process.wait() if process.returncode is None else process.returncode
+            
+            # Собрать весь вывод
+            stdout_text = ''.join(stdout_chunks)
+            stderr_text = ''.join(stderr_chunks)
+            
+            # Логировать вывод
+            if stdout_text:
+                logger.debug(f"Cursor CLI stdout (полный): {stdout_text[:1000]}")
+            if stderr_text:
+                logger.info(f"Cursor CLI stderr: {stderr_text[:1000]}")
+            
             # Проверить код возврата
-            if process.returncode != 0:
-                error_msg = f"Ошибка выполнения Cursor CLI: {stderr.decode('utf-8', errors='ignore')}"
+            if returncode != 0:
+                error_msg = f"Ошибка выполнения Cursor CLI (код: {returncode})"
+                if stderr_text:
+                    error_msg += f"\n\nОшибка:\n{stderr_text}"
                 logger.error(error_msg)
                 return f"❌ {error_msg}", []
             
             # Получить ответ
-            response = stdout.decode('utf-8', errors='ignore').strip()
+            response = stdout_text.strip()
             
             # Если ответ пустой, использовать stderr как fallback
             if not response:
-                response = stderr.decode('utf-8', errors='ignore').strip()
+                response = stderr_text.strip()
                 if not response:
                     response = "✅ Запрос обработан, но ответ пуст"
             
