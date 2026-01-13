@@ -39,6 +39,11 @@ async def main():
         dp.include_router(media.router)
         dp.include_router(messages.router)  # В конце, чтобы обрабатывать все остальные сообщения
         
+        # Инициализация базы данных
+        from utils.db_helpers import get_db, close_db
+        db = await get_db()
+        logger.info("База данных инициализирована")
+        
         # Инициализация синхронизации с NextCloud
         from services.sync_service import SyncService
         sync_service = SyncService()
@@ -60,6 +65,9 @@ async def main():
         logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
         sys.exit(1)
     finally:
+        # Закрыть соединения
+        from utils.db_helpers import close_db
+        await close_db()
         await bot.session.close()
 
 
