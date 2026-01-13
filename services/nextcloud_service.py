@@ -329,4 +329,61 @@ class NextCloudService:
         except Exception as e:
             logger.error(f"Ошибка при удалении файла {remote_path}: {e}")
             return False
+    
+    async def get_file_hash(self, remote_path: str) -> Optional[str]:
+        """
+        Получить хеш файла из NextCloud (через ETag или скачивание)
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+        
+        Returns:
+            str: Хеш файла (SHA256) или None если не удалось получить
+        """
+        if not self.enabled:
+            return None
+        
+        try:
+            # Попробовать получить ETag из заголовков (более эффективно)
+            url = self._get_webdav_url(remote_path)
+            auth = HTTPBasicAuth(self.username, self.password)
+            
+            response = requests.head(
+                url=url,
+                auth=auth,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                # NextCloud может возвращать ETag, но он не всегда является хешем файла
+                # Поэтому скачаем файл и вычислим хеш
+                file_content = await self.read_file(remote_path)
+                if file_content:
+                    import hashlib
+                    return hashlib.sha256(file_content.encode('utf-8')).hexdigest()
+            
+            return None
+        except Exception as e:
+            logger.debug(f"Не удалось получить хеш файла {remote_path}: {e}")
+            return None
+    
+    async def read_file(self, remote_path: str) -> Optional[str]:
+        """
+        Прочитать содержимое файла из NextCloud
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+        
+        Returns:
+            str: Содержимое файла или None если не удалось прочитать
+        """
+        if not self.enabled:
+            return None
+        
+        try:
+            response = self._make_request('GET', remote_path)
+            return response.text
+        except Exception as e:
+            logger.debug(f"Не удалось прочитать файл {remote_path}: {e}")
+            return None
 

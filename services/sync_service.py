@@ -310,4 +310,110 @@ class SyncService:
         if self._sync_task:
             self._sync_task.cancel()
             self._sync_task = None
+    
+    async def detect_conflicts(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Обнаружить конфликты синхронизации для файла
+        
+        Конфликт возникает, когда локальный и удаленный файлы отличаются
+        (оба были изменены независимо).
+        
+        Args:
+            file_path: Путь к файлу (относительно local_kb_path)
+        
+        Returns:
+            dict: Информация о конфликте или None если конфликта нет
+        """
+        if not self.enabled:
+            return None
+        
+        local_file = self.local_kb_path / file_path
+        
+        # Если локальный файл не существует, конфликта нет (просто нужно скачать)
+        if not local_file.exists():
+            return None
+        
+        # Проверить, существует ли файл в NextCloud
+        if not await self.nextcloud_service.file_exists(file_path):
+            return None
+        
+        try:
+            # Вычислить хеш локального файла
+            from utils.file_helpers import calculate_file_hash
+            local_hash = calculate_file_hash(local_file)
+            
+            # Получить хеш удаленного файла
+            remote_hash = await self.nextcloud_service.get_file_hash(file_path)
+            
+            if remote_hash is None:
+                # Не удалось получить хеш удаленного файла
+                return None
+            
+            # Если хеши отличаются, есть конфликт
+            if local_hash != remote_hash:
+                return {
+                    "file_path": file_path,
+                    "local_hash": local_hash,
+                    "remote_hash": remote_hash,
+                    "conflict": True,
+                    "local_exists": True,
+                    "remote_exists": True
+                }
+            
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при обнаружении конфликтов для {file_path}: {e}")
+            return None
+    
+    async def resolve_conflict(
+        self,
+        file_path: str,
+        strategy: str = "local"
+    ) -> bool:
+        """
+        Разрешить конфликт синхронизации
+        
+        Args:
+            file_path: Путь к файлу (относительно local_kb_path)
+            strategy: Стратегия разрешения конфликта:
+                - "local" - использовать локальную версию (загрузить в NextCloud)
+                - "remote" - использовать удаленную версию (скачать из NextCloud)
+                - "merge" - попытка слияния (не реализовано, использует local)
+        
+        Returns:
+            bool: True если конфликт разрешен
+        """
+        if not self.enabled:
+            return False
+        
+        conflict = await self.detect_conflicts(file_path)
+        if not conflict:
+            return True  # Конфликта нет
+        
+        try:
+            if strategy == "local":
+                # Загрузить локальную версию в NextCloud
+                local_file = self.local_kb_path / file_path
+                if local_file.exists():
+                    await self.nextcloud_service.upload_file(local_file, file_path)
+                    logger.info(f"Конфликт разрешен (local): {file_path}")
+                    return True
+            elif strategy == "remote":
+                # Скачать удаленную версию
+                local_file = self.local_kb_path / file_path
+                await self.nextcloud_service.download_file(file_path, local_file)
+                logger.info(f"Конфликт разрешен (remote): {file_path}")
+                return True
+            elif strategy == "merge":
+                # Пока не реализовано - используем local
+                logger.warning(f"Стратегия merge не реализована, используется local для {file_path}")
+                local_file = self.local_kb_path / file_path
+                if local_file.exists():
+                    await self.nextcloud_service.upload_file(local_file, file_path)
+                    return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"Ошибка при разрешении конфликта для {file_path}: {e}")
+            return False
 
