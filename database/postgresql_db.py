@@ -165,6 +165,29 @@ class PostgreSQLDatabase(DatabaseInterface):
             """, user_id)
             return dict(row) if row else None
     
+    async def get_user_sessions(
+        self,
+        user_id: int,
+        limit: Optional[int] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить список сессий пользователя"""
+        async with self.pool.acquire() as conn:
+            query = "SELECT * FROM sessions WHERE user_id = $1"
+            params = [user_id]
+            
+            if status:
+                query += " AND status = $2"
+                params.append(status)
+            
+            query += " ORDER BY created_at DESC"
+            
+            if limit:
+                query += f" LIMIT {limit}"
+            
+            rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+    
     async def update_session(
         self,
         session_id: int,
