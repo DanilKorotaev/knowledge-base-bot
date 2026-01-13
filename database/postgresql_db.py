@@ -291,6 +291,37 @@ class PostgreSQLDatabase(DatabaseInterface):
             """, attachment_id, text, language)
             return dict(row)
     
+    async def get_last_voice_attachment(
+        self,
+        user_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить последнее голосовое сообщение пользователя"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT a.id, a.session_id, a.message_id, a.file_type, a.file_id, 
+                       a.file_path, a.file_name, a.file_size, a.created_at
+                FROM attachments a
+                JOIN sessions s ON a.session_id = s.id
+                WHERE s.user_id = $1 AND a.file_type = 'voice'
+                ORDER BY a.created_at DESC
+                LIMIT 1
+            """, user_id)
+            return dict(row) if row else None
+    
+    async def get_transcription(
+        self,
+        attachment_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить транскрипцию по ID вложения"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT id, attachment_id, text, language, created_at
+                FROM transcriptions WHERE attachment_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, attachment_id)
+            return dict(row) if row else None
+    
     async def log_file_change(
         self,
         session_id: int,

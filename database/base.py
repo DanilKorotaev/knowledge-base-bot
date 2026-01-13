@@ -108,6 +108,22 @@ class DatabaseInterface(ABC):
         pass
     
     @abstractmethod
+    async def get_last_voice_attachment(
+        self,
+        user_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить последнее голосовое сообщение пользователя"""
+        pass
+    
+    @abstractmethod
+    async def get_transcription(
+        self,
+        attachment_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить транскрипцию по ID вложения"""
+        pass
+    
+    @abstractmethod
     async def log_file_change(
         self,
         session_id: int,

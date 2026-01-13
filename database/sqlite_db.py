@@ -417,6 +417,59 @@ class SQLiteDatabase(DatabaseInterface):
                 "created_at": row[4]
             }
     
+    async def get_last_voice_attachment(
+        self,
+        user_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить последнее голосовое сообщение пользователя"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT a.id, a.session_id, a.message_id, a.file_type, a.file_id, 
+                       a.file_path, a.file_name, a.file_size, a.created_at
+                FROM attachments a
+                JOIN sessions s ON a.session_id = s.id
+                WHERE s.user_id = ? AND a.file_type = 'voice'
+                ORDER BY a.created_at DESC
+                LIMIT 1
+            """, (user_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "session_id": row[1],
+                "message_id": row[2],
+                "file_type": row[3],
+                "file_id": row[4],
+                "file_path": row[5],
+                "file_name": row[6],
+                "file_size": row[7],
+                "created_at": row[8]
+            }
+    
+    async def get_transcription(
+        self,
+        attachment_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """Получить транскрипцию по ID вложения"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT id, attachment_id, text, language, created_at
+                FROM transcriptions WHERE attachment_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (attachment_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "attachment_id": row[1],
+                "text": row[2],
+                "language": row[3],
+                "created_at": row[4]
+            }
+    
     async def log_file_change(
         self,
         session_id: int,

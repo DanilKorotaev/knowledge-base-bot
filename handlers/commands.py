@@ -136,8 +136,90 @@ async def cancel_handler(message: Message, state: FSMContext):
 @router.message(Command("transcribe"))
 async def transcribe_handler(message: Message):
     """Расшифровать последнее голосовое сообщение"""
-    # TODO: Реализовать транскрибацию
-    await message.answer("🎤 Функция транскрибации будет реализована позже.")
+    from pathlib import Path
+    from services.transcription_service import TranscriptionService
+    from services.openai_service import OpenAIService
+    from utils.file_helpers import download_telegram_file
+    from utils.message_helpers import markdown_to_html
+    
+    user_id = message.from_user.id
+    db = await get_db()
+    
+    # Получить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Получить последнее голосовое сообщение
+    last_voice = await db.get_last_voice_attachment(user["id"])
+    
+    if not last_voice:
+        await message.answer(
+            "ℹ️ У вас нет голосовых сообщений для расшифровки.\n\n"
+            "Отправьте голосовое сообщение, и я его расшифрую."
+        )
+        return
+    
+    # Проверить, есть ли уже транскрипция
+    existing_transcription = await db.get_transcription(last_voice["id"])
+    
+    if existing_transcription:
+        # Показать существующую транскрипцию
+        transcription_text = existing_transcription["text"]
+        language = existing_transcription.get("language", "unknown")
+        
+        response = f"🎤 <b>Расшифровка последнего голосового сообщения:</b>\n\n{markdown_to_html(transcription_text)}"
+        if language and language != "unknown":
+            response += f"\n\n🌐 Язык: {language}"
+        
+        await message.answer(response, parse_mode=ParseMode.HTML)
+        return
+    
+    # Если транскрипции нет, нужно расшифровать
+    processing_message = await message.answer("🔄 Расшифровываю последнее голосовое сообщение...")
+    
+    try:
+        # Скачать файл, если его нет локально
+        if last_voice.get("file_path") and Path(last_voice["file_path"]).exists():
+            audio_path = Path(last_voice["file_path"])
+        else:
+            await processing_message.edit_text("📥 Скачиваю голосовое сообщение...")
+            audio_path = await download_telegram_file(message.bot, last_voice["file_id"])
+            if not audio_path:
+                await processing_message.edit_text("❌ Не удалось скачать голосовое сообщение.")
+                return
+        
+        await processing_message.edit_text("🎙️ Расшифровываю голосовое сообщение...")
+        
+        # Транскрибировать
+        openai_service = OpenAIService()
+        transcription_service = TranscriptionService(openai_service)
+        
+        transcription_result = await transcription_service.transcribe(str(audio_path))
+        transcribed_text = transcription_result.get("text", "")
+        language = transcription_result.get("language", "unknown")
+        
+        if not transcribed_text:
+            await processing_message.edit_text("❌ Не удалось расшифровать голосовое сообщение.")
+            return
+        
+        # Сохранить транскрипцию в БД
+        await db.add_transcription(
+            attachment_id=last_voice["id"],
+            text=transcribed_text,
+            language=language
+        )
+        
+        # Отправить расшифровку
+        response = f"🎤 <b>Расшифровка последнего голосового сообщения:</b>\n\n{markdown_to_html(transcribed_text)}"
+        if language and language != "unknown":
+            response += f"\n\n🌐 Язык: {language}"
+        
+        await processing_message.edit_text(response, parse_mode=ParseMode.HTML)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при расшифровке голосового сообщения: {e}", exc_info=True)
+        await processing_message.edit_text(
+            f"❌ Произошла ошибка при расшифровке: {str(e)}"
+        )
 
 
 @router.message(Command("sessions"))
