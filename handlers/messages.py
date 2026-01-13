@@ -12,6 +12,7 @@ from aiogram.enums import ParseMode
 from services.cursor_cli_service import CursorCLIService
 from services.sync_service import SyncService
 from utils.message_helpers import split_long_message, markdown_to_html, escape_markdown_v2
+from utils.db_helpers import get_db
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -34,6 +35,29 @@ async def text_message_handler(message: Message, state: FSMContext):
     query = message.text.strip()
     
     logger.info(f"Получено текстовое сообщение от пользователя {user_id}: {query[:50]}...")
+    
+    # Получить или создать сессию
+    db = await get_db()
+    user = await db.ensure_user(user_id, message.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    # Если нет активной сессии, создать новую с контекстом БЗ по умолчанию
+    if not active_session:
+        active_session = await db.create_session(
+            user_id=user["id"],
+            session_type="query_with_kb",
+            status="active"
+        )
+        logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
+    
+    session_id = active_session["id"]
+    
+    # Сохранить сообщение пользователя в сессию
+    await db.add_message(session_id, "user", query)
+    
+    # Получить историю сообщений сессии для контекста
+    session_messages = await db.get_session_messages(session_id)
+    logger.debug(f"Загружена история сессии: {len(session_messages)} сообщений")
     
     # Отправить индикатор "печатает..."
     typing_message = await message.answer("⏳ Обрабатываю запрос...")
@@ -75,10 +99,11 @@ async def text_message_handler(message: Message, state: FSMContext):
         cursor_start = time.time()
         cursor_service = CursorCLIService()
         
-        # Обработать запрос через Cursor CLI
+        # Обработать запрос через Cursor CLI с контекстом сессии
         response, changes = await cursor_service.process_query(
             query=query,
-            session_id=None  # Пока без сессий, будет реализовано позже
+            session_id=session_id,
+            session_messages=session_messages
         )
         
         cursor_time = time.time() - cursor_start
@@ -109,10 +134,23 @@ async def text_message_handler(message: Message, state: FSMContext):
                 except TelegramBadRequest as e2:
                     # Если и Markdown V2 не работает, отправляем без форматирования
                     logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
-                await message.answer(part)
+                    await message.answer(part)
         
-        # Если были изменения файлов, синхронизировать с NextCloud
+        # Сохранить ответ ассистента в сессию
+        await db.add_message(session_id, "assistant", response)
+        
+        # Если были изменения файлов, залогировать их и синхронизировать с NextCloud
         if changes:
+            # Залогировать изменения в БД
+            for change in changes:
+                await db.log_file_change(
+                    session_id=session_id,
+                    file_path=change.get("path", ""),
+                    change_type=change.get("type", "modified"),
+                    old_content=change.get("old_content"),
+                    new_content=change.get("new_content")
+                )
+            
             # Синхронизировать изменения с NextCloud
             sync_success = await sync_service.sync_changes(changes)
             

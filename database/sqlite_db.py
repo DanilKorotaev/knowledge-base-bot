@@ -209,6 +209,44 @@ class SQLiteDatabase(DatabaseInterface):
                 "updated_at": row[6]
             }
     
+    async def get_user_sessions(
+        self,
+        user_id: int,
+        limit: Optional[int] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить список сессий пользователя"""
+        import json
+        async with aiosqlite.connect(self.db_path) as db:
+            query = "SELECT * FROM sessions WHERE user_id = ?"
+            params = [user_id]
+            
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            
+            query += " ORDER BY created_at DESC"
+            
+            if limit:
+                query += f" LIMIT {limit}"
+            
+            cursor = await db.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+            
+            sessions = []
+            for row in rows:
+                sessions.append({
+                    "id": row[0],
+                    "user_id": row[1],
+                    "session_type": row[2],
+                    "status": row[3],
+                    "context_files": json.loads(row[4]) if row[4] else [],
+                    "created_at": row[5],
+                    "updated_at": row[6]
+                })
+            
+            return sessions
+    
     async def update_session(
         self,
         session_id: int,

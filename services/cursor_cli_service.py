@@ -181,7 +181,8 @@ class CursorCLIService:
         self,
         query: str,
         session_id: Optional[int] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        session_messages: Optional[List[Dict[str, Any]]] = None
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -190,6 +191,7 @@ class CursorCLIService:
             query: Текст запроса пользователя
             session_id: ID сессии (опционально)
             model: Модель для использования (опционально, по умолчанию из конфига)
+            session_messages: История сообщений сессии для контекста (опционально)
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -204,20 +206,28 @@ class CursorCLIService:
         # Сохранить состояние файлов до выполнения (для отслеживания изменений)
         file_states_before = await self._save_file_states()
         
-        # Подготовить запрос
+        # Подготовить запрос с контекстом сессии
         # Системные промпты теперь в .cursor/rules/, поэтому не добавляем их в запрос
         # Это оптимизирует производительность - Cursor CLI автоматически загружает промпты из .cursor/rules/
-        full_query = query
+        full_query = self._build_query_with_context(query, session_messages)
         if self.system_prompt:
             logger.debug(f"Системные промпты доступны в .cursor/rules/ ({len(self.system_prompt)} символов)")
         
         # Подготовить команду
+        # -p: prompt mode (интерактивный режим)
+        # --force: принудительное выполнение
         cmd = ["cursor-agent", "-p", "--force"]
         
         # Добавить модель, если указана
         model_to_use = model or self.model
         if model_to_use:
             cmd.extend(["--model", model_to_use])
+        
+        # Дополнительные флаги для оптимизации (если доступны)
+        # Можно добавить через переменные окружения для экспериментов
+        additional_flags = os.getenv("CURSOR_CLI_EXTRA_FLAGS", "").strip()
+        if additional_flags:
+            cmd.extend(additional_flags.split())
         
         # Добавить полный запрос (с системным промптом, если есть)
         cmd.append(full_query)
@@ -435,6 +445,51 @@ class CursorCLIService:
     async def get_file_changes(self) -> List[Dict[str, Any]]:
         """Получить список измененных файлов (через git diff)"""
         return await self._get_file_changes({})
+    
+    def _build_query_with_context(
+        self,
+        query: str,
+        session_messages: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        """
+        Построить запрос с контекстом сессии
+        
+        Args:
+            query: Текущий запрос пользователя
+            session_messages: История сообщений сессии
+        
+        Returns:
+            str: Запрос с контекстом
+        """
+        if not session_messages or len(session_messages) == 0:
+            return query
+        
+        # Ограничить количество сообщений для контекста (последние N сообщений)
+        max_context_messages = 10
+        context_messages = session_messages[-max_context_messages:] if len(session_messages) > max_context_messages else session_messages
+        
+        # Построить контекст из истории
+        context_parts = []
+        context_parts.append("Контекст предыдущих сообщений в этой сессии:")
+        context_parts.append("")
+        
+        for msg in context_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            # Ограничить длину каждого сообщения для контекста
+            content_preview = content[:500] + "..." if len(content) > 500 else content
+            role_label = "Пользователь" if role == "user" else "Ассистент"
+            context_parts.append(f"{role_label}: {content_preview}")
+        
+        context_parts.append("")
+        context_parts.append("---")
+        context_parts.append("")
+        context_parts.append(f"Текущий запрос пользователя: {query}")
+        
+        full_query = "\n".join(context_parts)
+        logger.debug(f"Построен запрос с контекстом ({len(context_messages)} сообщений в истории)")
+        
+        return full_query
     
     def setup_cursor_rules(self, kb_config: Optional[Dict[str, Any]] = None) -> None:
         """

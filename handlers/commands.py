@@ -6,6 +6,9 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
+from aiogram.enums import ParseMode
+
+from utils.db_helpers import get_db
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -23,8 +26,6 @@ async def start_handler(message: Message):
 @router.message(Command("help"))
 async def help_handler(message: Message):
     """Обработчик команды /help"""
-    from aiogram.enums import ParseMode
-    
     help_text = """📚 <b>Доступные команды:</b>
 
 /start - Начать работу с ботом
@@ -32,6 +33,8 @@ async def help_handler(message: Message):
 /new_query - Начать новый запрос с контекстом базы знаний
 /new_chat - Начать пустой чат (без контекста)
 /end_query - Завершить текущий запрос
+/sessions - Показать список ваших сессий
+/switch_session &lt;id&gt; - Переключиться на другую сессию
 /cancel - Отменить текущую операцию
 /transcribe - Расшифровать последнее голосовое сообщение
 /history - Показать историю изменений текущей сессии
@@ -45,28 +48,82 @@ async def help_handler(message: Message):
 @router.message(Command("new_query"))
 async def new_query_handler(message: Message, state: FSMContext):
     """Начать новый запрос с контекстом базы знаний"""
-    # TODO: Реализовать создание сессии
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    # Создать или обновить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Деактивировать предыдущую активную сессию
+    active_session = await db.get_active_session(user["id"])
+    if active_session:
+        await db.update_session(active_session["id"], status="completed")
+    
+    # Создать новую сессию с контекстом базы знаний
+    session = await db.create_session(
+        user_id=user["id"],
+        session_type="query_with_kb",
+        status="active"
+    )
+    
+    # Сохранить ID сессии в состоянии
+    await state.update_data(session_id=session["id"])
+    
     await message.answer(
-        "✅ Начат новый запрос с контекстом базы знаний.\n"
-        "Отправьте ваш вопрос текстом, голосом или с файлами."
+        f"✅ Начат новый запрос с контекстом базы знаний.\n"
+        f"Сессия #{session['id']}\n\n"
+        f"Отправьте ваш вопрос текстом, голосом или с файлами."
     )
 
 
 @router.message(Command("new_chat"))
 async def new_chat_handler(message: Message, state: FSMContext):
     """Начать пустой чат (без контекста базы знаний)"""
-    # TODO: Реализовать создание сессии
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    # Создать или обновить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Деактивировать предыдущую активную сессию
+    active_session = await db.get_active_session(user["id"])
+    if active_session:
+        await db.update_session(active_session["id"], status="completed")
+    
+    # Создать новую сессию без контекста базы знаний
+    session = await db.create_session(
+        user_id=user["id"],
+        session_type="empty_chat",
+        status="active"
+    )
+    
+    # Сохранить ID сессии в состоянии
+    await state.update_data(session_id=session["id"])
+    
     await message.answer(
-        "✅ Начат новый чат без контекста базы знаний.\n"
-        "Отправьте ваш вопрос текстом, голосом или с файлами."
+        f"✅ Начат новый чат без контекста базы знаний.\n"
+        f"Сессия #{session['id']}\n\n"
+        f"Отправьте ваш вопрос текстом, голосом или с файлами."
     )
 
 
 @router.message(Command("end_query"))
 async def end_query_handler(message: Message, state: FSMContext):
     """Завершить текущий запрос"""
-    # TODO: Реализовать завершение сессии
-    await message.answer("✅ Запрос завершен.")
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    # Получить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Получить активную сессию
+    active_session = await db.get_active_session(user["id"])
+    if active_session:
+        await db.update_session(active_session["id"], status="completed")
+        await state.update_data(session_id=None)
+        await message.answer(f"✅ Сессия #{active_session['id']} завершена.")
+    else:
+        await message.answer("ℹ️ Нет активной сессии для завершения.")
 
 
 @router.message(Command("cancel"))
@@ -81,6 +138,97 @@ async def transcribe_handler(message: Message):
     """Расшифровать последнее голосовое сообщение"""
     # TODO: Реализовать транскрибацию
     await message.answer("🎤 Функция транскрибации будет реализована позже.")
+
+
+@router.message(Command("sessions"))
+async def sessions_handler(message: Message):
+    """Показать список сессий пользователя"""
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    # Получить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Получить все сессии пользователя (последние 10)
+    sessions = await db.get_user_sessions(user["id"], limit=10)
+    
+    if not sessions:
+        response = "ℹ️ У вас нет сессий.\n\n"
+        response += "Используйте /new_query или /new_chat для создания новой сессии."
+        await message.answer(response, parse_mode=ParseMode.HTML)
+        return
+    
+    # Найти активную сессию
+    active_session = await db.get_active_session(user["id"])
+    active_session_id = active_session["id"] if active_session else None
+    
+    response = "📋 <b>Ваши сессии:</b>\n\n"
+    
+    for session in sessions:
+        session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
+        status_label = "🟢 Активна" if session["id"] == active_session_id else f"⚪ {session['status']}"
+        
+        messages_count = len(await db.get_session_messages(session["id"]))
+        
+        response += f"<b>#{session['id']}</b> - {status_label}\n"
+        response += f"  Тип: {session_type_label}\n"
+        response += f"  Сообщений: {messages_count}\n"
+        response += f"  Создана: {session['created_at']}\n\n"
+    
+    response += "Используйте /switch_session &lt;id&gt; для переключения на другую сессию."
+    
+    await message.answer(response, parse_mode=ParseMode.HTML)
+
+
+@router.message(Command("switch_session"))
+async def switch_session_handler(message: Message, state: FSMContext):
+    """Переключиться на другую сессию"""
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    # Получить пользователя
+    user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Получить ID сессии из команды
+    command_parts = message.text.split()
+    if len(command_parts) < 2:
+        await message.answer("❌ Укажите ID сессии: /switch_session &lt;id&gt;", parse_mode=ParseMode.HTML)
+        return
+    
+    try:
+        session_id = int(command_parts[1])
+    except ValueError:
+        await message.answer("❌ Неверный формат ID сессии. Используйте число.")
+        return
+    
+    # Получить сессию
+    session = await db.get_session(session_id)
+    if not session:
+        await message.answer(f"❌ Сессия #{session_id} не найдена.")
+        return
+    
+    # Проверить, что сессия принадлежит пользователю
+    if session["user_id"] != user["id"]:
+        await message.answer("❌ Эта сессия не принадлежит вам.")
+        return
+    
+    # Деактивировать текущую активную сессию
+    active_session = await db.get_active_session(user["id"])
+    if active_session and active_session["id"] != session_id:
+        await db.update_session(active_session["id"], status="completed")
+    
+    # Активировать выбранную сессию
+    await db.update_session(session_id, status="active")
+    await state.update_data(session_id=session_id)
+    
+    messages_count = len(await db.get_session_messages(session_id))
+    session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
+    
+    await message.answer(
+        f"✅ Переключено на сессию #{session_id}\n"
+        f"Тип: {session_type_label}\n"
+        f"Сообщений: {messages_count}"
+    )
 
 
 @router.message(Command("history"))

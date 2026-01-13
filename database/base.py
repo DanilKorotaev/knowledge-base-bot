@@ -40,6 +40,16 @@ class DatabaseInterface(ABC):
         pass
     
     @abstractmethod
+    async def get_user_sessions(
+        self,
+        user_id: int,
+        limit: Optional[int] = None,
+        status: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Получить список сессий пользователя"""
+        pass
+    
+    @abstractmethod
     async def update_session(
         self,
         session_id: int,
