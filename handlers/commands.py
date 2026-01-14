@@ -9,6 +9,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
 from utils.db_helpers import get_db
+from handlers.states import QueryStates
+from handlers.keyboards import get_confirm_query_keyboard
+from utils.query_builder import QueryBuilder, query_builder_to_state
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -32,6 +35,8 @@ async def help_handler(message: Message):
 /help - Показать эту справку
 /new_query - Начать новый запрос с контекстом базы знаний
 /new_chat - Начать пустой чат (без контекста)
+/collect - Включить режим сбора сообщений (текст, голос, файлы)
+/stop_collect - Отключить режим сбора сообщений
 /end_query - Завершить текущий запрос
 /sessions - Показать список ваших сессий
 /switch_session &lt;id&gt; - Переключиться на другую сессию
@@ -40,7 +45,10 @@ async def help_handler(message: Message):
 /history - Показать историю изменений текущей сессии
 /revert [change_id] - Откатить конкретное изменение
 /revert_session - Откатить все изменения текущей сессии
-/sync - Принудительная синхронизация с NextCloud"""
+/sync - Принудительная синхронизация с NextCloud
+
+<b>Режим сбора сообщений:</b>
+Используйте /collect для включения режима, в котором можно отправлять несколько сообщений (текст, голос, файлы) перед отправкой запроса. Все сообщения будут собраны вместе и отправлены одним запросом."""
     
     await message.answer(help_text, parse_mode=ParseMode.HTML)
 
@@ -69,10 +77,68 @@ async def new_query_handler(message: Message, state: FSMContext):
     # Сохранить ID сессии в состоянии
     await state.update_data(session_id=session["id"])
     
+    # Очистить режим сбора сообщений (если был активен)
+    await state.set_state(None)
+    
     await message.answer(
         f"✅ Начат новый запрос с контекстом базы знаний.\n"
         f"Сессия #{session['id']}\n\n"
-        f"Отправьте ваш вопрос текстом, голосом или с файлами."
+        f"Отправьте ваш вопрос текстом, голосом или с файлами.\n\n"
+        f"Используйте /collect для включения режима сбора сообщений."
+    )
+
+
+@router.message(Command("collect"))
+async def collect_mode_handler(message: Message, state: FSMContext):
+    """Включить режим сбора сообщений"""
+    # Получить или создать сессию
+    db = await get_db()
+    user_id = message.from_user.id
+    user = await db.ensure_user(user_id, message.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    if not active_session:
+        active_session = await db.create_session(
+            user_id=user["id"],
+            session_type="query_with_kb",
+            status="active"
+        )
+    
+    # Включить режим сбора сообщений
+    await state.set_state(QueryStates.collecting_messages)
+    
+    # Инициализировать пустой QueryBuilder
+    builder = QueryBuilder()
+    await state.update_data(**query_builder_to_state(builder))
+    
+    await message.answer(
+        "📝 Режим сбора сообщений включен.\n\n"
+        "Теперь вы можете отправлять несколько сообщений:\n"
+        "• Текстовые сообщения\n"
+        "• Голосовые сообщения\n"
+        "• Файлы и фото\n\n"
+        "Все сообщения будут собраны вместе. "
+        "Когда будете готовы, нажмите кнопку «Отправить запрос».\n\n"
+        "Используйте /stop_collect для отключения режима.",
+        reply_markup=get_confirm_query_keyboard()
+    )
+
+
+@router.message(Command("stop_collect"))
+async def stop_collect_mode_handler(message: Message, state: FSMContext):
+    """Отключить режим сбора сообщений"""
+    current_state = await state.get_state()
+    
+    if current_state != QueryStates.collecting_messages.state:
+        await message.answer("ℹ️ Режим сбора сообщений не активен.")
+        return
+    
+    # Очистить состояние
+    await state.clear()
+    
+    await message.answer(
+        "❌ Режим сбора сообщений отключен.\n"
+        "Все собранные данные удалены."
     )
 
 

@@ -13,44 +13,24 @@ from services.cursor_cli_service import CursorCLIService
 from services.sync_service import SyncService
 from utils.message_helpers import split_long_message, markdown_to_html, escape_markdown_v2
 from utils.db_helpers import get_db
+from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
+from handlers.states import QueryStates
+from handlers.keyboards import get_confirm_query_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 
-@router.message()
-async def text_message_handler(message: Message, state: FSMContext):
-    """Обработчик текстовых сообщений"""
+async def process_final_query(
+    query: str,
+    message: Message,
+    state: FSMContext,
+    session_id: int
+):
+    """Обработать финальный запрос через Cursor CLI"""
+    from utils.db_helpers import get_db
     
-    # Пропустить команды (они обрабатываются в commands.py)
-    if message.text and message.text.startswith('/'):
-        return
-    
-    # Проверить, что есть текст
-    if not message.text or not message.text.strip():
-        await message.answer("❌ Пожалуйста, отправьте текстовое сообщение.")
-        return
-    
-    user_id = message.from_user.id
-    query = message.text.strip()
-    
-    logger.info(f"Получено текстовое сообщение от пользователя {user_id}: {query[:50]}...")
-    
-    # Получить или создать сессию
     db = await get_db()
-    user = await db.ensure_user(user_id, message.from_user.username)
-    active_session = await db.get_active_session(user["id"])
-    
-    # Если нет активной сессии, создать новую с контекстом БЗ по умолчанию
-    if not active_session:
-        active_session = await db.create_session(
-            user_id=user["id"],
-            session_type="query_with_kb",
-            status="active"
-        )
-        logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
-    
-    session_id = active_session["id"]
     
     # Сохранить сообщение пользователя в сессию
     await db.add_message(session_id, "user", query)
@@ -72,8 +52,6 @@ async def text_message_handler(message: Message, state: FSMContext):
         sync_start = time.time()
         if sync_service.enabled:
             try:
-                # Быстрая синхронизация (показываем уведомление только если синхронизация долгая)
-                # Обновляем сообщение, если синхронизация началась
                 async def notify_sync(msg: str, is_important: bool = False):
                     """Callback для уведомлений о синхронизации"""
                     if is_important or "Синхронизирую" in msg:
@@ -84,7 +62,6 @@ async def text_message_handler(message: Message, state: FSMContext):
                 
                 sync_service.set_notify_callback(notify_sync)
                 
-                # Быстрая синхронизация из NextCloud (только если включена AUTO_SYNC)
                 from config import config
                 if config.AUTO_SYNC:
                     sync_updated = await sync_service.sync_from_nextcloud(show_notification=True)
@@ -116,23 +93,18 @@ async def text_message_handler(message: Message, state: FSMContext):
             pass
         
         # Отправить ответ пользователю
-        # Разбить длинные сообщения на части (лимит Telegram - 4096 символов)
         response_parts = split_long_message(response, max_length=4000)
         
         for i, part in enumerate(response_parts):
             try:
-                # Используем HTML для более надежного форматирования
-                # Конвертируем Markdown в HTML
                 html_part = markdown_to_html(part)
                 await message.answer(html_part, parse_mode=ParseMode.HTML)
             except TelegramBadRequest as e:
-                # Если ошибка форматирования HTML, пробуем Markdown V2
                 logger.warning(f"Ошибка форматирования HTML: {e}, пробую Markdown V2")
                 try:
                     md_part = escape_markdown_v2(part)
                     await message.answer(md_part, parse_mode=ParseMode.MARKDOWN_V2)
                 except TelegramBadRequest as e2:
-                    # Если и Markdown V2 не работает, отправляем без форматирования
                     logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
                     await message.answer(part)
         
@@ -141,7 +113,6 @@ async def text_message_handler(message: Message, state: FSMContext):
         
         # Если были изменения файлов, залогировать их и синхронизировать с NextCloud
         if changes:
-            # Залогировать изменения в БД
             for change in changes:
                 await db.log_file_change(
                     session_id=session_id,
@@ -151,7 +122,6 @@ async def text_message_handler(message: Message, state: FSMContext):
                     new_content=change.get("new_content")
                 )
             
-            # Синхронизировать изменения с NextCloud
             sync_success = await sync_service.sync_changes(changes)
             
             changes_info = f"\n\n📝 Изменено файлов: {len(changes)}"
@@ -173,20 +143,79 @@ async def text_message_handler(message: Message, state: FSMContext):
                 logger.warning(f"Не удалось отправить информацию об изменениях: {e}")
         
         total_time = time.time() - start_time
-        logger.info(f"✅ Запрос от пользователя {user_id} обработан успешно за {total_time:.2f}с")
+        logger.info(f"✅ Запрос обработан успешно за {total_time:.2f}с")
         
     except Exception as e:
-        # Удалить индикатор "печатает..."
         try:
             await typing_message.delete()
         except Exception:
             pass
         
         error_msg = f"❌ Произошла ошибка при обработке запроса: {str(e)}"
-        logger.error(f"Ошибка при обработке запроса от пользователя {user_id}: {e}", exc_info=True)
+        logger.error(f"Ошибка при обработке запроса: {e}", exc_info=True)
         
         try:
             await message.answer(error_msg)
         except Exception:
             pass
+
+
+@router.message()
+async def text_message_handler(message: Message, state: FSMContext):
+    """Обработчик текстовых сообщений"""
+    
+    # Пропустить команды (они обрабатываются в commands.py)
+    if message.text and message.text.startswith('/'):
+        return
+    
+    # Проверить, что есть текст
+    if not message.text or not message.text.strip():
+        await message.answer("❌ Пожалуйста, отправьте текстовое сообщение.")
+        return
+    
+    user_id = message.from_user.id
+    query = message.text.strip()
+    
+    # Проверить режим сбора сообщений
+    current_state = await state.get_state()
+    if current_state == QueryStates.collecting_messages.state:
+        # Режим сбора сообщений - сохранить во временное хранилище
+        state_data = await state.get_data()
+        builder = query_builder_from_state(state_data) if state_data.get("text_parts") else QueryBuilder()
+        
+        builder.add_text(query)
+        
+        # Сохранить обратно в состояние
+        await state.update_data(**query_builder_to_state(builder))
+        
+        # Показать кнопку подтверждения
+        summary = builder.get_summary()
+        await message.answer(
+            f"✅ Текстовое сообщение добавлено.\n\n{summary}\n\n"
+            f"Продолжайте добавлять сообщения или подтвердите отправку.",
+            reply_markup=get_confirm_query_keyboard()
+        )
+        return
+    
+    # Обычный режим - обработать сразу
+    logger.info(f"Получено текстовое сообщение от пользователя {user_id}: {query[:50]}...")
+    
+    # Получить или создать сессию
+    db = await get_db()
+    user = await db.ensure_user(user_id, message.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    # Если нет активной сессии, создать новую с контекстом БЗ по умолчанию
+    if not active_session:
+        active_session = await db.create_session(
+            user_id=user["id"],
+            session_type="query_with_kb",
+            status="active"
+        )
+        logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
+    
+    session_id = active_session["id"]
+    
+    # Обработать запрос
+    await process_final_query(query, message, state, session_id)
 

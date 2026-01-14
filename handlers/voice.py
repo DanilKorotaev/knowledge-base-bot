@@ -16,6 +16,9 @@ from services.sync_service import SyncService
 from utils.file_helpers import download_telegram_file
 from utils.message_helpers import split_long_message, markdown_to_html, escape_markdown_v2
 from utils.db_helpers import get_db
+from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
+from handlers.states import QueryStates
+from handlers.keyboards import get_confirm_query_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -176,6 +179,58 @@ async def voice_handler(message: Message, state: FSMContext):
     
     logger.info(f"Получено голосовое сообщение от пользователя {user_id}, длительность: {voice.duration}с")
     
+    # Проверить режим сбора сообщений
+    current_state = await state.get_state()
+    if current_state == QueryStates.collecting_messages.state:
+        # Режим сбора сообщений - сохранить во временное хранилище
+        processing_message = await message.answer("🎤 Обрабатываю голосовое сообщение для сбора...")
+        
+        try:
+            # Скачать голосовой файл
+            await processing_message.edit_text("📥 Скачиваю голосовое сообщение...")
+            audio_path = await download_telegram_file(message.bot, voice.file_id)
+            if not audio_path:
+                await processing_message.edit_text("❌ Не удалось скачать голосовое сообщение.")
+                return
+            
+            # Транскрибировать
+            await processing_message.edit_text("🎙️ Расшифровываю голосовое сообщение...")
+            openai_service = OpenAIService()
+            transcription_service = TranscriptionService(openai_service)
+            transcription_result = await transcription_service.transcribe(str(audio_path))
+            transcribed_text = transcription_result.get("text", "")
+            language = transcription_result.get("language", "unknown")
+            
+            if not transcribed_text:
+                await processing_message.edit_text("❌ Не удалось расшифровать голосовое сообщение.")
+                return
+            
+            # Сохранить во временное хранилище
+            state_data = await state.get_data()
+            builder = query_builder_from_state(state_data) if state_data.get("voice_files") else QueryBuilder()
+            
+            builder.add_voice(voice.file_id, audio_path, transcribed_text)
+            
+            # Сохранить обратно в состояние
+            await state.update_data(**query_builder_to_state(builder))
+            
+            # Показать кнопку подтверждения
+            summary = builder.get_summary()
+            transcription_preview = transcribed_text[:100] + "..." if len(transcribed_text) > 100 else transcribed_text
+            
+            await processing_message.edit_text(
+                f"✅ Голосовое сообщение добавлено.\n\n"
+                f"📝 Расшифровка: {transcription_preview}\n\n"
+                f"{summary}\n\n"
+                f"Продолжайте добавлять сообщения или подтвердите отправку.",
+                reply_markup=get_confirm_query_keyboard()
+            )
+        except Exception as e:
+            logger.error(f"Ошибка при обработке голосового сообщения в режиме сбора: {e}", exc_info=True)
+            await processing_message.edit_text(f"❌ Ошибка: {str(e)}")
+        return
+    
+    # Обычный режим - обработать сразу
     # Отправить уведомление о начале обработки
     processing_message = await message.answer("🎤 Обрабатываю голосовое сообщение...")
     

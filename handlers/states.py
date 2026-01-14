@@ -9,4 +9,5 @@ class QueryStates(StatesGroup):
     waiting_for_query = State()
     processing_query = State()
     waiting_for_confirmation = State()
+    collecting_messages = State()  # Режим сбора сообщений перед отправкой
 

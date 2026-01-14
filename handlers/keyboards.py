@@ -26,3 +26,16 @@ def get_revert_keyboard(change_id: int) -> InlineKeyboardMarkup:
     )
     return keyboard
 
+
+def get_confirm_query_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура для подтверждения отправки запроса"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Отправить запрос", callback_data="confirm_query"),
+                InlineKeyboardButton(text="❌ Отменить", callback_data="cancel_query")
+            ]
+        ]
+    )
+    return keyboard
+
