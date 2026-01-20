@@ -17,7 +17,10 @@ from utils.message_helpers import split_long_message, markdown_to_html, escape_m
 from utils.db_helpers import get_db
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
 from handlers.states import QueryStates
-from handlers.keyboards import get_confirm_query_keyboard
+from handlers.keyboards import (
+    get_confirm_query_keyboard, get_main_keyboard, get_collecting_messages_keyboard,
+    get_active_session_keyboard
+)
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -151,9 +154,18 @@ async def process_final_query(
                 changes_info += "\n⚠️ Не удалось синхронизировать с NextCloud"
             
             try:
-                await message.answer(changes_info)
+                await message.answer(changes_info, reply_markup=get_active_session_keyboard())
             except Exception as e:
                 logger.warning(f"Не удалось отправить информацию об изменениях: {e}")
+        else:
+            # Если изменений не было, показать клавиатуру активной сессии отдельным сообщением
+            try:
+                await message.answer(
+                    "💡 Используйте кнопки ниже для управления сессией.",
+                    reply_markup=get_active_session_keyboard()
+                )
+            except Exception:
+                pass  # Игнорируем ошибки
         
         total_time = time.time() - start_time
         logger.info(f"✅ Запрос обработан успешно за {total_time:.2f}с")
@@ -173,12 +185,171 @@ async def process_final_query(
             pass
 
 
+# Обработчики кнопок главного меню
+# Эти кнопки теперь обрабатываются через inline-меню главного меню
+
+
+# Эти кнопки теперь обрабатываются через inline-меню главного меню
+
+
+@router.message(lambda m: m.text == "🏠 Главное меню")
+async def main_menu_button_handler(message: Message):
+    """Обработка кнопки 'Главное меню'"""
+    from handlers.keyboards import get_main_menu_inline_keyboard
+    
+    await message.answer(
+        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
+        reply_markup=get_main_menu_inline_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.message(lambda m: m.text == "❌ Отмена")
+async def cancel_button_handler(message: Message, state: FSMContext):
+    """Обработка кнопки 'Отмена' для FSM-состояний"""
+    current_state = await state.get_state()
+    
+    # Если режим сбора сообщений - очистить состояние
+    if current_state == QueryStates.collecting_messages.state:
+        await state.clear()
+        await message.answer(
+            "❌ Режим сбора сообщений отменен.\nВсе собранные данные удалены.",
+            reply_markup=get_main_keyboard()
+        )
+    else:
+        await state.clear()
+        await message.answer(
+            "❌ Операция отменена.",
+            reply_markup=get_main_keyboard()
+        )
+
+
+@router.message(lambda m: m.text == "✅ Завершить сбор")
+async def finish_collect_button_handler(message: Message, state: FSMContext):
+    """Обработка кнопки 'Завершить сбор' - завершает режим сбора и отправляет запрос"""
+    current_state = await state.get_state()
+    
+    if current_state != QueryStates.collecting_messages.state:
+        await message.answer(
+            "ℹ️ Режим сбора сообщений не активен.",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    # Получить собранные данные
+    state_data = await state.get_data()
+    builder = query_builder_from_state(state_data)
+    
+    if not builder.has_content():
+        await message.answer(
+            "❌ Нет данных для отправки. Добавьте сообщения перед завершением сбора.",
+            reply_markup=get_collecting_messages_keyboard()
+        )
+        return
+    
+    # Собрать финальный запрос
+    final_query = builder.build_query()
+    
+    if not final_query.strip():
+        await message.answer(
+            "❌ Запрос пуст. Добавьте сообщения перед завершением сбора.",
+            reply_markup=get_collecting_messages_keyboard()
+        )
+        return
+    
+    # Получить или создать сессию
+    db = await get_db()
+    user_id = message.from_user.id
+    user = await db.ensure_user(user_id, message.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    if not active_session:
+        active_session = await db.create_session(
+            user_id=user["id"],
+            session_type="query_with_kb",
+            status="active"
+        )
+        logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
+    
+    session_id = active_session["id"]
+    
+    # Извлечь пути к прикрепленным файлам
+    attached_files = []
+    for media in builder.media_files:
+        if media.get("file_path"):
+            file_path = Path(media["file_path"]) if isinstance(media["file_path"], str) else media["file_path"]
+            if file_path.exists():
+                attached_files.append(file_path)
+    
+    # Очистить состояние перед обработкой
+    await state.clear()
+    
+    # Обработать финальный запрос
+    await process_final_query(final_query, message, state, session_id, attached_files=attached_files)
+    
+    # Сохранить вложения в БД ПОСЛЕ обработки
+    user_messages = await db.get_session_messages(session_id)
+    last_user_message = None
+    for msg in reversed(user_messages):
+        if msg.get("role") == "user":
+            last_user_message = msg
+            break
+    
+    if last_user_message:
+        for voice in builder.voice_files:
+            if voice.get("file_path"):
+                attachment = await db.add_attachment(
+                    session_id=session_id,
+                    message_id=last_user_message["id"],
+                    file_type="voice",
+                    file_id=voice.get("file_id", ""),
+                    file_path=str(voice["file_path"]) if voice.get("file_path") else None,
+                    file_name=f"{voice.get('file_id', 'voice')}.ogg"
+                )
+                if voice.get("transcription"):
+                    await db.add_transcription(
+                        attachment_id=attachment["id"],
+                        text=voice["transcription"],
+                        language=None
+                    )
+        
+        for media in builder.media_files:
+            if media.get("file_path"):
+                await db.add_attachment(
+                    session_id=session_id,
+                    message_id=last_user_message["id"],
+                    file_type=media.get("file_type", "file"),
+                    file_id=media.get("file_id", ""),
+                    file_path=str(media["file_path"]) if media.get("file_path") else None,
+                    file_name=media.get("file_name", "")
+                )
+    
+    builder.clear()
+
+
+@router.message(lambda m: m.text == "📝 Режим сбора")
+async def collect_mode_button_handler(message: Message, state: FSMContext):
+    """Обработка кнопки 'Режим сбора'"""
+    from handlers.commands import collect_mode_handler
+    await collect_mode_handler(message, state)
+
+
+# Эти действия теперь доступны через детали сессии в inline-меню
+
+
 @router.message()
 async def text_message_handler(message: Message, state: FSMContext):
     """Обработчик текстовых сообщений"""
     
     # Пропустить команды (они обрабатываются в commands.py)
     if message.text and message.text.startswith('/'):
+        return
+    
+    # Пропустить кнопки (они обрабатываются выше или через inline-меню)
+    menu_buttons = [
+        "🏠 Главное меню", "❌ Отмена", "✅ Завершить сбор", "📝 Режим сбора"
+    ]
+    if message.text in menu_buttons:
         return
     
     # Проверить, что есть текст
@@ -201,13 +372,18 @@ async def text_message_handler(message: Message, state: FSMContext):
         # Сохранить обратно в состояние
         await state.update_data(**query_builder_to_state(builder))
         
-        # Показать кнопку подтверждения
+        # Показать информацию о добавленном сообщении
         summary = builder.get_summary()
         await message.answer(
             f"✅ Текстовое сообщение добавлено.\n\n{summary}\n\n"
-            f"Продолжайте добавлять сообщения или подтвердите отправку.",
-            reply_markup=get_confirm_query_keyboard(),
+            f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор' для отправки.",
+            reply_markup=get_collecting_messages_keyboard(),
             parse_mode=None  # Явно указываем отсутствие форматирования
+        )
+        # Также показать inline-кнопку для быстрой отправки
+        await message.answer(
+            "Готовы отправить запрос?",
+            reply_markup=get_confirm_query_keyboard()
         )
         return
     
@@ -232,4 +408,6 @@ async def text_message_handler(message: Message, state: FSMContext):
     
     # Обработать запрос
     await process_final_query(query, message, state, session_id)
+    
+    # Клавиатура активной сессии будет показана автоматически в process_final_query
 

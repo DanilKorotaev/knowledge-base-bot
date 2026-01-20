@@ -22,11 +22,16 @@
 
 - [x] [Создание документации по Git Flow](tasks/completed/task-doc-git-flow.md)
 
+## Улучшения UX
+
+- [x] [Добавление inline-кнопок для быстрых действий](tasks/completed/task-ux-inline-buttons.md)
+- [x] [Интерактивный режим команд](tasks/completed/task-ux-interactive-commands.md)
+
 ---
 
 ## Статистика
 
-**Всего выполнено задач**: 2  
+**Всего выполнено задач**: 4  
 **Последнее обновление**: 2025-01-07
 
 ---

@@ -24,7 +24,6 @@
 ### Улучшения UX
 
 - [ ] [Улучшение интерфейса команд](tasks/pending/task-ux-commands-improvement.md)
-- [ ] [Добавление inline-кнопок для быстрых действий](tasks/pending/task-ux-inline-buttons.md)
 
 ### Технические улучшения
 

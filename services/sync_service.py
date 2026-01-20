@@ -4,9 +4,12 @@
 import asyncio
 import logging
 import time
+import requests
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
+from requests.auth import HTTPBasicAuth
 
 from config import config
 from services.nextcloud_service import NextCloudService
@@ -28,6 +31,10 @@ class SyncService:
         # Формат: async def notify(message: str, is_important: bool = False)
         self.notify_callback: Optional[Callable[[str, bool], Awaitable[None]]] = None
         
+        # Callback для прогресса синхронизации
+        # Формат: async def progress(stage: str, current: int, total: int)
+        self.progress_callback: Optional[Callable[[str, int, int], Awaitable[None]]] = None
+        
         # Защита от спама уведомлений
         self._last_notify_time: Optional[datetime] = None
         self._notify_cooldown = timedelta(seconds=30)  # Минимум 30 секунд между уведомлениями
@@ -35,6 +42,10 @@ class SyncService:
     def set_notify_callback(self, callback: Callable[[str, bool], Awaitable[None]]) -> None:
         """Установить callback для уведомлений о синхронизации"""
         self.notify_callback = callback
+    
+    def set_progress_callback(self, callback: Callable[[str, int, int], Awaitable[None]]) -> None:
+        """Установить callback для прогресса синхронизации"""
+        self.progress_callback = callback
     
     async def _notify(self, message: str, is_important: bool = False) -> None:
         """
@@ -131,6 +142,12 @@ class SyncService:
         try:
             if file_paths:
                 # Синхронизировать только указанные файлы
+                total = len(file_paths)
+                uploaded = 0
+                
+                if self.progress_callback:
+                    await self.progress_callback("upload", 0, total)
+                
                 for file_path in file_paths:
                     local_file = self.local_kb_path / file_path
                     if local_file.exists():
@@ -138,9 +155,23 @@ class SyncService:
                             local_file,
                             file_path
                         )
+                        uploaded += 1
+                        if self.progress_callback:
+                            await self.progress_callback("upload", uploaded, total)
             else:
                 # Синхронизировать все файлы (рекурсивно)
-                await self._sync_directory_to_nextcloud(self.local_kb_path)
+                # Сначала подсчитаем количество файлов
+                total_files = await self._count_files(self.local_kb_path)
+                
+                if self.progress_callback:
+                    await self.progress_callback("upload", 0, total_files)
+                
+                uploaded_count = [0]  # Используем список для передачи по ссылке
+                await self._sync_directory_to_nextcloud(
+                    self.local_kb_path, 
+                    total_files=total_files,
+                    uploaded_count=uploaded_count
+                )
             
             logger.info("Синхронизация в NextCloud завершена")
             return True
@@ -148,8 +179,67 @@ class SyncService:
             logger.error(f"Ошибка при синхронизации в NextCloud: {e}", exc_info=True)
             return False
     
-    async def _sync_directory_to_nextcloud(self, local_dir: Path, remote_base: str = "") -> None:
+    async def _count_files(self, directory: Path) -> int:
+        """Подсчитать количество файлов в директории (рекурсивно)"""
+        count = 0
+        for item in directory.iterdir():
+            if item.is_file():
+                # Пропустить служебные файлы
+                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
+                    continue
+                count += 1
+            elif item.is_dir():
+                # Пропустить служебные директории
+                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
+                    continue
+                count += await self._count_files(item)
+        return count
+    
+    async def _should_upload_file(self, local_file: Path, remote_path: str) -> bool:
+        """Проверить, нужно ли загружать файл (сравнить дату модификации)"""
+        try:
+            # Проверить, существует ли файл в NextCloud
+            if not await self.nextcloud_service.file_exists(remote_path):
+                return True  # Файл не существует в NextCloud, нужно загрузить
+            
+            # Получить дату модификации удаленного файла
+            url = self.nextcloud_service._get_webdav_url(remote_path)
+            auth = HTTPBasicAuth(self.nextcloud_service.username, self.nextcloud_service.password)
+            
+            response = requests.head(url=url, auth=auth, timeout=10)
+            
+            if response.status_code == 200:
+                # Получить Last-Modified из заголовков
+                remote_last_modified = response.headers.get('Last-Modified')
+                if remote_last_modified:
+                    remote_mtime = parsedate_to_datetime(remote_last_modified).timestamp()
+                    local_mtime = local_file.stat().st_mtime
+                    
+                    # Загружать только если локальный файл новее
+                    return local_mtime > remote_mtime
+            
+            # Если не удалось сравнить, загружаем для безопасности
+            return True
+        except Exception as e:
+            logger.debug(f"Не удалось проверить дату модификации {remote_path}: {e}")
+            # В случае ошибки загружаем файл
+            return True
+    
+    async def _sync_directory_to_nextcloud(
+        self, 
+        local_dir: Path, 
+        remote_base: str = "",
+        total_files: Optional[int] = None,
+        uploaded_count: List[int] = None,
+        files_to_upload: Optional[List[tuple]] = None
+    ) -> None:
         """Рекурсивная синхронизация директории в NextCloud"""
+        if uploaded_count is None:
+            uploaded_count = [0]
+        if files_to_upload is None:
+            files_to_upload = []
+        
+        # Собрать все файлы для загрузки
         for item in local_dir.iterdir():
             if item.is_file():
                 # Пропустить служебные файлы
@@ -157,14 +247,56 @@ class SyncService:
                     continue
                 
                 remote_path = f"{remote_base}/{item.name}".lstrip('/')
-                await self.nextcloud_service.upload_file(item, remote_path)
+                files_to_upload.append((item, remote_path))
             elif item.is_dir():
                 # Пропустить служебные директории
                 if item.name.startswith('.') or item.name in ['.git', '.cursor']:
                     continue
                 
                 new_remote_base = f"{remote_base}/{item.name}".lstrip('/')
-                await self._sync_directory_to_nextcloud(item, new_remote_base)
+                await self._sync_directory_to_nextcloud(
+                    item, 
+                    new_remote_base, 
+                    total_files=total_files,
+                    uploaded_count=uploaded_count,
+                    files_to_upload=files_to_upload
+                )
+        
+        # Если это корневой вызов, загрузить файлы параллельно
+        if remote_base == "":
+            # Фильтровать файлы, которые нужно загрузить (параллельно)
+            semaphore_check = asyncio.Semaphore(10)  # Больше для проверки
+            
+            async def check_file(local_file: Path, remote_path: str):
+                async with semaphore_check:
+                    if await self._should_upload_file(local_file, remote_path):
+                        return (local_file, remote_path)
+                    return None
+            
+            # Проверить все файлы параллельно
+            check_tasks = [check_file(local_file, remote_path) for local_file, remote_path in files_to_upload]
+            check_results = await asyncio.gather(*check_tasks, return_exceptions=True)
+            
+            # Отфильтровать None и исключения
+            files_to_sync = [result for result in check_results if result is not None and not isinstance(result, Exception)]
+            
+            # Загружать файлы параллельно (по 5 одновременно)
+            semaphore_upload = asyncio.Semaphore(5)
+            
+            async def upload_with_semaphore(local_file: Path, remote_path: str):
+                async with semaphore_upload:
+                    try:
+                        await self.nextcloud_service.upload_file(local_file, remote_path)
+                        uploaded_count[0] += 1
+                        if self.progress_callback and total_files:
+                            await self.progress_callback("upload", uploaded_count[0], total_files)
+                    except Exception as e:
+                        logger.error(f"Ошибка при загрузке файла {remote_path}: {e}")
+            
+            # Загрузить все файлы параллельно
+            if files_to_sync:
+                tasks = [upload_with_semaphore(local_file, remote_path) for local_file, remote_path in files_to_sync]
+                await asyncio.gather(*tasks, return_exceptions=True)
     
     async def sync_from_nextcloud(self, show_notification: bool = False) -> bool:
         """
@@ -201,29 +333,67 @@ class SyncService:
                     notification_shown = True
             
             # Скачать файлы
+            total_files = len(files)
             downloaded = 0
             updated = 0
+            processed = 0
+            
+            if self.progress_callback:
+                await self.progress_callback("download", 0, total_files)
+            
+            # Фильтровать файлы, которые нужно скачать
+            files_to_download = []
             for file_info in files:
                 remote_path = file_info.get('path', '')
                 if not remote_path:
                     continue
                 
                 local_path = self.local_kb_path / remote_path
+                remote_last_modified = file_info.get('last_modified')
                 
-                # Проверить, нужно ли обновить файл (если локальный файл существует и старше)
+                # Проверить, нужно ли обновить файл
                 needs_update = True
-                if local_path.exists():
-                    # Упрощенная проверка: если файл существует, считаем что он актуален
-                    # В будущем можно добавить проверку по дате модификации
+                if local_path.exists() and remote_last_modified:
+                    try:
+                        remote_mtime = parsedate_to_datetime(remote_last_modified).timestamp()
+                        local_mtime = local_path.stat().st_mtime
+                        
+                        # Обновлять только если удаленный файл новее (с запасом в 1 секунду для погрешности)
+                        needs_update = remote_mtime > (local_mtime + 1)
+                    except Exception:
+                        # Если не удалось сравнить, скачиваем для безопасности
+                        needs_update = True
+                elif not local_path.exists():
+                    # Файл не существует локально, нужно скачать
+                    needs_update = True
+                else:
+                    # Локальный файл существует, но нет даты модификации удаленного
                     needs_update = False
                 
                 if needs_update:
-                    # Скачать файл
-                    success = await self.nextcloud_service.download_file(remote_path, local_path)
-                    if success:
-                        downloaded += 1
+                    files_to_download.append((remote_path, local_path))
                 else:
                     updated += 1
+                    processed += 1
+                    if self.progress_callback:
+                        await self.progress_callback("download", processed, total_files)
+            
+            # Скачать файлы параллельно (по 5 одновременно)
+            semaphore = asyncio.Semaphore(5)
+            
+            async def download_with_semaphore(remote_path: str, local_path: Path):
+                async with semaphore:
+                    success = await self.nextcloud_service.download_file(remote_path, local_path)
+                    nonlocal downloaded, processed
+                    if success:
+                        downloaded += 1
+                    processed += 1
+                    if self.progress_callback:
+                        await self.progress_callback("download", processed, total_files)
+            
+            # Скачать все файлы параллельно
+            tasks = [download_with_semaphore(remote_path, local_path) for remote_path, local_path in files_to_download]
+            await asyncio.gather(*tasks, return_exceptions=True)
             
             elapsed_time = time.time() - start_time
             

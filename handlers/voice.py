@@ -18,7 +18,7 @@ from utils.message_helpers import split_long_message, markdown_to_html, escape_m
 from utils.db_helpers import get_db
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
 from handlers.states import QueryStates
-from handlers.keyboards import get_confirm_query_keyboard
+from handlers.keyboards import get_confirm_query_keyboard, get_transcribe_inline_keyboard, get_collecting_messages_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -149,9 +149,20 @@ async def process_text_query_after_transcription(
                 changes_info += "\n⚠️ Не удалось синхронизировать с NextCloud"
             
             try:
-                await message.answer(changes_info)
+                from handlers.keyboards import get_active_session_keyboard
+                await message.answer(changes_info, reply_markup=get_active_session_keyboard())
             except Exception as e:
                 logger.warning(f"Не удалось отправить информацию об изменениях: {e}")
+        else:
+            # Если изменений не было, показать клавиатуру активной сессии отдельным сообщением
+            try:
+                from handlers.keyboards import get_active_session_keyboard
+                await message.answer(
+                    "💡 Используйте кнопки ниже для управления сессией.",
+                    reply_markup=get_active_session_keyboard()
+                )
+            except Exception:
+                pass  # Игнорируем ошибки
         
         total_time = time.time() - start_time
         logger.info(f"✅ Запрос обработан успешно за {total_time:.2f}с")
@@ -222,9 +233,14 @@ async def voice_handler(message: Message, state: FSMContext):
                 f"✅ Голосовое сообщение добавлено.\n\n"
                 f"📝 Расшифровка: {transcription_preview}\n\n"
                 f"{summary}\n\n"
-                f"Продолжайте добавлять сообщения или подтвердите отправку.",
-                reply_markup=get_confirm_query_keyboard(),
+                f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор' для отправки.",
+                reply_markup=get_collecting_messages_keyboard(),
                 parse_mode=None  # Явно указываем отсутствие форматирования
+            )
+            # Также показать inline-кнопку для быстрой отправки
+            await message.answer(
+                "Готовы отправить запрос?",
+                reply_markup=get_confirm_query_keyboard()
             )
         except Exception as e:
             logger.error(f"Ошибка при обработке голосового сообщения в режиме сбора: {e}", exc_info=True)
@@ -314,6 +330,16 @@ async def voice_handler(message: Message, state: FSMContext):
         except Exception:
             # Если не получилось с HTML, отправляем без форматирования
             await processing_message.edit_text(transcription_display)
+        
+        # Показать inline-кнопку для повторной расшифровки (если нужно)
+        # Кнопка будет показана отдельным сообщением
+        try:
+            await message.answer(
+                "💡 Хотите перерасшифровать это голосовое сообщение?",
+                reply_markup=get_transcribe_inline_keyboard()
+            )
+        except Exception:
+            pass  # Игнорируем ошибки при отправке дополнительного сообщения
         
         # Обработать транскрибированный текст как обычный запрос
         await process_text_query_after_transcription(
