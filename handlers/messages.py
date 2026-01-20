@@ -3,6 +3,8 @@
 """
 import logging
 import time
+from pathlib import Path
+from typing import Optional, List
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
@@ -25,17 +27,24 @@ async def process_final_query(
     query: str,
     message: Message,
     state: FSMContext,
-    session_id: int
+    session_id: int,
+    attached_files: Optional[List[Path]] = None
 ):
-    """Обработать финальный запрос через Cursor CLI"""
+    """
+    Обработать финальный запрос через Cursor CLI
+    
+    Args:
+        query: Текст запроса
+        message: Объект сообщения Telegram
+        state: Состояние FSM
+        session_id: ID сессии
+        attached_files: Список путей к прикрепленным файлам (опционально)
+    """
     from utils.db_helpers import get_db
     
     db = await get_db()
     
-    # Сохранить сообщение пользователя в сессию
-    await db.add_message(session_id, "user", query)
-    
-    # Получить историю сообщений сессии для контекста
+    # Получить историю сообщений сессии для контекста (ПЕРЕД сохранением текущего сообщения)
     session_messages = await db.get_session_messages(session_id)
     logger.debug(f"Загружена история сессии: {len(session_messages)} сообщений")
     
@@ -76,11 +85,12 @@ async def process_final_query(
         cursor_start = time.time()
         cursor_service = CursorCLIService()
         
-        # Обработать запрос через Cursor CLI с контекстом сессии
+        # Обработать запрос через Cursor CLI с контекстом сессии и прикрепленными файлами
         response, changes = await cursor_service.process_query(
             query=query,
             session_id=session_id,
-            session_messages=session_messages
+            session_messages=session_messages,
+            attached_files=attached_files
         )
         
         cursor_time = time.time() - cursor_start
@@ -107,6 +117,9 @@ async def process_final_query(
                 except TelegramBadRequest as e2:
                     logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
                     await message.answer(part)
+        
+        # Сохранить сообщение пользователя в сессию (ПОСЛЕ обработки, чтобы избежать дублирования в контексте)
+        await db.add_message(session_id, "user", query)
         
         # Сохранить ответ ассистента в сессию
         await db.add_message(session_id, "assistant", response)
@@ -193,7 +206,8 @@ async def text_message_handler(message: Message, state: FSMContext):
         await message.answer(
             f"✅ Текстовое сообщение добавлено.\n\n{summary}\n\n"
             f"Продолжайте добавлять сообщения или подтвердите отправку.",
-            reply_markup=get_confirm_query_keyboard()
+            reply_markup=get_confirm_query_keyboard(),
+            parse_mode=None  # Явно указываем отсутствие форматирования
         )
         return
     

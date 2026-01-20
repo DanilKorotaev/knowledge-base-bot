@@ -56,36 +56,13 @@ async def confirm_query_handler(callback: CallbackQuery, state: FSMContext):
     
     session_id = active_session["id"]
     
-    # Сохранить вложения в БД
-    for voice in builder.voice_files:
-        if voice.get("file_path"):
-            message_obj = await db.add_message(session_id, "user", "[Голосовое сообщение]")
-            attachment = await db.add_attachment(
-                session_id=session_id,
-                message_id=message_obj["id"],
-                file_type="voice",
-                file_id=voice.get("file_id", ""),
-                file_path=str(voice["file_path"]) if voice.get("file_path") else None,
-                file_name=f"{voice.get('file_id', 'voice')}.ogg"
-            )
-            if voice.get("transcription"):
-                await db.add_transcription(
-                    attachment_id=attachment["id"],
-                    text=voice["transcription"],
-                    language=None
-                )
-    
+    # Извлечь пути к прикрепленным файлам для передачи в Cursor CLI
+    attached_files = []
     for media in builder.media_files:
         if media.get("file_path"):
-            message_obj = await db.add_message(session_id, "user", f"[Файл: {media.get('file_name', 'файл')}]")
-            await db.add_attachment(
-                session_id=session_id,
-                message_id=message_obj["id"],
-                file_type=media.get("file_type", "file"),
-                file_id=media.get("file_id", ""),
-                file_path=str(media["file_path"]) if media.get("file_path") else None,
-                file_name=media.get("file_name", "")
-            )
+            file_path = Path(media["file_path"]) if isinstance(media["file_path"], str) else media["file_path"]
+            if file_path.exists():
+                attached_files.append(file_path)
     
     # Подтвердить callback
     await callback.answer("✅ Запрос отправляется...")
@@ -96,8 +73,46 @@ async def confirm_query_handler(callback: CallbackQuery, state: FSMContext):
     except Exception:
         pass
     
-    # Обработать финальный запрос
-    await process_final_query(final_query, callback.message, state, session_id)
+    # Обработать финальный запрос с прикрепленными файлами
+    await process_final_query(final_query, callback.message, state, session_id, attached_files=attached_files)
+    
+    # Сохранить вложения в БД ПОСЛЕ обработки (чтобы они были связаны с правильным сообщением)
+    # Получить последнее сообщение пользователя (которое было сохранено в process_final_query)
+    user_messages = await db.get_session_messages(session_id)
+    last_user_message = None
+    for msg in reversed(user_messages):
+        if msg.get("role") == "user":
+            last_user_message = msg
+            break
+    
+    if last_user_message:
+        for voice in builder.voice_files:
+            if voice.get("file_path"):
+                attachment = await db.add_attachment(
+                    session_id=session_id,
+                    message_id=last_user_message["id"],
+                    file_type="voice",
+                    file_id=voice.get("file_id", ""),
+                    file_path=str(voice["file_path"]) if voice.get("file_path") else None,
+                    file_name=f"{voice.get('file_id', 'voice')}.ogg"
+                )
+                if voice.get("transcription"):
+                    await db.add_transcription(
+                        attachment_id=attachment["id"],
+                        text=voice["transcription"],
+                        language=None
+                    )
+        
+        for media in builder.media_files:
+            if media.get("file_path"):
+                await db.add_attachment(
+                    session_id=session_id,
+                    message_id=last_user_message["id"],
+                    file_type=media.get("file_type", "file"),
+                    file_id=media.get("file_id", ""),
+                    file_path=str(media["file_path"]) if media.get("file_path") else None,
+                    file_name=media.get("file_name", "")
+                )
     
     # Очистить состояние
     await state.clear()

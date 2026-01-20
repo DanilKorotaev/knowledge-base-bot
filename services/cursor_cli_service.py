@@ -182,7 +182,8 @@ class CursorCLIService:
         query: str,
         session_id: Optional[int] = None,
         model: Optional[str] = None,
-        session_messages: Optional[List[Dict[str, Any]]] = None
+        session_messages: Optional[List[Dict[str, Any]]] = None,
+        attached_files: Optional[List[Path]] = None
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -192,6 +193,7 @@ class CursorCLIService:
             session_id: ID сессии (опционально)
             model: Модель для использования (опционально, по умолчанию из конфига)
             session_messages: История сообщений сессии для контекста (опционально)
+            attached_files: Список путей к прикрепленным файлам (фото, документы) (опционально)
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -203,13 +205,30 @@ class CursorCLIService:
             logger.error(error_msg)
             return f"❌ Ошибка: {error_msg}", []
         
+        # Логировать прикрепленные файлы
+        if attached_files:
+            logger.info(f"Прикреплено файлов: {len(attached_files)}")
+            for i, file_path in enumerate(attached_files, 1):
+                if file_path and file_path.exists():
+                    file_size = file_path.stat().st_size
+                    logger.info(f"  Файл {i}: {file_path.name} ({file_size} байт, путь: {file_path})")
+                else:
+                    logger.warning(f"  Файл {i}: {file_path} (не найден!)")
+        else:
+            logger.debug("Прикрепленных файлов нет")
+        
         # Сохранить состояние файлов до выполнения (для отслеживания изменений)
         file_states_before = await self._save_file_states()
         
-        # Подготовить запрос с контекстом сессии
+        # Подготовить запрос с контекстом сессии и прикрепленными файлами
         # Системные промпты теперь в .cursor/rules/, поэтому не добавляем их в запрос
         # Это оптимизирует производительность - Cursor CLI автоматически загружает промпты из .cursor/rules/
-        full_query = self._build_query_with_context(query, session_messages)
+        # 
+        # Обработка файлов:
+        # Cursor CLI не поддерживает флаг --file (см. https://forum.cursor.com/t/image-support-in-headless-cli/135007)
+        # Вместо этого нужно упомянуть пути к файлам в промпте, и Cursor CLI автоматически прочитает их через tool calling
+        # См. документацию: https://cursor.com/docs/cli/headless#working-with-images
+        full_query = self._build_query_with_context(query, session_messages, attached_files)
         if self.system_prompt:
             logger.debug(f"Системные промпты доступны в .cursor/rules/ ({len(self.system_prompt)} символов)")
         
@@ -449,24 +468,72 @@ class CursorCLIService:
     def _build_query_with_context(
         self,
         query: str,
-        session_messages: Optional[List[Dict[str, Any]]] = None
+        session_messages: Optional[List[Dict[str, Any]]] = None,
+        attached_files: Optional[List[Path]] = None
     ) -> str:
         """
-        Построить запрос с контекстом сессии
+        Построить запрос с контекстом сессии и прикрепленными файлами
         
         Args:
             query: Текущий запрос пользователя
             session_messages: История сообщений сессии
+            attached_files: Список путей к прикрепленным файлам
         
         Returns:
-            str: Запрос с контекстом
+            str: Запрос с контекстом и упоминанием файлов
         """
-        if not session_messages or len(session_messages) == 0:
+        # Обработать прикрепленные файлы
+        # Согласно документации Cursor CLI: https://cursor.com/docs/cli/headless
+        # Нужно просто упомянуть пути к файлам в промпте, и Cursor CLI автоматически прочитает их
+        file_paths_in_prompt = []
+        if attached_files:
+            for file_path in attached_files:
+                if file_path and file_path.exists():
+                    # Преобразовать путь в относительный от базы знаний
+                    try:
+                        relative_path = file_path.relative_to(self.kb_path)
+                        file_paths_in_prompt.append(str(relative_path))
+                        logger.debug(f"Добавлен файл в промпт: {relative_path}")
+                    except ValueError:
+                        # Если файл не в базе знаний, используем абсолютный путь
+                        file_paths_in_prompt.append(str(file_path))
+                        logger.debug(f"Добавлен файл в промпт (абсолютный путь): {file_path}")
+                else:
+                    logger.warning(f"Файл не найден, пропускаем: {file_path}")
+        
+        # Если нет истории или только одно сообщение (текущий запрос), вернуть запрос без контекста
+        if not session_messages or len(session_messages) <= 1:
+            logger.debug("Нет предыдущих сообщений в сессии, отправляю запрос без контекста")
+            # Добавить файлы в запрос, если есть
+            if file_paths_in_prompt:
+                # Добавляем файлы в запрос, как рекомендует документация
+                # Cursor CLI автоматически прочитает файлы через tool calling
+                files_list = ", ".join(file_paths_in_prompt)
+                query_with_files = f"{query}\n\n[Прикрепленные файлы для анализа: {files_list}]"
+                logger.info(f"Добавлено {len(file_paths_in_prompt)} файлов в промпт: {files_list}")
+                return query_with_files
+            return query
+        
+        # Фильтровать сообщения: исключить последнее, если оно совпадает с текущим запросом
+        # (это может быть текущий запрос, который уже сохранился в БД)
+        previous_messages = session_messages[:-1] if len(session_messages) > 1 else []
+        
+        # Если после фильтрации не осталось сообщений, вернуть запрос без контекста
+        if not previous_messages:
+            logger.debug("Нет предыдущих сообщений после фильтрации, отправляю запрос без контекста")
+            # Добавить файлы в запрос, если есть
+            if file_paths_in_prompt:
+                # Добавляем файлы в запрос, как рекомендует документация
+                # Cursor CLI автоматически прочитает файлы через tool calling
+                files_list = ", ".join(file_paths_in_prompt)
+                query_with_files = f"{query}\n\n[Прикрепленные файлы для анализа: {files_list}]"
+                logger.info(f"Добавлено {len(file_paths_in_prompt)} файлов в промпт: {files_list}")
+                return query_with_files
             return query
         
         # Ограничить количество сообщений для контекста (последние N сообщений)
         max_context_messages = 10
-        context_messages = session_messages[-max_context_messages:] if len(session_messages) > max_context_messages else session_messages
+        context_messages = previous_messages[-max_context_messages:] if len(previous_messages) > max_context_messages else previous_messages
         
         # Построить контекст из истории
         context_parts = []
@@ -486,8 +553,14 @@ class CursorCLIService:
         context_parts.append("")
         context_parts.append(f"Текущий запрос пользователя: {query}")
         
+        # Добавить файлы в конец запроса
+        if file_paths_in_prompt:
+            context_parts.append("")
+            context_parts.append(f"Прикрепленные файлы для анализа: {', '.join(file_paths_in_prompt)}")
+            logger.info(f"Добавлено {len(file_paths_in_prompt)} файлов в промпт: {', '.join(file_paths_in_prompt)}")
+        
         full_query = "\n".join(context_parts)
-        logger.debug(f"Построен запрос с контекстом ({len(context_messages)} сообщений в истории)")
+        logger.debug(f"Построен запрос с контекстом ({len(context_messages)} предыдущих сообщений)")
         
         return full_query
     

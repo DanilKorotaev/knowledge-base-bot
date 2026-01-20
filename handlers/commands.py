@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from utils.db_helpers import get_db
 from handlers.states import QueryStates
@@ -111,17 +112,35 @@ async def collect_mode_handler(message: Message, state: FSMContext):
     builder = QueryBuilder()
     await state.update_data(**query_builder_to_state(builder))
     
-    await message.answer(
-        "📝 Режим сбора сообщений включен.\n\n"
-        "Теперь вы можете отправлять несколько сообщений:\n"
-        "• Текстовые сообщения\n"
-        "• Голосовые сообщения\n"
-        "• Файлы и фото\n\n"
-        "Все сообщения будут собраны вместе. "
-        "Когда будете готовы, нажмите кнопку «Отправить запрос».\n\n"
-        "Используйте /stop_collect для отключения режима.",
-        reply_markup=get_confirm_query_keyboard()
-    )
+    try:
+        await message.answer(
+            "📝 Режим сбора сообщений включен.\n\n"
+            "Теперь вы можете отправлять несколько сообщений:\n"
+            "- Текстовые сообщения\n"
+            "- Голосовые сообщения\n"
+            "- Файлы и фото\n\n"
+            "Все сообщения будут собраны вместе. "
+            "Когда будете готовы, нажмите кнопку Отправить запрос.\n\n"
+            "Используйте /stop_collect для отключения режима.",
+            reply_markup=get_confirm_query_keyboard()
+        )
+    except TelegramBadRequest as e:
+        logger.error(f"Ошибка при отправке сообщения с клавиатурой: {e}")
+        # Попробовать отправить без клавиатуры
+        try:
+            await message.answer(
+                "📝 Режим сбора сообщений включен.\n\n"
+                "Теперь вы можете отправлять несколько сообщений:\n"
+                "- Текстовые сообщения\n"
+                "- Голосовые сообщения\n"
+                "- Файлы и фото\n\n"
+                "Все сообщения будут собраны вместе.\n\n"
+                "Используйте /stop_collect для отключения режима."
+            )
+            logger.warning("Сообщение отправлено без клавиатуры из-за ошибки Telegram API")
+        except Exception as e2:
+            logger.error(f"Критическая ошибка при отправке сообщения: {e2}")
+            await message.answer("✅ Режим сбора сообщений включен.")
 
 
 @router.message(Command("stop_collect"))

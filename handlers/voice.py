@@ -223,7 +223,8 @@ async def voice_handler(message: Message, state: FSMContext):
                 f"📝 Расшифровка: {transcription_preview}\n\n"
                 f"{summary}\n\n"
                 f"Продолжайте добавлять сообщения или подтвердите отправку.",
-                reply_markup=get_confirm_query_keyboard()
+                reply_markup=get_confirm_query_keyboard(),
+                parse_mode=None  # Явно указываем отсутствие форматирования
             )
         except Exception as e:
             logger.error(f"Ошибка при обработке голосового сообщения в режиме сбора: {e}", exc_info=True)

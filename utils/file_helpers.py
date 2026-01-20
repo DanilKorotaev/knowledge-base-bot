@@ -46,8 +46,12 @@ async def download_telegram_file(bot, file_id: str, file_path: Optional[str] = N
     Returns:
         Path к скачанному файлу или None в случае ошибки
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         # Получить информацию о файле
+        logger.debug(f"Получаю информацию о файле {file_id} из Telegram")
         file = await bot.get_file(file_id)
         
         # Определить путь для сохранения
@@ -61,13 +65,18 @@ async def download_telegram_file(bot, file_id: str, file_path: Optional[str] = N
             file_extension = Path(file.file_path).suffix if file.file_path else ".ogg"
             save_path = temp_dir / f"{file_id}{file_extension}"
         
+        logger.debug(f"Скачиваю файл {file_id} в {save_path}")
         # Скачать файл
         await bot.download_file(file.file_path, destination=save_path)
         
+        if save_path.exists():
+            file_size = save_path.stat().st_size
+            logger.info(f"Файл {file_id} успешно скачан: {save_path} ({file_size} байт)")
+        else:
+            logger.warning(f"Файл скачан, но не найден по пути: {save_path}")
+        
         return save_path
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"Ошибка при скачивании файла {file_id}: {e}", exc_info=True)
         return None
 
