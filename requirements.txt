@@ -7,7 +7,9 @@ asyncpg==0.29.0
 aiosqlite==0.20.0
 
 # OpenAI API (for Whisper transcription)
-openai==1.12.0
+# Обновлено до версии, совместимой с httpx
+openai>=1.30.0,<2.0.0
+httpx>=0.27.0
 
 # NextCloud WebDAV
 requests==2.31.0
