@@ -2,7 +2,10 @@
 Клавиатуры для бота
 """
 from typing import List, Dict, Optional
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton,
+    KeyboardButtonRequestUsers
+)
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
@@ -333,4 +336,148 @@ def get_transcribe_inline_keyboard() -> InlineKeyboardMarkup:
         ]
     )
     return keyboard
+
+
+def get_main_menu_inline_keyboard_with_admin(is_admin: bool = False) -> InlineKeyboardMarkup:
+    """Главное меню как inline-кнопки с опциональной кнопкой админки"""
+    keyboard = [
+        [
+            InlineKeyboardButton(text="📚 Новый запрос", callback_data="main_new_query"),
+            InlineKeyboardButton(text="💬 Новый чат", callback_data="main_new_chat")
+        ],
+        [
+            InlineKeyboardButton(text="📋 Мои сессии", callback_data="main_sessions"),
+            InlineKeyboardButton(text="📜 История", callback_data="main_history")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Синхронизация", callback_data="main_sync"),
+            InlineKeyboardButton(text="❓ Помощь", callback_data="main_help")
+        ]
+    ]
+    
+    if is_admin:
+        keyboard.append([
+            InlineKeyboardButton(text="⚙️ Админка", callback_data="admin_menu")
+        ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_admin_menu_keyboard() -> InlineKeyboardMarkup:
+    """Меню администратора"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👥 Список пользователей", callback_data="admin_list_users")
+            ],
+            [
+                InlineKeyboardButton(text="✅ Разрешить доступ", callback_data="admin_allow_start"),
+                InlineKeyboardButton(text="❌ Запретить доступ", callback_data="admin_disallow_start")
+            ],
+            [
+                InlineKeyboardButton(text="👑 Назначить админа", callback_data="admin_set_admin_start"),
+                InlineKeyboardButton(text="🔻 Убрать админа", callback_data="admin_remove_admin_start")
+            ],
+            [
+                InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+            ]
+        ]
+    )
+    return keyboard
+
+
+def get_users_selection_keyboard(
+    users: List[Dict],
+    action: str,  # "allow", "disallow", "set_admin", "remove_admin"
+    page: int = 0,
+    per_page: int = 10
+) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора пользователя из списка с пагинацией"""
+    keyboard = []
+    
+    # Показать пользователей для текущей страницы
+    start_idx = page * per_page
+    end_idx = start_idx + per_page
+    page_users = users[start_idx:end_idx]
+    
+    # Каждый пользователь - одна кнопка
+    for user in page_users:
+        telegram_id = user["telegram_id"]
+        username = user.get("username") or "без username"
+        admin_marker = "👑" if user.get("is_admin") else ""
+        allowed_marker = "✅" if user.get("is_allowed") else "❌"
+        
+        # Обрезаем username если слишком длинный
+        display_username = username[:20] if len(username) > 20 else username
+        
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{admin_marker} {allowed_marker} {telegram_id} (@{display_username})",
+                callback_data=f"admin_select_user_{action}_{telegram_id}"
+            )
+        ])
+    
+    # Кнопки навигации
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="◀️ Назад", callback_data=f"admin_users_page_{action}_{page - 1}")
+        )
+    if end_idx < len(users):
+        nav_buttons.append(
+            InlineKeyboardButton(text="Вперед ▶️", callback_data=f"admin_users_page_{action}_{page + 1}")
+        )
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    # Кнопка отмены
+    keyboard.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="admin_menu")
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_admin_contact_request_keyboard(action: str) -> tuple[ReplyKeyboardMarkup, InlineKeyboardMarkup]:
+    """
+    Клавиатура с просьбой отправить контакт или ID.
+    Возвращает tuple: (reply_keyboard с кнопкой выбора пользователя, inline_keyboard)
+    """
+    # Reply-клавиатура с кнопкой выбора пользователя через UI Telegram
+    reply_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(
+                    text="👤 Выбрать пользователя",
+                    request_users=KeyboardButtonRequestUsers(
+                        request_id=hash(action) % 1000000,  # Уникальный ID для идентификации запроса
+                        user_is_bot=False,  # Только реальные пользователи
+                        user_is_premium=None  # Любые пользователи
+                    )
+                )
+            ],
+            [
+                KeyboardButton(text="❌ Отмена")
+            ]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    # Inline-клавиатура с альтернативными опциями
+    inline_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📋 Выбрать из списка", callback_data=f"admin_list_for_{action}")
+            ],
+            [
+                InlineKeyboardButton(text="📝 Ввести ID вручную", callback_data=f"admin_manual_id_{action}")
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отмена", callback_data="admin_menu")
+            ]
+        ]
+    )
+    
+    return reply_keyboard, inline_keyboard
 

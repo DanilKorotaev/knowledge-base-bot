@@ -3,18 +3,19 @@
 """
 import asyncio
 import logging
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, Contact
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 
 from utils.db_helpers import get_db
-from handlers.states import QueryStates
+from handlers.states import QueryStates, AdminStates
 from handlers.keyboards import (
     get_confirm_query_keyboard, get_main_keyboard, get_new_query_keyboard,
-    get_active_session_keyboard, get_collecting_messages_keyboard
+    get_active_session_keyboard, get_collecting_messages_keyboard,
+    get_admin_menu_keyboard, get_cancel_keyboard
 )
 from utils.query_builder import QueryBuilder, query_builder_to_state
 
@@ -25,11 +26,29 @@ logger = logging.getLogger(__name__)
 @router.message(Command("start"))
 async def start_handler(message: Message):
     """Обработчик команды /start"""
-    from handlers.keyboards import get_main_menu_inline_keyboard
+    from handlers.keyboards import get_main_menu_inline_keyboard_with_admin
+    from config import config
     
     db = await get_db()
     user_id = message.from_user.id
     user = await db.ensure_user(user_id, message.from_user.username)
+    
+    # Проверка доступа в режиме restricted
+    if config.ACCESS_MODE == "restricted":
+        is_allowed = await db.is_user_allowed(user_id)
+        if not is_allowed:
+            await message.answer(
+                "❌ У вас нет доступа к этому боту.\n\n"
+                "Обратитесь к администратору для получения доступа."
+            )
+            logger.warning(
+                f"Попытка доступа от неавторизованного пользователя при /start: "
+                f"telegram_id={user_id}, username={message.from_user.username}"
+            )
+            return
+    
+    # Проверить, является ли пользователь администратором
+    is_admin = await db.is_user_admin(user_id)
     
     await message.answer(
         "👋 Привет! Я бот для работы с базой знаний.\n\n"
@@ -38,7 +57,7 @@ async def start_handler(message: Message):
     )
     await message.answer(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard(),
+        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
         parse_mode=ParseMode.HTML
     )
 
@@ -46,7 +65,12 @@ async def start_handler(message: Message):
 @router.message(Command("help"))
 async def help_handler(message: Message):
     """Обработчик команды /help"""
-    from handlers.keyboards import get_main_menu_inline_keyboard
+    from handlers.keyboards import get_main_menu_inline_keyboard_with_admin
+    from utils.db_helpers import get_db
+    
+    db = await get_db()
+    user_id = message.from_user.id
+    is_admin = await db.is_user_admin(user_id)
     
     help_text = """📚 <b>Справка по использованию бота</b>
 
@@ -82,7 +106,7 @@ async def help_handler(message: Message):
     await message.answer(help_text, parse_mode=ParseMode.HTML, reply_markup=get_main_keyboard())
     await message.answer(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard(),
+        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
         parse_mode=ParseMode.HTML
     )
 
@@ -548,6 +572,276 @@ async def revert_session_handler(message: Message):
     """Откатить все изменения текущей сессии"""
     # TODO: Реализовать откат сессии
     await message.answer("↩️ Функция отката сессии будет реализована позже.")
+
+
+# Старые административные команды удалены - теперь используется интерактивный режим через callbacks
+
+
+@router.message(AdminStates.waiting_for_user_contact)
+async def admin_users_requested_handler(message: Message, state: FSMContext):
+    """Обработка выбора пользователя через UI Telegram (кнопка 'Выбрать пользователя')"""
+    db = await get_db()
+    user_id = message.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await message.answer("❌ У вас нет прав администратора.")
+        await state.clear()
+        return
+    
+    # Логирование для отладки - проверим все возможные поля
+    logger.debug(f"Получено сообщение в состоянии waiting_for_user_contact:")
+    logger.debug(f"  text={message.text}")
+    logger.debug(f"  contact={message.contact}")
+    logger.debug(f"  message_id={message.message_id}")
+    logger.debug(f"  from_user={message.from_user}")
+    
+    # Проверить, есть ли выбранные пользователи через UI Telegram
+    # В Telegram Bot API данные приходят в поле users_shared как объект UsersShared
+    users_shared = getattr(message, 'users_shared', None)
+    
+    if users_shared:
+        logger.info(f"Обнаружен users_shared: {users_shared}, type: {type(users_shared)}")
+        logger.info(f"users_shared атрибуты: {dir(users_shared)}")
+        
+        # UsersShared содержит поле user_ids - список ID выбранных пользователей
+        if hasattr(users_shared, 'user_ids') and users_shared.user_ids and len(users_shared.user_ids) > 0:
+            target_telegram_id = users_shared.user_ids[0]
+        elif hasattr(users_shared, 'user_id'):
+            target_telegram_id = users_shared.user_id
+        else:
+            logger.error(f"Не удалось извлечь user_id из users_shared: {users_shared}")
+            await message.answer("❌ Ошибка: не удалось определить ID выбранного пользователя.")
+            return
+        
+        logger.info(f"Выбран пользователь через UI: {target_telegram_id}")
+        
+        state_data = await state.get_data()
+        action = state_data.get("admin_action")
+        
+        if not action:
+            await message.answer("❌ Ошибка: действие не определено.")
+            await state.clear()
+            return
+        
+        try:
+            # Для users_shared может не быть username, поэтому используем только ID
+            # Username будет обновлен при следующем взаимодействии пользователя с ботом
+            username_display = f"ID {target_telegram_id}"
+            
+            if action == "allow":
+                await db.allow_user(target_telegram_id)
+                await db.ensure_user(target_telegram_id, None)  # Username обновится автоматически
+                result_text = f"✅ Пользователю {target_telegram_id} разрешен доступ."
+                logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+            elif action == "set_admin":
+                await db.set_user_admin(target_telegram_id, is_admin=True)
+                await db.ensure_user(target_telegram_id, None)  # Username обновится автоматически
+                result_text = f"👑 Пользователю {target_telegram_id} назначены права администратора."
+                logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
+            else:
+                await message.answer("❌ Неизвестное действие.")
+                await state.clear()
+                return
+            
+            await state.clear()
+            # Убрать reply-клавиатуру
+            await message.answer(
+                result_text,
+                reply_markup=get_main_keyboard()
+            )
+            await message.answer(
+                "⚙️ <b>Админка</b>",
+                reply_markup=get_admin_menu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+            await message.answer(
+                f"❌ Ошибка: {str(e)}",
+                reply_markup=get_main_keyboard()
+            )
+            await state.clear()
+            return
+    
+    # Если это не выбор пользователя через UI, проверяем другие варианты
+    if message.contact:
+        # Обработка контакта
+        contact: Contact = message.contact
+        target_telegram_id = contact.user_id
+        
+        state_data = await state.get_data()
+        action = state_data.get("admin_action")
+        
+        if not action:
+            await message.answer("❌ Ошибка: действие не определено.")
+            await state.clear()
+            return
+        
+        try:
+            if action == "allow":
+                await db.allow_user(target_telegram_id)
+                await db.ensure_user(target_telegram_id, contact.first_name)
+                result_text = f"✅ Пользователю {target_telegram_id} ({contact.first_name}) разрешен доступ."
+                logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+            elif action == "set_admin":
+                await db.set_user_admin(target_telegram_id, is_admin=True)
+                await db.ensure_user(target_telegram_id, contact.first_name)
+                result_text = f"👑 Пользователю {target_telegram_id} ({contact.first_name}) назначены права администратора."
+                logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
+            else:
+                await message.answer("❌ Неизвестное действие.")
+                await state.clear()
+                return
+            
+            await state.clear()
+            await message.answer(
+                result_text,
+                reply_markup=get_main_keyboard()
+            )
+            await message.answer(
+                "⚙️ <b>Админка</b>",
+                reply_markup=get_admin_menu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception as e:
+            logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+            await message.answer(
+                f"❌ Ошибка: {str(e)}",
+                reply_markup=get_main_keyboard()
+            )
+            await state.clear()
+            return
+    
+    # Если это текстовое сообщение (Telegram ID)
+    if not message.text:
+        await message.answer(
+            "❌ Пожалуйста, отправьте контакт или Telegram ID пользователя.\n\n"
+            "Используйте кнопку '👤 Выбрать пользователя' или отправьте число (Telegram ID).",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+    
+    # Проверка на отмену
+    if message.text.strip().lower() in ["отмена", "cancel", "❌ отмена"]:
+        await state.clear()
+        await message.answer("❌ Действие отменено.", reply_markup=get_admin_menu_keyboard())
+        return
+    
+    try:
+        target_telegram_id = int(message.text.strip())
+    except ValueError:
+        await message.answer(
+            "❌ Неверный формат Telegram ID. Используйте число.\n\n"
+            "Или используйте кнопку '👤 Выбрать пользователя' для выбора через UI Telegram.",
+            reply_markup=get_cancel_keyboard()
+        )
+        return
+    
+    state_data = await state.get_data()
+    action = state_data.get("admin_action")
+    
+    if not action:
+        await message.answer("❌ Ошибка: действие не определено.")
+        await state.clear()
+        return
+    
+    try:
+        if action == "allow":
+            await db.allow_user(target_telegram_id)
+            await db.ensure_user(target_telegram_id)
+            result_text = f"✅ Пользователю {target_telegram_id} разрешен доступ."
+            logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+        elif action == "set_admin":
+            await db.set_user_admin(target_telegram_id, is_admin=True)
+            await db.ensure_user(target_telegram_id)
+            result_text = f"👑 Пользователю {target_telegram_id} назначены права администратора."
+            logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
+        else:
+            await message.answer("❌ Неизвестное действие.")
+            await state.clear()
+            return
+        
+        await state.clear()
+        await message.answer(
+            result_text,
+            reply_markup=get_main_keyboard()
+        )
+        await message.answer(
+            "⚙️ <b>Админка</b>",
+            reply_markup=get_admin_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+        await message.answer(
+            f"❌ Ошибка: {str(e)}",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
+    
+    # Берем первого выбранного пользователя
+    selected_user = message.users_requested[0]
+    target_telegram_id = selected_user.id
+    
+    state_data = await state.get_data()
+    action = state_data.get("admin_action")
+    
+    if not action:
+        await message.answer("❌ Ошибка: действие не определено.")
+        await state.clear()
+        return
+    
+    try:
+        username = selected_user.username or selected_user.first_name or "без username"
+        
+        if action == "allow":
+            await db.allow_user(target_telegram_id)
+            await db.ensure_user(target_telegram_id, selected_user.username)
+            result_text = f"✅ Пользователю {target_telegram_id} ({username}) разрешен доступ."
+            logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+        elif action == "set_admin":
+            await db.set_user_admin(target_telegram_id, is_admin=True)
+            await db.ensure_user(target_telegram_id, selected_user.username)
+            result_text = f"👑 Пользователю {target_telegram_id} ({username}) назначены права администратора."
+            logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
+        else:
+            await message.answer("❌ Неизвестное действие.")
+            await state.clear()
+            return
+        
+        await state.clear()
+        # Убрать reply-клавиатуру
+        await message.answer(
+            result_text,
+            reply_markup=get_main_keyboard()
+        )
+        await message.answer(
+            "⚙️ <b>Админка</b>",
+            reply_markup=get_admin_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+        await message.answer(
+            f"❌ Ошибка: {str(e)}",
+            reply_markup=get_main_keyboard()
+        )
+        await state.clear()
+
+
+# Обработка контактов и текстовых сообщений теперь объединена в один обработчик выше
+
+
+@router.message(lambda m: m.text == "❌ Отмена", AdminStates.waiting_for_user_contact)
+@router.message(lambda m: m.text == "❌ Отмена", AdminStates.waiting_for_user_selection)
+async def admin_cancel_handler(message: Message, state: FSMContext):
+    """Отмена административного действия"""
+    from handlers.keyboards import get_admin_menu_keyboard
+    
+    await state.clear()
+    await message.answer("❌ Действие отменено.", reply_markup=get_admin_menu_keyboard())
 
 
 @router.message(Command("sync"))

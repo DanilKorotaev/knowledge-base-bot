@@ -30,9 +30,23 @@ class SQLiteDatabase(DatabaseInterface):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_id INTEGER UNIQUE NOT NULL,
                     username TEXT,
+                    is_allowed INTEGER DEFAULT 0,
+                    is_admin INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Миграция: добавить поля is_allowed и is_admin, если их нет
+            cursor = await db.execute("PRAGMA table_info(users)")
+            columns = {row[1] for row in await cursor.fetchall()}
+            
+            if 'is_allowed' not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN is_allowed INTEGER DEFAULT 0")
+            
+            if 'is_admin' not in columns:
+                await db.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+            
+            await db.commit()
             
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -114,14 +128,22 @@ class SQLiteDatabase(DatabaseInterface):
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
         async with aiosqlite.connect(self.db_path) as db:
+            # Сначала попробуем вставить, если пользователя нет
             await db.execute("""
-                INSERT OR REPLACE INTO users (telegram_id, username)
+                INSERT OR IGNORE INTO users (telegram_id, username)
                 VALUES (?, ?)
             """, (telegram_id, username))
+            
+            # Затем обновим username, если пользователь уже существует
+            if username:
+                await db.execute("""
+                    UPDATE users SET username = ? WHERE telegram_id = ?
+                """, (username, telegram_id))
+            
             await db.commit()
             
             cursor = await db.execute("""
-                SELECT id, telegram_id, username, created_at 
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at 
                 FROM users WHERE telegram_id = ?
             """, (telegram_id,))
             row = await cursor.fetchone()
@@ -129,7 +151,9 @@ class SQLiteDatabase(DatabaseInterface):
                 "id": row[0],
                 "telegram_id": row[1],
                 "username": row[2],
-                "created_at": row[3]
+                "is_allowed": bool(row[3]) if len(row) > 3 else False,
+                "is_admin": bool(row[4]) if len(row) > 4 else False,
+                "created_at": row[5] if len(row) > 5 else row[3]
             }
     
     async def create_session(
@@ -566,4 +590,78 @@ class SQLiteDatabase(DatabaseInterface):
                 "file_hash": row[6],
                 "created_at": row[7]
             }
+    
+    async def is_user_allowed(self, telegram_id: int) -> bool:
+        """Проверить, разрешен ли доступ пользователю"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT is_allowed FROM users WHERE telegram_id = ?
+            """, (telegram_id,))
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
+    
+    async def is_user_admin(self, telegram_id: int) -> bool:
+        """Проверить, является ли пользователь администратором"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT is_admin FROM users WHERE telegram_id = ?
+            """, (telegram_id,))
+            row = await cursor.fetchone()
+            return bool(row[0]) if row else False
+    
+    async def allow_user(self, telegram_id: int) -> None:
+        """Разрешить доступ пользователю"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Создать пользователя, если его нет
+            await db.execute("""
+                INSERT OR IGNORE INTO users (telegram_id, is_allowed)
+                VALUES (?, 1)
+            """, (telegram_id,))
+            await db.execute("""
+                UPDATE users SET is_allowed = 1 WHERE telegram_id = ?
+            """, (telegram_id,))
+            await db.commit()
+    
+    async def disallow_user(self, telegram_id: int) -> None:
+        """Запретить доступ пользователю"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE users SET is_allowed = 0 WHERE telegram_id = ?
+            """, (telegram_id,))
+            await db.commit()
+    
+    async def set_user_admin(self, telegram_id: int, is_admin: bool) -> None:
+        """Установить права администратора пользователю"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Создать пользователя, если его нет, и установить права
+            await db.execute("""
+                INSERT OR IGNORE INTO users (telegram_id, is_admin, is_allowed)
+                VALUES (?, ?, 1)
+            """, (telegram_id, 1 if is_admin else 0))
+            await db.execute("""
+                UPDATE users SET is_admin = ?, is_allowed = 1 WHERE telegram_id = ?
+            """, (1 if is_admin else 0, telegram_id))
+            await db.commit()
+    
+    async def get_allowed_users(self) -> List[Dict[str, Any]]:
+        """Получить список всех разрешенных пользователей"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at
+                FROM users
+                WHERE is_allowed = 1
+                ORDER BY created_at DESC
+            """)
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "telegram_id": row[1],
+                    "username": row[2],
+                    "is_allowed": bool(row[3]),
+                    "is_admin": bool(row[4]),
+                    "created_at": row[5]
+                }
+                for row in rows
+            ]
 

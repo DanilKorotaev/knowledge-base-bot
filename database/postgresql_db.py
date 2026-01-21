@@ -39,9 +39,30 @@ class PostgreSQLDatabase(DatabaseInterface):
                     id SERIAL PRIMARY KEY,
                     telegram_id BIGINT UNIQUE NOT NULL,
                     username VARCHAR(255),
+                    is_allowed BOOLEAN DEFAULT FALSE,
+                    is_admin BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            
+            # Миграция: добавить поля is_allowed и is_admin, если их нет
+            # Проверяем существование колонок
+            column_check = await conn.fetch("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='users' AND column_name IN ('is_allowed', 'is_admin')
+            """)
+            existing_columns = {row['column_name'] for row in column_check}
+            
+            if 'is_allowed' not in existing_columns:
+                await conn.execute("""
+                    ALTER TABLE users ADD COLUMN is_allowed BOOLEAN DEFAULT FALSE
+                """)
+            
+            if 'is_admin' not in existing_columns:
+                await conn.execute("""
+                    ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE
+                """)
             
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -126,7 +147,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 VALUES ($1, $2)
                 ON CONFLICT (telegram_id) 
                 DO UPDATE SET username = EXCLUDED.username
-                RETURNING id, telegram_id, username, created_at
+                RETURNING id, telegram_id, username, is_allowed, is_admin, created_at
             """, telegram_id, username)
             return dict(row)
     
@@ -379,4 +400,60 @@ class PostgreSQLDatabase(DatabaseInterface):
                 SELECT * FROM file_changes WHERE id = $1
             """, change_id)
             return dict(row) if row else None
+    
+    async def is_user_allowed(self, telegram_id: int) -> bool:
+        """Проверить, разрешен ли доступ пользователю"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT is_allowed FROM users WHERE telegram_id = $1
+            """, telegram_id)
+            return row['is_allowed'] if row else False
+    
+    async def is_user_admin(self, telegram_id: int) -> bool:
+        """Проверить, является ли пользователь администратором"""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT is_admin FROM users WHERE telegram_id = $1
+            """, telegram_id)
+            return row['is_admin'] if row else False
+    
+    async def allow_user(self, telegram_id: int) -> None:
+        """Разрешить доступ пользователю"""
+        async with self.pool.acquire() as conn:
+            # Создать пользователя, если его нет
+            await conn.execute("""
+                INSERT INTO users (telegram_id, is_allowed)
+                VALUES ($1, TRUE)
+                ON CONFLICT (telegram_id) 
+                DO UPDATE SET is_allowed = TRUE
+            """, telegram_id)
+    
+    async def disallow_user(self, telegram_id: int) -> None:
+        """Запретить доступ пользователю"""
+        async with self.pool.acquire() as conn:
+            await conn.execute("""
+                UPDATE users SET is_allowed = FALSE WHERE telegram_id = $1
+            """, telegram_id)
+    
+    async def set_user_admin(self, telegram_id: int, is_admin: bool) -> None:
+        """Установить права администратора пользователю"""
+        async with self.pool.acquire() as conn:
+            # Создать пользователя, если его нет, и установить права
+            await conn.execute("""
+                INSERT INTO users (telegram_id, is_admin, is_allowed)
+                VALUES ($1, $2, TRUE)
+                ON CONFLICT (telegram_id) 
+                DO UPDATE SET is_admin = $2, is_allowed = TRUE
+            """, telegram_id, is_admin)
+    
+    async def get_allowed_users(self) -> List[Dict[str, Any]]:
+        """Получить список всех разрешенных пользователей"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at
+                FROM users
+                WHERE is_allowed = TRUE
+                ORDER BY created_at DESC
+            """)
+            return [dict(row) for row in rows]
 

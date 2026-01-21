@@ -11,3 +11,9 @@ class QueryStates(StatesGroup):
     waiting_for_confirmation = State()
     collecting_messages = State()  # Режим сбора сообщений перед отправкой
 
+
+class AdminStates(StatesGroup):
+    """Состояния для административных команд"""
+    waiting_for_user_selection = State()  # Ожидание выбора пользователя из списка
+    waiting_for_user_contact = State()  # Ожидание контакта или ID пользователя
+

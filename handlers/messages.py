@@ -195,11 +195,15 @@ async def process_final_query(
 @router.message(lambda m: m.text == "🏠 Главное меню")
 async def main_menu_button_handler(message: Message):
     """Обработка кнопки 'Главное меню'"""
-    from handlers.keyboards import get_main_menu_inline_keyboard
+    from handlers.keyboards import get_main_menu_inline_keyboard_with_admin
+    
+    db = await get_db()
+    user_id = message.from_user.id
+    is_admin = await db.is_user_admin(user_id)
     
     await message.answer(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard(),
+        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
         parse_mode=ParseMode.HTML
     )
 
@@ -343,6 +347,16 @@ async def text_message_handler(message: Message, state: FSMContext):
     
     # Пропустить команды (они обрабатываются в commands.py)
     if message.text and message.text.startswith('/'):
+        return
+    
+    # Пропустить сообщения с выбранными пользователями (обрабатываются в commands.py)
+    # Проверяем различные возможные поля для users_requested
+    if (hasattr(message, 'users_requested') and message.users_requested) or \
+       (hasattr(message, 'users_shared') and message.users_shared):
+        return
+    
+    # Пропустить сообщения с контактами (обрабатываются в commands.py)
+    if message.contact:
         return
     
     # Пропустить кнопки (они обрабатываются выше или через inline-меню)

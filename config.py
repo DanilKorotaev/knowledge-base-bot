@@ -3,7 +3,7 @@
 """
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 
 # Загрузить переменные окружения
@@ -49,6 +49,13 @@ class Config:
     MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "5"))
     ENABLE_CHANGE_TRACKING: bool = os.getenv("ENABLE_CHANGE_TRACKING", "true").lower() == "true"
     
+    # Access control
+    ACCESS_MODE: str = os.getenv("ACCESS_MODE", "restricted")  # "open" or "restricted"
+    ADMIN_TELEGRAM_IDS: List[int] = [
+        int(id.strip()) for id in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
+        if id.strip()
+    ]
+    
     @classmethod
     def validate(cls) -> bool:
         """Проверка обязательных параметров"""
@@ -57,6 +64,10 @@ class Config:
         
         if not cls.CURSOR_API_KEY and not cls.OPENAI_API_KEY:
             raise ValueError("Необходимо установить CURSOR_API_KEY или OPENAI_API_KEY")
+        
+        # Валидация режима доступа
+        if cls.ACCESS_MODE not in ["open", "restricted"]:
+            raise ValueError(f"ACCESS_MODE должен быть 'open' или 'restricted', получено: {cls.ACCESS_MODE}")
         
         return True
     

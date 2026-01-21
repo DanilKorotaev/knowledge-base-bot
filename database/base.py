@@ -149,4 +149,34 @@ class DatabaseInterface(ABC):
     async def get_file_change(self, change_id: int) -> Optional[Dict[str, Any]]:
         """Получить конкретное изменение"""
         pass
+    
+    @abstractmethod
+    async def is_user_allowed(self, telegram_id: int) -> bool:
+        """Проверить, разрешен ли доступ пользователю"""
+        pass
+    
+    @abstractmethod
+    async def is_user_admin(self, telegram_id: int) -> bool:
+        """Проверить, является ли пользователь администратором"""
+        pass
+    
+    @abstractmethod
+    async def allow_user(self, telegram_id: int) -> None:
+        """Разрешить доступ пользователю"""
+        pass
+    
+    @abstractmethod
+    async def disallow_user(self, telegram_id: int) -> None:
+        """Запретить доступ пользователю"""
+        pass
+    
+    @abstractmethod
+    async def set_user_admin(self, telegram_id: int, is_admin: bool) -> None:
+        """Установить права администратора пользователю"""
+        pass
+    
+    @abstractmethod
+    async def get_allowed_users(self) -> List[Dict[str, Any]]:
+        """Получить список всех разрешенных пользователей"""
+        pass
 

@@ -7,17 +7,19 @@ import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from aiogram import Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, Contact
 from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
-from handlers.states import QueryStates
+from handlers.states import QueryStates, AdminStates
 from handlers.messages import process_final_query
 from utils.db_helpers import get_db
 from handlers.keyboards import (
     get_main_keyboard, get_sessions_keyboard, get_history_keyboard,
-    get_revert_session_keyboard, get_delete_session_keyboard, get_session_details_keyboard
+    get_revert_session_keyboard, get_delete_session_keyboard, get_session_details_keyboard,
+    get_admin_menu_keyboard, get_users_selection_keyboard, get_admin_contact_request_keyboard,
+    get_main_menu_inline_keyboard_with_admin, get_cancel_keyboard
 )
 from utils.file_helpers import write_file_content, read_file_content
 from config import config
@@ -777,12 +779,14 @@ async def confirm_revert_session_callback(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
     """Обработка возврата в главное меню"""
-    from handlers.keyboards import get_main_menu_inline_keyboard
+    db = await get_db()
+    user_id = callback.from_user.id
+    is_admin = await db.is_user_admin(user_id)
     
     await callback.answer()
     await callback.message.edit_text(
         "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard(),
+        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
         parse_mode=ParseMode.HTML
     )
 
@@ -1055,4 +1059,391 @@ async def transcribe_last_voice_callback(callback: CallbackQuery):
     fake_message = FakeMessage(callback)
     await transcribe_handler(fake_message)
     await callback.answer("🎤 Расшифровка начата")
+
+
+# ========== Административные обработчики ==========
+
+@router.callback_query(lambda c: c.data == "admin_menu")
+async def admin_menu_callback(callback: CallbackQuery):
+    """Обработка открытия меню администратора"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    # Проверка прав администратора
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.answer()
+    await callback.message.edit_text(
+        "⚙️ <b>Меню администратора</b>\n\n"
+        "Выберите действие:",
+        reply_markup=get_admin_menu_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.callback_query(lambda c: c.data == "admin_list_users")
+async def admin_list_users_callback(callback: CallbackQuery):
+    """Показать список разрешенных пользователей"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    # Проверка прав администратора
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    try:
+        allowed_users = await db.get_allowed_users()
+        
+        if not allowed_users:
+            await callback.answer("ℹ️ Нет разрешенных пользователей", show_alert=True)
+            return
+        
+        response = "👥 <b>Список разрешенных пользователей:</b>\n\n"
+        for user in allowed_users[:10]:  # Показать первые 10
+            admin_marker = "👑" if user.get("is_admin") else ""
+            username = user.get("username") or "без username"
+            response += f"{admin_marker} <b>{user['telegram_id']}</b> (@{username})\n"
+        
+        if len(allowed_users) > 10:
+            response += f"\n<i>Показано 10 из {len(allowed_users)} пользователей</i>"
+        
+        await callback.answer()
+        await callback.message.edit_text(
+            response,
+            reply_markup=get_admin_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при получении списка пользователей: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_allow_start"))
+async def admin_allow_start_callback(callback: CallbackQuery, state: FSMContext):
+    """Начать процесс разрешения доступа"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_user_contact)
+    await state.update_data(admin_action="allow")
+    
+    reply_kb, inline_kb = get_admin_contact_request_keyboard("allow")
+    
+    await callback.message.edit_text(
+        "✅ <b>Разрешить доступ пользователю</b>\n\n"
+        "Выберите способ:\n\n"
+        "• Нажмите кнопку '👤 Выбрать пользователя' для выбора через UI Telegram\n"
+        "• Или используйте кнопки ниже для других способов",
+        reply_markup=inline_kb,
+        parse_mode=ParseMode.HTML
+    )
+    # Отправить reply-клавиатуру отдельным сообщением
+    await callback.message.answer(
+        "👤 Нажмите кнопку ниже для выбора пользователя:",
+        reply_markup=reply_kb
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_disallow_start"))
+async def admin_disallow_start_callback(callback: CallbackQuery, state: FSMContext):
+    """Начать процесс запрета доступа"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Получить список разрешенных пользователей для выбора
+    allowed_users = await db.get_allowed_users()
+    
+    if not allowed_users:
+        await callback.message.edit_text(
+            "ℹ️ Нет разрешенных пользователей для запрета доступа.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        return
+    
+    await state.set_state(AdminStates.waiting_for_user_selection)
+    await state.update_data(admin_action="disallow")
+    
+    await callback.message.edit_text(
+        "❌ <b>Запретить доступ пользователю</b>\n\n"
+        "Выберите пользователя из списка:",
+        reply_markup=get_users_selection_keyboard(allowed_users, "disallow", page=0),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_set_admin_start"))
+async def admin_set_admin_start_callback(callback: CallbackQuery, state: FSMContext):
+    """Начать процесс назначения администратора"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_user_contact)
+    await state.update_data(admin_action="set_admin")
+    
+    reply_kb, inline_kb = get_admin_contact_request_keyboard("set_admin")
+    
+    await callback.message.edit_text(
+        "👑 <b>Назначить администратора</b>\n\n"
+        "Выберите способ:\n\n"
+        "• Нажмите кнопку '👤 Выбрать пользователя' для выбора через UI Telegram\n"
+        "• Или используйте кнопки ниже для других способов",
+        reply_markup=inline_kb,
+        parse_mode=ParseMode.HTML
+    )
+    # Отправить reply-клавиатуру отдельным сообщением
+    await callback.message.answer(
+        "👤 Нажмите кнопку ниже для выбора пользователя:",
+        reply_markup=reply_kb
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_remove_admin_start"))
+async def admin_remove_admin_start_callback(callback: CallbackQuery, state: FSMContext):
+    """Начать процесс удаления прав администратора"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Получить список администраторов
+    allowed_users = await db.get_allowed_users()
+    admin_users = [u for u in allowed_users if u.get("is_admin")]
+    
+    if not admin_users:
+        await callback.message.edit_text(
+            "ℹ️ Нет других администраторов.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        return
+    
+    await state.set_state(AdminStates.waiting_for_user_selection)
+    await state.update_data(admin_action="remove_admin")
+    
+    await callback.message.edit_text(
+        "🔻 <b>Убрать права администратора</b>\n\n"
+        "Выберите администратора из списка:",
+        reply_markup=get_users_selection_keyboard(admin_users, "remove_admin", page=0),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_select_user_"))
+async def admin_select_user_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора пользователя из списка"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    # Извлечь действие и telegram_id из callback_data
+    # Формат: admin_select_user_{action}_{telegram_id}
+    # Проблема: remove_admin содержит подчеркивание, поэтому нужно парсить по-другому
+    prefix = "admin_select_user_"
+    if not callback.data.startswith(prefix):
+        await callback.answer("❌ Ошибка формата", show_alert=True)
+        return
+    
+    # Убрать префикс и разбить оставшуюся часть
+    data_without_prefix = callback.data[len(prefix):]
+    # Разделить на действие и ID (ID всегда последний элемент после последнего подчеркивания)
+    parts = data_without_prefix.rsplit("_", 1)  # Разделить только по последнему подчеркиванию
+    
+    if len(parts) != 2:
+        await callback.answer("❌ Ошибка формата", show_alert=True)
+        return
+    
+    action = parts[0]  # allow, disallow, set_admin, remove_admin
+    try:
+        target_telegram_id = int(parts[1])
+    except ValueError:
+        await callback.answer("❌ Неверный ID пользователя", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    try:
+        if action == "allow":
+            await db.allow_user(target_telegram_id)
+            await db.ensure_user(target_telegram_id)  # Создать пользователя если его нет
+            result_text = f"✅ Пользователю {target_telegram_id} разрешен доступ."
+            logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+        elif action == "disallow":
+            await db.disallow_user(target_telegram_id)
+            result_text = f"❌ Пользователю {target_telegram_id} запрещен доступ."
+            logger.info(f"Администратор {user_id} запретил доступ пользователю {target_telegram_id}")
+        elif action == "set_admin":
+            await db.set_user_admin(target_telegram_id, is_admin=True)
+            result_text = f"👑 Пользователю {target_telegram_id} назначены права администратора."
+            logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
+        elif action == "remove_admin":
+            await db.set_user_admin(target_telegram_id, is_admin=False)
+            result_text = f"🔻 У пользователя {target_telegram_id} убраны права администратора."
+            logger.info(f"Администратор {user_id} убрал права администратора у пользователя {target_telegram_id}")
+        else:
+            await callback.message.edit_text("❌ Неизвестное действие.", reply_markup=get_admin_menu_keyboard())
+            return
+        
+        await state.clear()
+        await callback.message.edit_text(
+            result_text,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Ошибка: {str(e)}",
+            reply_markup=get_admin_menu_keyboard()
+        )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_users_page_"))
+async def admin_users_page_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка пагинации списка пользователей"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    # Формат: admin_users_page_{action}_{page}
+    parts = callback.data.split("_")
+    if len(parts) < 5:
+        await callback.answer("❌ Ошибка формата", show_alert=True)
+        return
+    
+    action = parts[3]
+    try:
+        page = int(parts[4])
+    except ValueError:
+        await callback.answer("❌ Неверный номер страницы", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Получить список пользователей в зависимости от действия
+    if action == "disallow":
+        users = await db.get_allowed_users()
+    elif action == "remove_admin":
+        all_users = await db.get_allowed_users()
+        users = [u for u in all_users if u.get("is_admin")]
+    else:
+        users = await db.get_allowed_users()
+    
+    if not users:
+        await callback.message.edit_text(
+            "ℹ️ Нет пользователей для выбора.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        return
+    
+    action_labels = {
+        "disallow": "❌ Запретить доступ пользователю",
+        "remove_admin": "🔻 Убрать права администратора"
+    }
+    
+    await callback.message.edit_text(
+        f"{action_labels.get(action, 'Выбор пользователя')}\n\n"
+        "Выберите пользователя из списка:",
+        reply_markup=get_users_selection_keyboard(users, action, page=page),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_manual_id_"))
+async def admin_manual_id_callback(callback: CallbackQuery, state: FSMContext):
+    """Переключиться на ручной ввод ID пользователя"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    # Формат: admin_manual_id_{action}
+    action = callback.data.split("_")[-1]
+    
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_user_contact)
+    await state.update_data(admin_action=action)
+    
+    action_labels = {
+        "allow": "✅ Разрешить доступ пользователю",
+        "set_admin": "👑 Назначить администратора"
+    }
+    
+    await callback.message.edit_text(
+        f"{action_labels.get(action, 'Выбор пользователя')}\n\n"
+        "Отправьте Telegram ID пользователя (число):",
+        reply_markup=get_cancel_keyboard(),
+        parse_mode=ParseMode.HTML
+    )
+
+
+@router.callback_query(lambda c: c.data.startswith("admin_list_for_"))
+async def admin_list_for_callback(callback: CallbackQuery, state: FSMContext):
+    """Показать список всех пользователей для выбора"""
+    db = await get_db()
+    user_id = callback.from_user.id
+    
+    if not await db.is_user_admin(user_id):
+        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
+        return
+    
+    # Формат: admin_list_for_{action}
+    action = callback.data.split("_")[-1]
+    
+    await callback.answer()
+    
+    # Получить всех пользователей (не только разрешенных)
+    # Для этого нужно получить всех пользователей из БД
+    # Пока используем get_allowed_users, но можно расширить для получения всех
+    users = await db.get_allowed_users()
+    
+    if not users:
+        await callback.message.edit_text(
+            "ℹ️ Нет пользователей в базе.",
+            reply_markup=get_admin_menu_keyboard()
+        )
+        return
+    
+    await state.set_state(AdminStates.waiting_for_user_selection)
+    await state.update_data(admin_action=action)
+    
+    action_labels = {
+        "allow": "✅ Разрешить доступ пользователю",
+        "set_admin": "👑 Назначить администратора"
+    }
+    
+    await callback.message.edit_text(
+        f"{action_labels.get(action, 'Выбор пользователя')}\n\n"
+        "Выберите пользователя из списка:",
+        reply_markup=get_users_selection_keyboard(users, action, page=0),
+        parse_mode=ParseMode.HTML
+    )
 

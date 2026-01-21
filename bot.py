@@ -44,6 +44,21 @@ async def main():
         db = await get_db()
         logger.info("База данных инициализирована")
         
+        # Инициализация администраторов из конфигурации
+        if config.ADMIN_TELEGRAM_IDS:
+            logger.info(f"Инициализация администраторов: {config.ADMIN_TELEGRAM_IDS}")
+            for admin_id in config.ADMIN_TELEGRAM_IDS:
+                try:
+                    await db.set_user_admin(admin_id, is_admin=True)
+                    logger.info(f"Администратор {admin_id} инициализирован")
+                except Exception as e:
+                    logger.error(f"Ошибка при инициализации администратора {admin_id}: {e}")
+        
+        # Регистрация middleware для проверки доступа
+        from middleware.access_control import AccessControlMiddleware
+        dp.update.middleware(AccessControlMiddleware())
+        logger.info("Middleware для проверки доступа зарегистрирован")
+        
         # Инициализация синхронизации с NextCloud
         from services.sync_service import SyncService
         sync_service = SyncService()
