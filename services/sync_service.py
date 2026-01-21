@@ -6,7 +6,7 @@ import logging
 import time
 import requests
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import List, Dict, Any, Optional, Callable, Awaitable, Set
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from requests.auth import HTTPBasicAuth
@@ -124,13 +124,15 @@ class SyncService:
             logger.info(f"Локальная папка уже содержит файлы: {self.local_kb_path}")
             return True
     
-    async def sync_to_nextcloud(self, file_paths: Optional[List[str]] = None) -> bool:
+    async def sync_to_nextcloud(self, file_paths: Optional[List[str]] = None, delete_missing: Optional[bool] = None) -> bool:
         """
         Синхронизировать изменения в NextCloud (загрузить измененные файлы)
         
         Args:
             file_paths: Список путей к файлам для синхронизации (относительно local_kb_path).
                        Если None, синхронизируются все измененные файлы.
+            delete_missing: Удалять ли файлы из NextCloud, которых нет локально.
+                          Если None, используется значение из конфигурации (SYNC_DELETE_MISSING)
         
         Returns:
             bool: True если синхронизация успешна
@@ -138,6 +140,10 @@ class SyncService:
         if not self.enabled:
             logger.debug("Синхронизация отключена")
             return False
+        
+        # Использовать значение из конфигурации, если не указано явно
+        if delete_missing is None:
+            delete_missing = config.SYNC_DELETE_MISSING
         
         try:
             if file_paths:
@@ -151,11 +157,20 @@ class SyncService:
                 for file_path in file_paths:
                     local_file = self.local_kb_path / file_path
                     if local_file.exists():
-                        await self.nextcloud_service.upload_file(
-                            local_file,
-                            file_path
-                        )
-                        uploaded += 1
+                        try:
+                            await self.nextcloud_service.upload_file(
+                                local_file,
+                                file_path
+                            )
+                            uploaded += 1
+                        except requests.exceptions.HTTPError as e:
+                            if e.response.status_code == 404:
+                                logger.warning(f"Файл не найден в NextCloud (возможно, был удален): {file_path}")
+                            else:
+                                logger.error(f"Ошибка при загрузке файла {file_path}: {e}")
+                        except Exception as e:
+                            logger.error(f"Ошибка при загрузке файла {file_path}: {e}")
+                        
                         if self.progress_callback:
                             await self.progress_callback("upload", uploaded, total)
             else:
@@ -172,6 +187,10 @@ class SyncService:
                     total_files=total_files,
                     uploaded_count=uploaded_count
                 )
+                
+                # Удалить файлы из NextCloud, которых нет локально
+                if delete_missing:
+                    await self._delete_missing_files_in_nextcloud()
             
             logger.info("Синхронизация в NextCloud завершена")
             return True
@@ -286,10 +305,20 @@ class SyncService:
             async def upload_with_semaphore(local_file: Path, remote_path: str):
                 async with semaphore_upload:
                     try:
+                        # Проверить, что файл все еще существует локально
+                        if not local_file.exists():
+                            logger.debug(f"Файл был удален локально, пропускаем: {remote_path}")
+                            return
+                        
                         await self.nextcloud_service.upload_file(local_file, remote_path)
                         uploaded_count[0] += 1
                         if self.progress_callback and total_files:
                             await self.progress_callback("upload", uploaded_count[0], total_files)
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 404:
+                            logger.warning(f"Файл не найден в NextCloud (возможно, был удален): {remote_path}")
+                        else:
+                            logger.error(f"Ошибка при загрузке файла {remote_path}: {e}")
                     except Exception as e:
                         logger.error(f"Ошибка при загрузке файла {remote_path}: {e}")
             
@@ -298,12 +327,14 @@ class SyncService:
                 tasks = [upload_with_semaphore(local_file, remote_path) for local_file, remote_path in files_to_sync]
                 await asyncio.gather(*tasks, return_exceptions=True)
     
-    async def sync_from_nextcloud(self, show_notification: bool = False) -> bool:
+    async def sync_from_nextcloud(self, show_notification: bool = False, delete_missing: Optional[bool] = None) -> bool:
         """
         Синхронизировать изменения из NextCloud (скачать файлы)
         
         Args:
             show_notification: Показывать ли уведомление (только если синхронизация долгая)
+            delete_missing: Удалять ли локальные файлы, которых нет в NextCloud.
+                          Если None, используется значение из конфигурации (SYNC_DELETE_MISSING)
         
         Returns:
             bool: True если синхронизация успешна
@@ -311,6 +342,10 @@ class SyncService:
         if not self.enabled:
             logger.debug("Синхронизация отключена")
             return False
+        
+        # Использовать значение из конфигурации, если не указано явно
+        if delete_missing is None:
+            delete_missing = config.SYNC_DELETE_MISSING
         
         start_time = time.time()
         notification_shown = False
@@ -340,6 +375,9 @@ class SyncService:
             
             if self.progress_callback:
                 await self.progress_callback("download", 0, total_files)
+            
+            # Получить множество путей файлов в NextCloud для быстрой проверки
+            remote_files_set = {file_info.get('path', '') for file_info in files if file_info.get('path')}
             
             # Фильтровать файлы, которые нужно скачать
             files_to_download = []
@@ -383,30 +421,215 @@ class SyncService:
             
             async def download_with_semaphore(remote_path: str, local_path: Path):
                 async with semaphore:
-                    success = await self.nextcloud_service.download_file(remote_path, local_path)
-                    nonlocal downloaded, processed
-                    if success:
-                        downloaded += 1
-                    processed += 1
-                    if self.progress_callback:
-                        await self.progress_callback("download", processed, total_files)
+                    try:
+                        success = await self.nextcloud_service.download_file(remote_path, local_path)
+                        nonlocal downloaded, processed
+                        if success:
+                            downloaded += 1
+                    except requests.exceptions.HTTPError as e:
+                        if e.response.status_code == 404:
+                            logger.warning(f"Файл не найден в NextCloud (возможно, был удален): {remote_path}")
+                        else:
+                            logger.error(f"Ошибка при скачивании файла {remote_path}: {e}")
+                    except Exception as e:
+                        logger.error(f"Ошибка при скачивании файла {remote_path}: {e}")
+                    finally:
+                        processed += 1
+                        if self.progress_callback:
+                            await self.progress_callback("download", processed, total_files)
             
             # Скачать все файлы параллельно
             tasks = [download_with_semaphore(remote_path, local_path) for remote_path, local_path in files_to_download]
             await asyncio.gather(*tasks, return_exceptions=True)
             
+            # Удалить локальные файлы, которых нет в NextCloud
+            deleted_count = 0
+            if delete_missing:
+                deleted_count = await self._delete_missing_files_locally(remote_files_set)
+            
             elapsed_time = time.time() - start_time
             
-            if notification_shown and downloaded > 0:
-                await self._notify(f"✅ Синхронизировано: {downloaded} новых файлов из NextCloud")
-            elif downloaded > 0:
-                logger.info(f"Синхронизация из NextCloud завершена. Скачано файлов: {downloaded}/{len(files)}")
+            if notification_shown and (downloaded > 0 or deleted_count > 0):
+                msg_parts = []
+                if downloaded > 0:
+                    msg_parts.append(f"{downloaded} новых")
+                if deleted_count > 0:
+                    msg_parts.append(f"{deleted_count} удалено")
+                await self._notify(f"✅ Синхронизировано из NextCloud: {', '.join(msg_parts)} файлов")
+            elif downloaded > 0 or deleted_count > 0:
+                logger.info(f"Синхронизация из NextCloud завершена. Скачано: {downloaded}, удалено: {deleted_count}, актуально: {updated}")
             
-            logger.info(f"Синхронизация из NextCloud завершена за {elapsed_time:.2f}с. Скачано: {downloaded}, актуально: {updated}")
-            return downloaded > 0 or updated > 0
+            logger.info(f"Синхронизация из NextCloud завершена за {elapsed_time:.2f}с. Скачано: {downloaded}, удалено: {deleted_count}, актуально: {updated}")
+            return downloaded > 0 or deleted_count > 0 or updated > 0
         except Exception as e:
             logger.error(f"Ошибка при синхронизации из NextCloud: {e}", exc_info=True)
             return False
+    
+    async def _delete_missing_files_in_nextcloud(self) -> int:
+        """
+        Удалить файлы из NextCloud, которых нет локально
+        
+        Returns:
+            int: Количество удаленных файлов
+        """
+        if not self.enabled:
+            return 0
+        
+        deleted_count = 0
+        
+        try:
+            # Получить список всех файлов в NextCloud
+            remote_files = await self.nextcloud_service.list_files(recursive=True)
+            remote_files_set = {file_info.get('path', '') for file_info in remote_files if file_info.get('path')}
+            
+            # Получить список всех локальных файлов
+            local_files_set = await self._get_local_files_set()
+            
+            # Найти файлы, которые есть в NextCloud, но нет локально
+            files_to_delete = remote_files_set - local_files_set
+            
+            logger.info(f"Найдено файлов для удаления из NextCloud: {len(files_to_delete)}")
+            
+            # Удалить файлы из NextCloud
+            for remote_path in files_to_delete:
+                try:
+                    # Пропустить служебные файлы
+                    if self._is_system_file(remote_path):
+                        continue
+                    
+                    success = await self.nextcloud_service.delete_file(remote_path)
+                    if success:
+                        deleted_count += 1
+                        logger.debug(f"Удален файл из NextCloud: {remote_path}")
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 404:
+                        # Файл уже удален, это нормально
+                        logger.debug(f"Файл уже удален в NextCloud: {remote_path}")
+                    else:
+                        logger.error(f"Ошибка при удалении файла из NextCloud {remote_path}: {e}")
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении файла из NextCloud {remote_path}: {e}")
+            
+            if deleted_count > 0:
+                logger.info(f"Удалено файлов из NextCloud: {deleted_count}")
+            
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Ошибка при удалении отсутствующих файлов из NextCloud: {e}", exc_info=True)
+            return deleted_count
+    
+    async def _delete_missing_files_locally(self, remote_files_set: Set[str]) -> int:
+        """
+        Удалить локальные файлы, которых нет в NextCloud
+        
+        Args:
+            remote_files_set: Множество путей файлов в NextCloud
+        
+        Returns:
+            int: Количество удаленных файлов
+        """
+        if not self.enabled:
+            return 0
+        
+        deleted_count = 0
+        
+        try:
+            # Получить список всех локальных файлов
+            local_files_set = await self._get_local_files_set()
+            
+            # Найти файлы, которые есть локально, но нет в NextCloud
+            files_to_delete = local_files_set - remote_files_set
+            
+            logger.info(f"Найдено локальных файлов для удаления: {len(files_to_delete)}")
+            
+            # Удалить локальные файлы
+            for local_path_str in files_to_delete:
+                try:
+                    local_path = self.local_kb_path / local_path_str
+                    
+                    # Пропустить служебные файлы
+                    if self._is_system_file(local_path_str):
+                        continue
+                    
+                    if local_path.exists() and local_path.is_file():
+                        local_path.unlink()
+                        deleted_count += 1
+                        logger.debug(f"Удален локальный файл: {local_path_str}")
+                        
+                        # Удалить пустые директории
+                        parent = local_path.parent
+                        while parent != self.local_kb_path and parent.exists():
+                            try:
+                                if not any(parent.iterdir()):
+                                    parent.rmdir()
+                                    logger.debug(f"Удалена пустая директория: {parent.relative_to(self.local_kb_path)}")
+                                    parent = parent.parent
+                                else:
+                                    break
+                            except OSError:
+                                break
+                except Exception as e:
+                    logger.error(f"Ошибка при удалении локального файла {local_path_str}: {e}")
+            
+            if deleted_count > 0:
+                logger.info(f"Удалено локальных файлов: {deleted_count}")
+            
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Ошибка при удалении отсутствующих локальных файлов: {e}", exc_info=True)
+            return deleted_count
+    
+    async def _get_local_files_set(self) -> Set[str]:
+        """
+        Получить множество путей всех локальных файлов (относительно local_kb_path)
+        
+        Returns:
+            Set[str]: Множество относительных путей файлов
+        """
+        files_set = set()
+        
+        if not self.local_kb_path.exists():
+            return files_set
+        
+        for item in self.local_kb_path.rglob('*'):
+            if item.is_file():
+                # Пропустить служебные файлы
+                if self._is_system_file(item.name):
+                    continue
+                
+                # Получить относительный путь
+                try:
+                    relative_path = item.relative_to(self.local_kb_path)
+                    files_set.add(str(relative_path).replace('\\', '/'))  # Нормализовать путь
+                except ValueError:
+                    # Файл не находится внутри local_kb_path
+                    continue
+        
+        return files_set
+    
+    def _is_system_file(self, path: str) -> bool:
+        """
+        Проверить, является ли файл служебным (нужно ли его пропускать)
+        
+        Args:
+            path: Путь к файлу
+        
+        Returns:
+            bool: True если файл служебный
+        """
+        # Проверить имя файла
+        name = Path(path).name
+        
+        # Служебные файлы и директории
+        if name.startswith('.') or name in ['.git', '.cursor', '__pycache__', '.DS_Store']:
+            return True
+        
+        # Проверить путь
+        path_parts = Path(path).parts
+        if any(part.startswith('.') for part in path_parts):
+            return True
+        
+        return False
     
     async def sync_file(self, file_path: str, direction: str = "both") -> bool:
         """

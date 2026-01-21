@@ -32,6 +32,7 @@ class Config:
     SYNC_INTERVAL: int = int(os.getenv("SYNC_INTERVAL", "300"))
     AUTO_SYNC: bool = os.getenv("AUTO_SYNC", "true").lower() == "true"
     ENABLE_SYNC: bool = os.getenv("ENABLE_SYNC", "false").lower() == "true"
+    SYNC_DELETE_MISSING: bool = os.getenv("SYNC_DELETE_MISSING", "true").lower() == "true"  # Удалять файлы при синхронизации
     
     # Database
     DB_TYPE: str = os.getenv("DB_TYPE", "postgresql")  # postgresql или sqlite
