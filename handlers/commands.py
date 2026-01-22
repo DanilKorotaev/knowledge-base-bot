@@ -11,6 +11,12 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 
 from utils.db_helpers import get_db
+from services.session_service import SessionService
+from services.sync_service import SyncService
+from utils.constants import SessionType, SessionStatus
+from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
+from utils.telegram_helpers import FakeMessage
+from middleware.admin_middleware import require_admin
 from handlers.states import QueryStates, AdminStates
 from handlers.keyboards import (
     get_confirm_query_keyboard, get_main_keyboard, get_new_query_keyboard,
@@ -117,19 +123,12 @@ async def new_query_handler(message: Message, state: FSMContext):
     db = await get_db()
     user_id = message.from_user.id
     
-    # Создать или обновить пользователя
-    user = await db.ensure_user(user_id, message.from_user.username)
-    
-    # Деактивировать предыдущую активную сессию
-    active_session = await db.get_active_session(user["id"])
-    if active_session:
-        await db.update_session(active_session["id"], status="completed")
-    
-    # Создать новую сессию с контекстом базы знаний
-    session = await db.create_session(
-        user_id=user["id"],
-        session_type="query_with_kb",
-        status="active"
+    # Создать новую сессию с контекстом базы знаний (деактивирует предыдущую)
+    session_service = SessionService()
+    session = await session_service.create_new_session(
+        user_id=user_id,
+        username=message.from_user.username,
+        session_type=SessionType.QUERY_WITH_KB
     )
     
     # Сохранить ID сессии в состоянии
@@ -159,17 +158,13 @@ async def new_query_handler(message: Message, state: FSMContext):
 async def collect_mode_handler(message: Message, state: FSMContext):
     """Включить режим сбора сообщений"""
     # Получить или создать сессию
-    db = await get_db()
     user_id = message.from_user.id
-    user = await db.ensure_user(user_id, message.from_user.username)
-    active_session = await db.get_active_session(user["id"])
-    
-    if not active_session:
-        active_session = await db.create_session(
-            user_id=user["id"],
-            session_type="query_with_kb",
-            status="active"
-        )
+    session_service = SessionService()
+    active_session = await session_service.get_or_create_active_session(
+        user_id=user_id,
+        username=message.from_user.username,
+        session_type=SessionType.QUERY_WITH_KB
+    )
     
     # Включить режим сбора сообщений
     await state.set_state(QueryStates.collecting_messages)
@@ -244,16 +239,12 @@ async def new_chat_handler(message: Message, state: FSMContext):
     # Создать или обновить пользователя
     user = await db.ensure_user(user_id, message.from_user.username)
     
-    # Деактивировать предыдущую активную сессию
-    active_session = await db.get_active_session(user["id"])
-    if active_session:
-        await db.update_session(active_session["id"], status="completed")
-    
-    # Создать новую сессию без контекста базы знаний
-    session = await db.create_session(
-        user_id=user["id"],
-        session_type="empty_chat",
-        status="active"
+    # Создать новую сессию без контекста базы знаний (деактивирует предыдущую)
+    session_service = SessionService()
+    session = await session_service.create_new_session(
+        user_id=user_id,
+        username=message.from_user.username,
+        session_type=SessionType.EMPTY_CHAT
     )
     
     # Сохранить ID сессии в состоянии
@@ -279,13 +270,15 @@ async def end_query_handler(message: Message, state: FSMContext):
     db = await get_db()
     user_id = message.from_user.id
     
-    # Получить пользователя
-    user = await db.ensure_user(user_id, message.from_user.username)
+    # Деактивировать текущую активную сессию
+    session_service = SessionService()
+    active_session = await session_service.get_or_create_active_session(
+        user_id=user_id,
+        username=message.from_user.username
+    )
     
-    # Получить активную сессию
-    active_session = await db.get_active_session(user["id"])
     if active_session:
-        await db.update_session(active_session["id"], status="completed")
+        await session_service.deactivate_current_session(user_id)
         await state.update_data(session_id=None)
         await message.answer(
             f"✅ Сессия #{active_session['id']} завершена.",
@@ -406,15 +399,18 @@ async def sessions_handler(message: Message):
     user_id = message.from_user.id
     
     # Получить пользователя
+    db = await get_db()
     user = await db.ensure_user(user_id, message.from_user.username)
     
-    # Получить все сессии пользователя (последние 20 для пагинации)
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    # Получить сессии для отображения с пагинацией
+    page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
+        user_id=user["id"],
+        page=0,
+        per_page=5,
+        limit=20
+    )
     
-    # Исключить удаленные сессии
-    sessions = [s for s in all_sessions if s.get("status") != "deleted"]
-    
-    if not sessions:
+    if not page_sessions:
         response = "ℹ️ У вас нет сессий.\n\n"
         response += "Используйте кнопку '📚 Новый запрос' для создания новой сессии."
         await message.answer(
@@ -424,26 +420,18 @@ async def sessions_handler(message: Message):
         )
         return
     
-    # Найти активную сессию
-    active_session = await db.get_active_session(user["id"])
-    active_session_id = active_session["id"] if active_session else None
+    # Форматировать список сессий
+    response = format_sessions_list(
+        sessions=page_sessions,
+        active_session_id=active_session_id,
+        page=0,
+        per_page=5,
+        total_count=total_count
+    )
     
-    # Форматировать список сессий для первой страницы
-    response = "📋 <b>Ваши сессии:</b>\n\n"
-    response += "Нажмите на сессию, чтобы увидеть детали и действия.\n\n"
-    
-    for session in sessions[:5]:  # Показать первые 5
-        session_type_emoji = "📚" if session["session_type"] == "query_with_kb" else "💬"
-        status_emoji = "🟢" if session["id"] == active_session_id else "⚪"
-        session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
-        
-        messages_count = len(await db.get_session_messages(session["id"]))
-        
-        response += f"{session_type_emoji} <b>#{session['id']}</b> {status_emoji}\n"
-        response += f"  {session_type_label} • {messages_count} сообщений\n\n"
-    
-    if len(sessions) > 5:
-        response += f"\n<i>Показано 5 из {len(sessions)} сессий. Используйте кнопки для навигации.</i>"
+    # Получить все сессии для клавиатуры (нужны для навигации)
+    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
     
     keyboard = get_sessions_keyboard(sessions, page=0)
     await message.answer(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -578,15 +566,11 @@ async def revert_session_handler(message: Message):
 
 
 @router.message(AdminStates.waiting_for_user_contact)
+@require_admin
 async def admin_users_requested_handler(message: Message, state: FSMContext):
     """Обработка выбора пользователя через UI Telegram (кнопка 'Выбрать пользователя')"""
     db = await get_db()
     user_id = message.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await message.answer("❌ У вас нет прав администратора.")
-        await state.clear()
-        return
     
     # Логирование для отладки - проверим все возможные поля
     logger.debug(f"Получено сообщение в состоянии waiting_for_user_contact:")
@@ -847,8 +831,6 @@ async def admin_cancel_handler(message: Message, state: FSMContext):
 @router.message(Command("sync"))
 async def sync_handler(message: Message):
     """Принудительная синхронизация с NextCloud"""
-    from services.sync_service import SyncService
-    
     sync_message = await message.answer("🔄 Синхронизация с NextCloud...")
     
     try:
@@ -858,76 +840,12 @@ async def sync_handler(message: Message):
             await sync_message.edit_text("❌ Синхронизация отключена. Проверьте настройки в .env")
             return
         
-        # Callback для обновления прогресса с защитой от флуда
-        from datetime import datetime, timedelta
-        
-        last_update_time = {}
-        
-        async def update_progress(stage: str, current: int, total: int):
-            """Обновить сообщение с прогрессом синхронизации"""
-            stage_names = {
-                "upload": "📤 Загрузка в NextCloud",
-                "download": "📥 Загрузка из NextCloud"
-            }
-            stage_name = stage_names.get(stage, "🔄 Синхронизация")
-            
-            if total > 0:
-                percentage = int((current / total) * 100)
-            else:
-                percentage = 0
-            
-            # Проверка: обновлять только если прошло минимум 1 секунда с последнего обновления
-            now = datetime.now()
-            last_time = last_update_time.get(stage)
-            
-            should_update = False
-            if last_time is None:
-                should_update = True  # Первое обновление
-            elif (now - last_time) >= timedelta(seconds=1):
-                should_update = True  # Прошла минимум 1 секунда
-            elif current == total:
-                should_update = True  # Завершение этапа (всегда обновляем)
-            
-            if not should_update:
-                return
-            
-            progress_text = f"{stage_name}\n\n"
-            progress_text += f"Обработано файлов: {current} из {total}"
-            
-            if total > 0:
-                progress_text += f" ({percentage}%)"
-            
-            try:
-                await sync_message.edit_text(progress_text)
-                last_update_time[stage] = now
-            except Exception as e:
-                error_str = str(e)
-                # Обработка Flood control
-                if "Flood control" in error_str or "retry after" in error_str.lower():
-                    # Извлечь время ожидания из ошибки
-                    retry_match = re.search(r'retry after (\d+)', error_str.lower())
-                    if retry_match:
-                        retry_after = int(retry_match.group(1))
-                        logger.warning(f"Flood control: ждем {retry_after} секунд перед следующим обновлением")
-                        # Увеличить время последнего обновления, чтобы не обновлять сразу после ожидания
-                        last_update_time[stage] = datetime.now() + timedelta(seconds=retry_after)
-                        await asyncio.sleep(retry_after)
-                    else:
-                        # Если не удалось извлечь время, ждем 5 секунд
-                        last_update_time[stage] = datetime.now() + timedelta(seconds=5)
-                        await asyncio.sleep(5)
-                    # Не пытаемся обновить сразу после ожидания - подождем следующего вызова
-                else:
-                    logger.debug(f"Не удалось обновить сообщение прогресса: {e}")
-        
-        sync_service.set_progress_callback(update_progress)
-        
-        # Синхронизировать в обе стороны (сначала из NextCloud, потом в NextCloud)
-        await sync_message.edit_text("📥 Загрузка из NextCloud...\n\nПолучение списка файлов...")
-        sync_from = await sync_service.sync_from_nextcloud(show_notification=False)
-        
-        await sync_message.edit_text("📤 Загрузка в NextCloud...\n\nПодготовка...")
-        sync_to = await sync_service.sync_to_nextcloud()
+        # Синхронизировать в обе стороны с отображением прогресса
+        sync_from, sync_to = await sync_service.sync_with_progress(
+            message=sync_message,
+            show_notification=False,
+            sync_direction="both"
+        )
         
         # Финальное сообщение
         if sync_to and sync_from:

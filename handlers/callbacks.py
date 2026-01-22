@@ -13,8 +13,13 @@ from aiogram.enums import ParseMode
 
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
 from handlers.states import QueryStates, AdminStates
-from handlers.messages import process_final_query
+from services.query_processing_service import QueryProcessingService
+from services.session_service import SessionService
+from utils.constants import SessionType, SessionStatus, MessageRole
 from utils.db_helpers import get_db
+from utils.telegram_helpers import FakeMessage
+from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
+from middleware.admin_middleware import require_admin
 from handlers.keyboards import (
     get_main_keyboard, get_sessions_keyboard, get_history_keyboard,
     get_revert_session_keyboard, get_delete_session_keyboard, get_session_details_keyboard,
@@ -55,18 +60,12 @@ async def confirm_query_handler(callback: CallbackQuery, state: FSMContext):
         return
     
     # Получить или создать сессию
-    db = await get_db()
-    user = await db.ensure_user(user_id, callback.from_user.username)
-    active_session = await db.get_active_session(user["id"])
-    
-    if not active_session:
-        active_session = await db.create_session(
-            user_id=user["id"],
-            session_type="query_with_kb",
-            status="active"
-        )
-        logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
-    
+    session_service = SessionService()
+    active_session = await session_service.get_or_create_active_session(
+        user_id=user_id,
+        username=callback.from_user.username,
+        session_type=SessionType.QUERY_WITH_KB
+    )
     session_id = active_session["id"]
     
     # Извлечь пути к прикрепленным файлам для передачи в Cursor CLI
@@ -87,14 +86,21 @@ async def confirm_query_handler(callback: CallbackQuery, state: FSMContext):
         pass
     
     # Обработать финальный запрос с прикрепленными файлами
-    await process_final_query(final_query, callback.message, state, session_id, attached_files=attached_files)
+    query_service = QueryProcessingService()
+    await query_service.process_query(
+        query=final_query,
+        session_id=session_id,
+        message=callback.message,
+        attached_files=attached_files
+    )
     
     # Сохранить вложения в БД ПОСЛЕ обработки (чтобы они были связаны с правильным сообщением)
-    # Получить последнее сообщение пользователя (которое было сохранено в process_final_query)
+    # Получить последнее сообщение пользователя (которое было сохранено в QueryProcessingService)
+    db = await get_db()
     user_messages = await db.get_session_messages(session_id)
     last_user_message = None
     for msg in reversed(user_messages):
-        if msg.get("role") == "user":
+        if msg.get("role") == str(MessageRole.USER):
             last_user_message = msg
             break
     
@@ -363,12 +369,6 @@ async def confirm_delete_session_callback(callback: CallbackQuery):
     
     # Вернуться к списку сессий
     from handlers.commands import sessions_handler
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await sessions_handler(fake_message)
     
@@ -410,12 +410,6 @@ async def end_session_callback(callback: CallbackQuery, state: FSMContext):
     
     # Вернуться к списку сессий
     from handlers.commands import sessions_handler
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await sessions_handler(fake_message)
     
@@ -441,44 +435,33 @@ async def sessions_page_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     user = await db.ensure_user(user_id, callback.from_user.username)
     
-    # Получить все сессии пользователя
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    # Получить сессии для отображения с пагинацией
+    page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
+        user_id=user["id"],
+        page=page,
+        per_page=5,
+        limit=20
+    )
     
-    # Исключить удаленные сессии
-    sessions = [s for s in all_sessions if s.get("status") != "deleted"]
-    
-    if not sessions:
+    if not page_sessions:
         await callback.message.edit_text(
             "ℹ️ У вас нет сессий.",
             reply_markup=None
         )
         return
     
-    # Найти активную сессию
-    active_session = await db.get_active_session(user["id"])
-    active_session_id = active_session["id"] if active_session else None
+    # Форматировать список сессий
+    response = format_sessions_list(
+        sessions=page_sessions,
+        active_session_id=active_session_id,
+        page=page,
+        per_page=5,
+        total_count=total_count
+    )
     
-    # Форматировать список сессий для текущей страницы
-    per_page = 5
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_sessions = sessions[start_idx:end_idx]
-    
-    response = "📋 <b>Ваши сессии:</b>\n\n"
-    response += "Нажмите на сессию, чтобы увидеть детали и действия.\n\n"
-    
-    for session in page_sessions:
-        session_type_emoji = "📚" if session["session_type"] == "query_with_kb" else "💬"
-        status_emoji = "🟢" if session["id"] == active_session_id else "⚪"
-        session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
-        
-        messages_count = len(await db.get_session_messages(session["id"]))
-        
-        response += f"{session_type_emoji} <b>#{session['id']}</b> {status_emoji}\n"
-        response += f"  {session_type_label} • {messages_count} сообщений\n\n"
-    
-    if len(sessions) > per_page:
-        response += f"\n<i>Страница {page + 1}. Показано {len(page_sessions)} из {len(sessions)} сессий.</i>"
+    # Получить все сессии для клавиатуры (нужны для навигации)
+    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
     
     keyboard = get_sessions_keyboard(sessions, page=page)
     await callback.message.edit_text(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -798,12 +781,6 @@ async def main_new_query_callback(callback: CallbackQuery, state: FSMContext):
     
     await callback.answer()
     # Создать временное сообщение для обработчика
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await new_query_handler(fake_message, state)
 
@@ -814,12 +791,6 @@ async def main_new_chat_callback(callback: CallbackQuery, state: FSMContext):
     from handlers.commands import new_chat_handler
     
     await callback.answer()
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await new_chat_handler(fake_message, state)
 
@@ -833,13 +804,15 @@ async def main_sessions_callback(callback: CallbackQuery):
     user_id = callback.from_user.id
     user = await db.ensure_user(user_id, callback.from_user.username)
     
-    # Получить все сессии пользователя
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    # Получить сессии для отображения с пагинацией
+    page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
+        user_id=user["id"],
+        page=0,
+        per_page=5,
+        limit=20
+    )
     
-    # Исключить удаленные сессии
-    sessions = [s for s in all_sessions if s.get("status") != "deleted"]
-    
-    if not sessions:
+    if not page_sessions:
         await callback.message.edit_text(
             "ℹ️ У вас нет сессий.\n\n"
             "Используйте кнопку '📚 Новый запрос' для создания новой сессии.",
@@ -847,26 +820,18 @@ async def main_sessions_callback(callback: CallbackQuery):
         )
         return
     
-    # Найти активную сессию
-    active_session = await db.get_active_session(user["id"])
-    active_session_id = active_session["id"] if active_session else None
+    # Форматировать список сессий
+    response = format_sessions_list(
+        sessions=page_sessions,
+        active_session_id=active_session_id,
+        page=0,
+        per_page=5,
+        total_count=total_count
+    )
     
-    # Форматировать список сессий для первой страницы
-    response = "📋 <b>Ваши сессии:</b>\n\n"
-    response += "Нажмите на сессию, чтобы увидеть детали и действия.\n\n"
-    
-    for session in sessions[:5]:  # Показать первые 5
-        session_type_emoji = "📚" if session["session_type"] == "query_with_kb" else "💬"
-        status_emoji = "🟢" if session["id"] == active_session_id else "⚪"
-        session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
-        
-        messages_count = len(await db.get_session_messages(session["id"]))
-        
-        response += f"{session_type_emoji} <b>#{session['id']}</b> {status_emoji}\n"
-        response += f"  {session_type_label} • {messages_count} сообщений\n\n"
-    
-    if len(sessions) > 5:
-        response += f"\n<i>Показано 5 из {len(sessions)} сессий. Используйте кнопки для навигации.</i>"
+    # Получить все сессии для клавиатуры (нужны для навигации)
+    all_sessions = await db.get_user_sessions(user["id"], limit=20)
+    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
     
     keyboard = get_sessions_keyboard(sessions, page=0)
     await callback.message.edit_text(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -878,12 +843,6 @@ async def main_history_callback(callback: CallbackQuery):
     from handlers.commands import history_handler
     
     await callback.answer()
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await history_handler(fake_message)
 
@@ -1009,12 +968,6 @@ async def main_help_callback(callback: CallbackQuery):
     from handlers.commands import help_handler
     
     await callback.answer()
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await help_handler(fake_message)
 
@@ -1032,12 +985,6 @@ async def start_collect_mode_callback(callback: CallbackQuery, state: FSMContext
     from handlers.commands import collect_mode_handler
     
     # Создать сообщение для обработчика
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = None
-    
     fake_message = FakeMessage(callback)
     await collect_mode_handler(fake_message, state)
     await callback.answer("✅ Режим сбора сообщений включен")
@@ -1049,14 +996,9 @@ async def transcribe_last_voice_callback(callback: CallbackQuery):
     from handlers.commands import transcribe_handler
     
     # Создать сообщение для обработчика
-    class FakeMessage:
-        def __init__(self, callback_msg):
-            self.from_user = callback_msg.from_user
-            self.answer = callback_msg.message.answer
-            self.text = "/transcribe"
-            self.bot = callback_msg.bot
-    
     fake_message = FakeMessage(callback)
+    fake_message.text = "/transcribe"
+    fake_message.bot = callback.bot
     await transcribe_handler(fake_message)
     await callback.answer("🎤 Расшифровка начата")
 
@@ -1064,16 +1006,9 @@ async def transcribe_last_voice_callback(callback: CallbackQuery):
 # ========== Административные обработчики ==========
 
 @router.callback_query(lambda c: c.data == "admin_menu")
+@require_admin
 async def admin_menu_callback(callback: CallbackQuery):
     """Обработка открытия меню администратора"""
-    db = await get_db()
-    user_id = callback.from_user.id
-    
-    # Проверка прав администратора
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
-    
     await callback.answer()
     await callback.message.edit_text(
         "⚙️ <b>Меню администратора</b>\n\n"
@@ -1084,15 +1019,10 @@ async def admin_menu_callback(callback: CallbackQuery):
 
 
 @router.callback_query(lambda c: c.data == "admin_list_users")
+@require_admin
 async def admin_list_users_callback(callback: CallbackQuery):
     """Показать список разрешенных пользователей"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    # Проверка прав администратора
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
     
     try:
         allowed_users = await db.get_allowed_users()
@@ -1122,15 +1052,9 @@ async def admin_list_users_callback(callback: CallbackQuery):
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_allow_start"))
+@require_admin
 async def admin_allow_start_callback(callback: CallbackQuery, state: FSMContext):
     """Начать процесс разрешения доступа"""
-    db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
-    
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_user_contact)
     await state.update_data(admin_action="allow")
@@ -1153,15 +1077,10 @@ async def admin_allow_start_callback(callback: CallbackQuery, state: FSMContext)
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_disallow_start"))
+@require_admin
 async def admin_disallow_start_callback(callback: CallbackQuery, state: FSMContext):
     """Начать процесс запрета доступа"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
-    
     await callback.answer()
     
     # Получить список разрешенных пользователей для выбора
@@ -1186,15 +1105,9 @@ async def admin_disallow_start_callback(callback: CallbackQuery, state: FSMConte
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_set_admin_start"))
+@require_admin
 async def admin_set_admin_start_callback(callback: CallbackQuery, state: FSMContext):
     """Начать процесс назначения администратора"""
-    db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
-    
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_user_contact)
     await state.update_data(admin_action="set_admin")
@@ -1217,15 +1130,10 @@ async def admin_set_admin_start_callback(callback: CallbackQuery, state: FSMCont
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_remove_admin_start"))
+@require_admin
 async def admin_remove_admin_start_callback(callback: CallbackQuery, state: FSMContext):
     """Начать процесс удаления прав администратора"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
-    
     await callback.answer()
     
     # Получить список администраторов
@@ -1251,14 +1159,11 @@ async def admin_remove_admin_start_callback(callback: CallbackQuery, state: FSMC
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_select_user_"))
+@require_admin
 async def admin_select_user_callback(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора пользователя из списка"""
     db = await get_db()
     user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
     
     # Извлечь действие и telegram_id из callback_data
     # Формат: admin_select_user_{action}_{telegram_id}
@@ -1315,21 +1220,20 @@ async def admin_select_user_callback(callback: CallbackQuery, state: FSMContext)
         )
     except Exception as e:
         logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
+        # Экранировать HTML-специальные символы в сообщении об ошибке
+        error_msg = str(e).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         await callback.message.edit_text(
-            f"❌ Ошибка: {str(e)}",
-            reply_markup=get_admin_menu_keyboard()
+            f"❌ Ошибка: {error_msg}",
+            reply_markup=get_admin_menu_keyboard(),
+            parse_mode=ParseMode.HTML
         )
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_users_page_"))
+@require_admin
 async def admin_users_page_callback(callback: CallbackQuery, state: FSMContext):
     """Обработка пагинации списка пользователей"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
     
     # Формат: admin_users_page_{action}_{page}
     parts = callback.data.split("_")
@@ -1376,14 +1280,10 @@ async def admin_users_page_callback(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_manual_id_"))
+@require_admin
 async def admin_manual_id_callback(callback: CallbackQuery, state: FSMContext):
     """Переключиться на ручной ввод ID пользователя"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
     
     # Формат: admin_manual_id_{action}
     action = callback.data.split("_")[-1]
@@ -1406,14 +1306,10 @@ async def admin_manual_id_callback(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(lambda c: c.data.startswith("admin_list_for_"))
+@require_admin
 async def admin_list_for_callback(callback: CallbackQuery, state: FSMContext):
     """Показать список всех пользователей для выбора"""
     db = await get_db()
-    user_id = callback.from_user.id
-    
-    if not await db.is_user_admin(user_id):
-        await callback.answer("❌ У вас нет прав администратора.", show_alert=True)
-        return
     
     # Формат: admin_list_for_{action}
     action = callback.data.split("_")[-1]
