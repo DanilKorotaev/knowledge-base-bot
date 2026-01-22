@@ -4,19 +4,20 @@
 import logging
 from pathlib import Path
 from typing import Optional, List
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
 
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
+
+from handlers.keyboards import (
+    get_confirm_query_keyboard, get_main_keyboard, get_collecting_messages_keyboard
+)
+from handlers.states import QueryStates
 from services.query_processing_service import QueryProcessingService
 from services.session_service import SessionService
 from utils.constants import SessionType
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
-from handlers.states import QueryStates
-from handlers.keyboards import (
-    get_confirm_query_keyboard, get_main_keyboard, get_collecting_messages_keyboard
-)
 
 router = Router()
 logger = logging.getLogger(__name__)

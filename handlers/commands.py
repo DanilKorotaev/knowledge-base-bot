@@ -3,27 +3,29 @@
 """
 import asyncio
 import logging
+
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, Contact
-from aiogram.fsm.context import FSMContext
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, Contact
 
-from utils.db_helpers import get_db
-from services.session_service import SessionService
-from services.sync_service import SyncService
-from utils.constants import SessionType, SessionStatus
-from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
-from utils.telegram_helpers import FakeMessage
-from middleware.admin_middleware import require_admin
-from handlers.states import QueryStates, AdminStates
 from handlers.keyboards import (
     get_confirm_query_keyboard, get_main_keyboard, get_new_query_keyboard,
     get_active_session_keyboard, get_collecting_messages_keyboard,
     get_admin_menu_keyboard, get_cancel_keyboard
 )
+from handlers.states import QueryStates, AdminStates
+from middleware.admin_middleware import require_admin
+from services.session_service import SessionService
+from services.sync_service import SyncService
+from utils.constants import SessionType, SessionStatus
+from utils.db_helpers import get_db
+from utils.error_helpers import send_error_message, handle_error_silently
 from utils.query_builder import QueryBuilder, query_builder_to_state
+from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
+from utils.telegram_helpers import FakeMessage
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -640,9 +642,11 @@ async def admin_users_requested_handler(message: Message, state: FSMContext):
             )
             return
         except Exception as e:
-            logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
-            await message.answer(
-                f"❌ Ошибка: {str(e)}",
+            await send_error_message(
+                event=message,
+                error=e,
+                user_message=f"❌ Ошибка: {str(e)}",
+                log_message="Ошибка при выполнении административного действия",
                 reply_markup=get_main_keyboard()
             )
             await state.clear()
@@ -690,9 +694,11 @@ async def admin_users_requested_handler(message: Message, state: FSMContext):
             )
             return
         except Exception as e:
-            logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
-            await message.answer(
-                f"❌ Ошибка: {str(e)}",
+            await send_error_message(
+                event=message,
+                error=e,
+                user_message=f"❌ Ошибка: {str(e)}",
+                log_message="Ошибка при выполнении административного действия",
                 reply_markup=get_main_keyboard()
             )
             await state.clear()
@@ -758,9 +764,11 @@ async def admin_users_requested_handler(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
-        await message.answer(
-            f"❌ Ошибка: {str(e)}",
+        await send_error_message(
+            event=message,
+            error=e,
+            user_message=f"❌ Ошибка: {str(e)}",
+            log_message="Ошибка при выполнении административного действия",
             reply_markup=get_main_keyboard()
         )
         await state.clear()
@@ -807,9 +815,11 @@ async def admin_users_requested_handler(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
-        await message.answer(
-            f"❌ Ошибка: {str(e)}",
+        await send_error_message(
+            event=message,
+            error=e,
+            user_message=f"❌ Ошибка: {str(e)}",
+            log_message="Ошибка при выполнении административного действия",
             reply_markup=get_main_keyboard()
         )
         await state.clear()
@@ -869,9 +879,11 @@ async def sync_handler(message: Message):
                 reply_markup=get_main_keyboard()
             )
     except Exception as e:
-        logger.error(f"Ошибка при синхронизации: {e}", exc_info=True)
-        await sync_message.edit_text(
-            f"❌ Ошибка при синхронизации: {str(e)}",
+        await send_error_message(
+            event=sync_message,
+            error=e,
+            user_message=f"❌ Ошибка при синхронизации: {str(e)}",
+            log_message="Ошибка при синхронизации",
             reply_markup=get_main_keyboard()
         )
 

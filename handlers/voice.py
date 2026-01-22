@@ -3,22 +3,24 @@
 """
 import logging
 from pathlib import Path
-from aiogram import Router
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
 
-from services.transcription_service import TranscriptionService
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message
+
+from handlers.keyboards import get_confirm_query_keyboard, get_transcribe_inline_keyboard, get_collecting_messages_keyboard
+from handlers.states import QueryStates
 from services.openai_service import OpenAIService
 from services.query_processing_service import QueryProcessingService
 from services.session_service import SessionService
+from services.transcription_service import TranscriptionService
 from utils.constants import SessionType, MessageRole
+from utils.db_helpers import get_db
+from utils.error_helpers import send_error_message, handle_error_silently
 from utils.file_helpers import download_telegram_file
 from utils.message_helpers import markdown_to_html
-from utils.db_helpers import get_db
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
-from handlers.states import QueryStates
-from handlers.keyboards import get_confirm_query_keyboard, get_transcribe_inline_keyboard, get_collecting_messages_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -199,16 +201,17 @@ async def voice_handler(message: Message, state: FSMContext):
             if audio_path.exists():
                 audio_path.unlink()
         except Exception as e:
-            logger.warning(f"Не удалось удалить временный файл {audio_path}: {e}")
+            await handle_error_silently(
+                error=e,
+                log_message=f"Не удалось удалить временный файл {audio_path}",
+                log_level="warning"
+            )
         
     except Exception as e:
-        logger.error(f"Ошибка при обработке голосового сообщения от пользователя {user_id}: {e}", exc_info=True)
-        try:
-            await processing_message.edit_text(
-                f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)}"
-            )
-        except Exception:
-            await message.answer(
-                f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)}"
-            )
+        await send_error_message(
+            event=processing_message if 'processing_message' in locals() else message,
+            error=e,
+            user_message=f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)}",
+            log_message=f"Ошибка при обработке голосового сообщения от пользователя {user_id}"
+        )
 

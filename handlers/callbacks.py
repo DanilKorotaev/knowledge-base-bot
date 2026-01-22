@@ -4,30 +4,32 @@
 import asyncio
 import logging
 import re
-from pathlib import Path
 from datetime import datetime, timedelta
-from aiogram import Router
-from aiogram.types import CallbackQuery, Message, Contact
-from aiogram.fsm.context import FSMContext
-from aiogram.enums import ParseMode
+from pathlib import Path
 
-from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
-from handlers.states import QueryStates, AdminStates
-from services.query_processing_service import QueryProcessingService
-from services.session_service import SessionService
-from utils.constants import SessionType, SessionStatus, MessageRole
-from utils.db_helpers import get_db
-from utils.telegram_helpers import FakeMessage
-from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
-from middleware.admin_middleware import require_admin
+from aiogram import Router
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message, Contact
+
+from config import config
 from handlers.keyboards import (
     get_main_keyboard, get_sessions_keyboard, get_history_keyboard,
     get_revert_session_keyboard, get_delete_session_keyboard, get_session_details_keyboard,
     get_admin_menu_keyboard, get_users_selection_keyboard, get_admin_contact_request_keyboard,
     get_main_menu_inline_keyboard_with_admin, get_cancel_keyboard
 )
+from handlers.states import QueryStates, AdminStates
+from middleware.admin_middleware import require_admin
+from services.query_processing_service import QueryProcessingService
+from services.session_service import SessionService
+from utils.constants import SessionType, SessionStatus, MessageRole
+from utils.db_helpers import get_db
+from utils.error_helpers import send_error_message
 from utils.file_helpers import write_file_content, read_file_content
-from config import config
+from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
+from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
+from utils.telegram_helpers import FakeMessage
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -1047,7 +1049,12 @@ async def admin_list_users_callback(callback: CallbackQuery):
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
-        logger.error(f"Ошибка при получении списка пользователей: {e}", exc_info=True)
+        await send_error_message(
+            event=callback,
+            error=e,
+            user_message=f"❌ Ошибка: {str(e)}",
+            log_message="Ошибка при получении списка пользователей"
+        )
         await callback.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
 
 
@@ -1219,13 +1226,13 @@ async def admin_select_user_callback(callback: CallbackQuery, state: FSMContext)
             reply_markup=get_admin_menu_keyboard()
         )
     except Exception as e:
-        logger.error(f"Ошибка при выполнении административного действия: {e}", exc_info=True)
-        # Экранировать HTML-специальные символы в сообщении об ошибке
-        error_msg = str(e).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        await callback.message.edit_text(
-            f"❌ Ошибка: {error_msg}",
-            reply_markup=get_admin_menu_keyboard(),
-            parse_mode=ParseMode.HTML
+        from handlers.keyboards import get_admin_menu_keyboard
+        await send_error_message(
+            event=callback,
+            error=e,
+            user_message=f"❌ Ошибка: {str(e)}",
+            log_message="Ошибка при выполнении административного действия",
+            reply_markup=get_admin_menu_keyboard()
         )
 
 
