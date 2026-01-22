@@ -3,6 +3,20 @@
 ## Дата создания
 2024-12-19
 
+## Текущий статус
+🟢 **Фаза 1 и Фаза 2 завершены** (2024-12-19)
+
+### Выполнено:
+- ✅ Созданы все утилиты и константы (Фаза 1)
+- ✅ Созданы все сервисы (Фаза 2)
+- ⏳ Начата Фаза 3: рефакторинг handlers
+
+### Следующие шаги:
+1. Рефакторинг `handlers/messages.py`
+2. Рефакторинг `handlers/voice.py`
+3. Рефакторинг `handlers/callbacks.py`
+4. Рефакторинг `handlers/commands.py`
+
 ## Цель
 Устранить дублирование кода, улучшить архитектуру и соблюдение принципов SOLID, DRY, KISS.
 
@@ -409,32 +423,66 @@ if not await db.is_user_admin(user_id):
 
 ## Порядок выполнения
 
-### Фаза 1: Подготовка (1-2 дня)
+### Фаза 1: Подготовка (1-2 дня) ✅ ВЫПОЛНЕНО
 1. ✅ Создать `utils/constants.py` с константами
+   - Создан файл с enum классами: `SessionType`, `SessionStatus`, `MessageRole`, `ChangeType`
 2. ✅ Создать `utils/telegram_helpers.py` с FakeMessage
+   - Создан класс `FakeMessage` для переиспользования обработчиков команд в callback-обработчиках
 3. ✅ Расширить `utils/message_helpers.py`
+   - Добавлена функция `send_formatted_message()` для универсальной отправки с fallback (HTML → Markdown V2 → Plain text)
+   - Добавлена функция `format_file_changes_info()` для форматирования информации об изменениях файлов
 
-### Фаза 2: Сервисы (3-5 дней)
+### Фаза 2: Сервисы (3-5 дней) ✅ ВЫПОЛНЕНО
 1. ✅ Создать `SessionService`
+   - Создан `services/session_service.py` с методами:
+     - `get_or_create_active_session()` - получение/создание активной сессии
+     - `ensure_user_and_session()` - обеспечение пользователя и сессии
+     - `deactivate_current_session()` - деактивация текущей сессии
+     - `create_new_session()` - создание новой сессии
 2. ✅ Создать `QueryProcessingService`
+   - Создан `services/query_processing_service.py` с методами:
+     - `process_query()` - обработка запроса через Cursor CLI
+     - `handle_file_changes()` - обработка изменений файлов
+   - Объединена логика из `process_final_query()` и `process_text_query_after_transcription()`
 3. ✅ Расширить `SyncService`
+   - Добавлен метод `sync_with_progress()` для синхронизации с отображением прогресса
+   - Добавлен метод `_create_progress_callback()` для создания callback с защитой от Flood control
 4. ✅ Создать `utils/session_helpers.py`
+   - Добавлена функция `get_user_sessions_for_display()` для получения сессий с пагинацией
+   - Добавлена функция `format_sessions_list()` для форматирования списка сессий
+   - Добавлена функция `format_session_details()` для форматирования деталей сессии
 
-### Фаза 3: Рефакторинг handlers (5-7 дней)
-1. ✅ Рефакторинг `messages.py`
-2. ✅ Рефакторинг `voice.py`
-3. ✅ Рефакторинг `callbacks.py`
-4. ✅ Рефакторинг `commands.py`
+### Фаза 3: Рефакторинг handlers (5-7 дней) 🔄 В ПРОЦЕССЕ
+1. ⏳ Рефакторинг `messages.py`
+   - Заменить `process_final_query()` на использование `QueryProcessingService`
+   - Заменить дублирование создания сессий на `SessionService`
+   - Использовать `send_formatted_message()` вместо дублирующегося кода
+2. ⏳ Рефакторинг `voice.py`
+   - Заменить `process_text_query_after_transcription()` на использование `QueryProcessingService`
+   - Заменить дублирование создания сессий на `SessionService`
+   - Использовать `send_formatted_message()` вместо дублирующегося кода
+3. ⏳ Рефакторинг `callbacks.py`
+   - Заменить дублирование создания сессий на `SessionService`
+   - Использовать `utils/session_helpers` для форматирования списков сессий
+   - Использовать `utils/telegram_helpers` для `FakeMessage`
+   - Добавить декоратор `@require_admin` для административных действий
+   - Разбить длинные обработчики на более мелкие функции
+4. ⏳ Рефакторинг `commands.py`
+   - Заменить дублирование создания сессий на `SessionService`
+   - Использовать `utils/session_helpers` для форматирования списков сессий
+   - Использовать `utils/telegram_helpers` для `FakeMessage`
+   - Использовать `sync_with_progress()` для синхронизации
+   - Упростить административные обработчики
 
-### Фаза 4: Улучшения (2-3 дня)
-1. ✅ Создать AdminMiddleware/декоратор
-2. ✅ Стандартизировать обработку ошибок
-3. ✅ Оптимизировать импорты
+### Фаза 4: Улучшения (2-3 дня) ⏳ ОЖИДАЕТ
+1. ⏳ Создать AdminMiddleware/декоратор
+2. ⏳ Стандартизировать обработку ошибок
+3. ⏳ Оптимизировать импорты
 
-### Фаза 5: Тестирование (2-3 дня)
-1. ✅ Написать тесты
-2. ✅ Провести ручное тестирование
-3. ✅ Исправить найденные баги
+### Фаза 5: Тестирование (2-3 дня) ⏳ ОЖИДАЕТ
+1. ⏳ Написать тесты
+2. ⏳ Провести ручное тестирование
+3. ⏳ Исправить найденные баги
 
 ---
 

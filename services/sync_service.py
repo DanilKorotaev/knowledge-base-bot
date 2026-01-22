@@ -6,7 +6,7 @@ import logging
 import time
 import requests
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable, Awaitable, Set
+from typing import List, Dict, Any, Optional, Callable, Awaitable, Set, Tuple
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from requests.auth import HTTPBasicAuth
@@ -809,4 +809,120 @@ class SyncService:
         except Exception as e:
             logger.error(f"Ошибка при разрешении конфликта для {file_path}: {e}")
             return False
+    
+    def _create_progress_callback(self, message: Any) -> Callable[[str, int, int], Awaitable[None]]:
+        """
+        Создать callback для обновления прогресса синхронизации с защитой от Flood control
+        
+        Args:
+            message: Объект сообщения Telegram для редактирования
+        
+        Returns:
+            Callable: Callback функция для прогресса
+        """
+        import asyncio
+        import re
+        from datetime import datetime, timedelta
+        
+        last_update_time = {}
+        
+        async def update_progress(stage: str, current: int, total: int):
+            """Обновить сообщение с прогрессом синхронизации"""
+            stage_names = {
+                "upload": "📤 Загрузка в NextCloud",
+                "download": "📥 Загрузка из NextCloud"
+            }
+            stage_name = stage_names.get(stage, "🔄 Синхронизация")
+            
+            if total > 0:
+                percentage = int((current / total) * 100)
+            else:
+                percentage = 0
+            
+            # Проверка: обновлять только если прошло минимум 1 секунда с последнего обновления
+            now = datetime.now()
+            last_time = last_update_time.get(stage)
+            
+            should_update = False
+            if last_time is None:
+                should_update = True  # Первое обновление
+            elif (now - last_time) >= timedelta(seconds=1):
+                should_update = True  # Прошла минимум 1 секунда
+            elif current == total:
+                should_update = True  # Завершение этапа (всегда обновляем)
+            
+            if not should_update:
+                return
+            
+            progress_text = f"{stage_name}\n\n"
+            progress_text += f"Обработано файлов: {current} из {total}"
+            
+            if total > 0:
+                progress_text += f" ({percentage}%)"
+            
+            try:
+                await message.edit_text(progress_text)
+                last_update_time[stage] = now
+            except Exception as e:
+                error_str = str(e)
+                # Обработка Flood control
+                if "Flood control" in error_str or "retry after" in error_str.lower():
+                    # Извлечь время ожидания из ошибки
+                    retry_match = re.search(r'retry after (\d+)', error_str.lower())
+                    if retry_match:
+                        retry_after = int(retry_match.group(1))
+                        logger.warning(f"Flood control: ждем {retry_after} секунд перед следующим обновлением")
+                        # Увеличить время последнего обновления, чтобы не обновлять сразу после ожидания
+                        last_update_time[stage] = datetime.now() + timedelta(seconds=retry_after)
+                        await asyncio.sleep(retry_after)
+                    else:
+                        # Если не удалось извлечь время, ждем 5 секунд
+                        last_update_time[stage] = datetime.now() + timedelta(seconds=5)
+                        await asyncio.sleep(5)
+                    # Не пытаемся обновить сразу после ожидания - подождем следующего вызова
+                else:
+                    logger.debug(f"Не удалось обновить сообщение прогресса: {e}")
+        
+        return update_progress
+    
+    async def sync_with_progress(
+        self,
+        message: Any,
+        show_notification: bool = True,
+        sync_direction: str = "both"
+    ) -> Tuple[bool, bool]:
+        """
+        Синхронизировать с NextCloud с отображением прогресса
+        
+        Args:
+            message: Объект сообщения Telegram для обновления прогресса
+            show_notification: Показывать ли уведомления
+            sync_direction: Направление синхронизации ("from", "to", "both")
+        
+        Returns:
+            Tuple[bool, bool]: (sync_from_success, sync_to_success)
+        """
+        if not self.enabled:
+            return False, False
+        
+        # Создать callback для прогресса
+        progress_callback = self._create_progress_callback(message)
+        self.set_progress_callback(progress_callback)
+        
+        sync_from_success = False
+        sync_to_success = False
+        
+        try:
+            if sync_direction in ["from", "both"]:
+                await message.edit_text("📥 Загрузка из NextCloud...\n\nПолучение списка файлов...")
+                sync_from_success = await self.sync_from_nextcloud(show_notification=show_notification)
+            
+            if sync_direction in ["to", "both"]:
+                await message.edit_text("📤 Загрузка в NextCloud...\n\nПодготовка...")
+                sync_to_success = await self.sync_to_nextcloud()
+        finally:
+            # Очистить callback после использования
+            self.set_progress_callback(None)
+        
+        return sync_from_success, sync_to_success
 

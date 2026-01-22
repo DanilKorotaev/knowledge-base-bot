@@ -1,9 +1,14 @@
 """
 Помощники для работы с сообщениями
 """
+import logging
 import re
-from typing import List
-from aiogram.types import Message
+from typing import List, Optional, Dict, Any
+from aiogram.types import Message, InlineKeyboardMarkup
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.enums import ParseMode
+
+logger = logging.getLogger(__name__)
 
 
 def escape_markdown_v2(text: str) -> str:
@@ -104,4 +109,76 @@ def split_long_message(text: str, max_length: int = 4096) -> List[str]:
         parts.append(current_part)
     
     return parts
+
+
+async def send_formatted_message(
+    message: Message,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None
+) -> None:
+    """
+    Отправить форматированное сообщение с автоматическим fallback
+    
+    Пытается отправить сообщение в следующем порядке:
+    1. HTML форматирование
+    2. Markdown V2 форматирование
+    3. Plain text (без форматирования)
+    
+    Args:
+        message: Объект сообщения Telegram
+        text: Текст для отправки
+        reply_markup: Опциональная клавиатура
+    """
+    # Разбить длинные сообщения на части
+    response_parts = split_long_message(text, max_length=4000)
+    
+    for part in response_parts:
+        try:
+            # Попытка 1: HTML форматирование
+            html_part = markdown_to_html(part)
+            await message.answer(html_part, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+            reply_markup = None  # Клавиатуру показываем только в первом сообщении
+        except TelegramBadRequest as e:
+            logger.warning(f"Ошибка форматирования HTML: {e}, пробую Markdown V2")
+            try:
+                # Попытка 2: Markdown V2 форматирование
+                md_part = escape_markdown_v2(part)
+                await message.answer(md_part, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+                reply_markup = None
+            except TelegramBadRequest as e2:
+                logger.warning(f"Ошибка форматирования Markdown V2: {e2}, отправляю без форматирования")
+                # Попытка 3: Plain text
+                await message.answer(part, reply_markup=reply_markup)
+                reply_markup = None
+
+
+def format_file_changes_info(changes: List[Dict[str, Any]], sync_success: bool) -> str:
+    """
+    Форматировать информацию об изменениях файлов
+    
+    Args:
+        changes: Список изменений файлов
+        sync_success: Успешна ли синхронизация с NextCloud
+    
+    Returns:
+        str: Отформатированная строка с информацией об изменениях
+    """
+    if not changes:
+        return ""
+    
+    changes_info = f"\n\n📝 Изменено файлов: {len(changes)}"
+    
+    if len(changes) <= 5:
+        changes_list = "\n".join([f"  • {ch.get('path', 'unknown')}" for ch in changes])
+        changes_info += f"\n{changes_list}"
+    else:
+        changes_list = "\n".join([f"  • {ch.get('path', 'unknown')}" for ch in changes[:5]])
+        changes_info += f"\n{changes_list}\n  ... и еще {len(changes) - 5}"
+    
+    if sync_success:
+        changes_info += "\n✅ Изменения синхронизированы с NextCloud"
+    else:
+        changes_info += "\n⚠️ Не удалось синхронизировать с NextCloud"
+    
+    return changes_info
 
