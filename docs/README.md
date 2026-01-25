@@ -8,10 +8,10 @@
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Руководство для разработчиков
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Инструкции по развертыванию
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Описание архитектуры
+- [REFACTORING.md](REFACTORING.md) - Документация по рефакторингу проекта
 - [GIT_FLOW.md](GIT_FLOW.md) - Процесс разработки и релизов (Git Flow)
 - [TODO.md](todo.md) - Активные задачи
 - [COMPLETED.md](completed.md) - Выполненные задачи
-- [AI_PROMPTS/](AI_PROMPTS/) - Системные промпты для AI-агента
 
 ## Быстрый старт
 
