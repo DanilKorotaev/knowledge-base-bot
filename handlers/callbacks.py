@@ -764,14 +764,28 @@ async def confirm_revert_session_callback(callback: CallbackQuery):
 @router.callback_query(lambda c: c.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
     """Обработка возврата в главное меню"""
+    from handlers.keyboards import format_active_session_info
+    
     db = await get_db()
     user_id = callback.from_user.id
     is_admin = await db.is_user_admin(user_id)
     
+    # Получить активную сессию
+    user = await db.ensure_user(user_id, callback.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    # Сформировать текст меню с информацией об активной сессии
+    menu_text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    if active_session:
+        menu_text += format_active_session_info(active_session)
+    
     await callback.answer()
     await callback.message.edit_text(
-        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
+        menu_text,
+        reply_markup=get_main_menu_inline_keyboard_with_admin(
+            is_admin=is_admin,
+            active_session=active_session
+        ),
         parse_mode=ParseMode.HTML
     )
 

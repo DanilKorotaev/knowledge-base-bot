@@ -338,8 +338,38 @@ def get_transcribe_inline_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
-def get_main_menu_inline_keyboard_with_admin(is_admin: bool = False) -> InlineKeyboardMarkup:
-    """Главное меню как inline-кнопки с опциональной кнопкой админки"""
+def format_active_session_info(active_session: Optional[Dict]) -> str:
+    """
+    Форматировать информацию об активной сессии для отображения в главном меню
+    
+    Args:
+        active_session: Информация об активной сессии или None
+    
+    Returns:
+        str: Отформатированный текст с информацией о сессии или пустая строка
+    """
+    if not active_session:
+        return ""
+    
+    session_id = active_session.get("id")
+    session_type = active_session.get("session_type", "")
+    session_type_emoji = "📚" if session_type == "query_with_kb" else "💬"
+    session_type_label = "С контекстом БЗ" if session_type == "query_with_kb" else "Без контекста"
+    
+    return f"\n\n🟢 <b>Активная сессия:</b> {session_type_emoji} #{session_id}\n<i>{session_type_label}</i>"
+
+
+def get_main_menu_inline_keyboard_with_admin(
+    is_admin: bool = False,
+    active_session: Optional[Dict] = None
+) -> InlineKeyboardMarkup:
+    """
+    Главное меню как inline-кнопки с опциональной кнопкой админки и режимом сбора
+    
+    Args:
+        is_admin: Является ли пользователь администратором
+        active_session: Информация об активной сессии (если есть)
+    """
     keyboard = [
         [
             InlineKeyboardButton(text="📚 Новый запрос", callback_data="main_new_query"),
@@ -354,6 +384,15 @@ def get_main_menu_inline_keyboard_with_admin(is_admin: bool = False) -> InlineKe
             InlineKeyboardButton(text="❓ Помощь", callback_data="main_help")
         ]
     ]
+    
+    # Добавить кнопку режима сбора, если есть активная сессия
+    if active_session:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="📝 Режим сбора сообщений",
+                callback_data="start_collect_mode"
+            )
+        ])
     
     if is_admin:
         keyboard.append([

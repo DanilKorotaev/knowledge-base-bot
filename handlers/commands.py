@@ -58,14 +58,27 @@ async def start_handler(message: Message):
     # Проверить, является ли пользователь администратором
     is_admin = await db.is_user_admin(user_id)
     
+    # Получить активную сессию
+    active_session = await db.get_active_session(user["id"])
+    
     await message.answer(
         "👋 Привет! Я бот для работы с базой знаний.\n\n"
         "Выберите действие из меню ниже:",
         reply_markup=get_main_keyboard()
     )
+    
+    # Сформировать текст меню с информацией об активной сессии
+    from handlers.keyboards import format_active_session_info
+    menu_text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    if active_session:
+        menu_text += format_active_session_info(active_session)
+    
     await message.answer(
-        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
+        menu_text,
+        reply_markup=get_main_menu_inline_keyboard_with_admin(
+            is_admin=is_admin,
+            active_session=active_session
+        ),
         parse_mode=ParseMode.HTML
     )
 
@@ -78,7 +91,11 @@ async def help_handler(message: Message):
     
     db = await get_db()
     user_id = message.from_user.id
+    user = await db.ensure_user(user_id, message.from_user.username)
     is_admin = await db.is_user_admin(user_id)
+    
+    # Получить активную сессию
+    active_session = await db.get_active_session(user["id"])
     
     help_text = """📚 <b>Справка по использованию бота</b>
 
@@ -112,9 +129,19 @@ async def help_handler(message: Message):
 • Откатывайте отдельные изменения или все изменения сессии через кнопки"""
     
     await message.answer(help_text, parse_mode=ParseMode.HTML, reply_markup=get_main_keyboard())
+    
+    # Сформировать текст меню с информацией об активной сессии
+    from handlers.keyboards import format_active_session_info
+    menu_text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    if active_session:
+        menu_text += format_active_session_info(active_session)
+    
     await message.answer(
-        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
+        menu_text,
+        reply_markup=get_main_menu_inline_keyboard_with_admin(
+            is_admin=is_admin,
+            active_session=active_session
+        ),
         parse_mode=ParseMode.HTML
     )
 

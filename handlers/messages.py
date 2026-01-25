@@ -33,16 +33,31 @@ logger = logging.getLogger(__name__)
 @router.message(lambda m: m.text == "🏠 Главное меню")
 async def main_menu_button_handler(message: Message):
     """Обработка кнопки 'Главное меню'"""
-    from handlers.keyboards import get_main_menu_inline_keyboard_with_admin
+    from handlers.keyboards import (
+        get_main_menu_inline_keyboard_with_admin,
+        format_active_session_info
+    )
     from utils.db_helpers import get_db
     
     db = await get_db()
     user_id = message.from_user.id
     is_admin = await db.is_user_admin(user_id)
     
+    # Получить активную сессию
+    user = await db.ensure_user(user_id, message.from_user.username)
+    active_session = await db.get_active_session(user["id"])
+    
+    # Сформировать текст меню с информацией об активной сессии
+    menu_text = "🏠 <b>Главное меню</b>\n\nВыберите действие:"
+    if active_session:
+        menu_text += format_active_session_info(active_session)
+    
     await message.answer(
-        "🏠 <b>Главное меню</b>\n\nВыберите действие:",
-        reply_markup=get_main_menu_inline_keyboard_with_admin(is_admin=is_admin),
+        menu_text,
+        reply_markup=get_main_menu_inline_keyboard_with_admin(
+            is_admin=is_admin,
+            active_session=active_session
+        ),
         parse_mode=ParseMode.HTML
     )
 
