@@ -40,9 +40,12 @@ class OpenAIService:
                     language=language
                 )
             
+            # Получить язык из транскрипции, если доступен, иначе использовать переданный или "unknown"
+            detected_language = getattr(transcript, 'language', None) or language or "unknown"
+            
             return {
                 "text": transcript.text,
-                "language": transcript.language
+                "language": detected_language
             }
         except Exception as e:
             logger.error(f"Ошибка при транскрибации: {e}", exc_info=True)

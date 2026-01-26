@@ -552,6 +552,18 @@ class SyncService:
                         continue
                     
                     if local_path.exists() and local_path.is_file():
+                        # Проверить, не был ли файл создан недавно (менее 10 минут назад)
+                        # Это защищает от удаления файлов, созданных Cursor CLI, которые еще не загружены в NextCloud
+                        file_age = time.time() - local_path.stat().st_mtime
+                        min_age_seconds = 600  # 10 минут
+                        
+                        if file_age < min_age_seconds:
+                            logger.debug(
+                                f"Пропущен новый файл (создан {file_age:.0f}с назад): {local_path_str}. "
+                                f"Возможно, он еще не загружен в NextCloud."
+                            )
+                            continue
+                        
                         local_path.unlink()
                         deleted_count += 1
                         logger.debug(f"Удален локальный файл: {local_path_str}")

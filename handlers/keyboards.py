@@ -338,6 +338,75 @@ def get_transcribe_inline_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_voice_action_collecting_keyboard(voice_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура выбора действия для голосового в режиме сбора сообщений"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📝 Прикрепить к запросу",
+                    callback_data=f"voice_add_to_collect_{voice_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎤 Только транскрибировать",
+                    callback_data=f"voice_transcribe_only_{voice_id}"
+                )
+            ]
+        ]
+    )
+    return keyboard
+
+
+def get_voice_action_normal_keyboard(voice_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура выбора действия для голосового в обычном режиме"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📤 Отправить как запрос",
+                    callback_data=f"voice_send_query_{voice_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Использовать как prompt",
+                    callback_data=f"voice_use_as_prompt_{voice_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎤 Только транскрибировать",
+                    callback_data=f"voice_transcribe_only_{voice_id}"
+                )
+            ]
+        ]
+    )
+    return keyboard
+
+
+def get_enable_collect_mode_keyboard(voice_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора включения режима сбора после 'использовать как prompt'"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, включить режим сбора",
+                    callback_data=f"voice_prompt_enable_collect_{voice_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Нет, только добавить в prompt",
+                    callback_data=f"voice_prompt_no_collect_{voice_id}"
+                )
+            ]
+        ]
+    )
+    return keyboard
+
+
 def format_active_session_info(active_session: Optional[Dict]) -> str:
     """
     Форматировать информацию об активной сессии для отображения в главном меню

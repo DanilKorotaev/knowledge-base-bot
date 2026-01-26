@@ -17,7 +17,8 @@ from handlers.keyboards import (
     get_main_keyboard, get_sessions_keyboard, get_history_keyboard,
     get_revert_session_keyboard, get_delete_session_keyboard, get_session_details_keyboard,
     get_admin_menu_keyboard, get_users_selection_keyboard, get_admin_contact_request_keyboard,
-    get_main_menu_inline_keyboard_with_admin, get_cancel_keyboard
+    get_main_menu_inline_keyboard_with_admin, get_cancel_keyboard,
+    get_collecting_messages_keyboard, get_enable_collect_mode_keyboard
 )
 from handlers.states import QueryStates, AdminStates
 from middleware.admin_middleware import require_admin
@@ -1017,6 +1018,360 @@ async def transcribe_last_voice_callback(callback: CallbackQuery):
     fake_message.bot = callback.bot
     await transcribe_handler(fake_message)
     await callback.answer("🎤 Расшифровка начата")
+
+
+# ========== Обработчики выбора действия с голосовым сообщением ==========
+
+@router.callback_query(lambda c: c.data.startswith("voice_add_to_collect_"))
+async def voice_add_to_collect_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка добавления голосового к запросу в режиме сбора"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_add_to_collect_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Получить данные
+        audio_path = Path(voice_data["audio_path"])
+        transcribed_text = voice_data["transcribed_text"]
+        file_id = voice_data["file_id"]
+        
+        # Добавить в QueryBuilder
+        builder = query_builder_from_state(state_data) if (state_data.get("text_parts") or state_data.get("voice_files") or state_data.get("media_files")) else QueryBuilder()
+        builder.add_voice(file_id, audio_path, transcribed_text)
+        
+        # Сохранить обратно в состояние
+        await state.update_data(**query_builder_to_state(builder))
+        
+        # Удалить временные данные голосового
+        state_data.pop(f"voice_{voice_id}", None)
+        await state.update_data(**state_data)
+        
+        # Показать информацию
+        summary = builder.get_summary()
+        transcription_preview = transcribed_text[:100] + "..." if len(transcribed_text) > 100 else transcribed_text
+        
+        from handlers.keyboards import get_collecting_messages_keyboard
+        await callback.message.answer(
+            f"✅ Голосовое сообщение добавлено к запросу.\n\n"
+            f"📝 Расшифровка: {transcription_preview}\n\n"
+            f"{summary}\n\n"
+            f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор' для отправки.",
+            reply_markup=get_collecting_messages_keyboard(),
+            parse_mode=None
+        )
+        
+        # Удалить сообщение с кнопками
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении голосового к запросу: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_transcribe_only_"))
+async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка только транскрибации голосового (без запроса к БЗ)"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_transcribe_only_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Получить данные
+        transcribed_text = voice_data["transcribed_text"]
+        language = voice_data.get("language", "unknown")
+        audio_path = Path(voice_data["audio_path"])
+        
+        # Удалить временные данные
+        state_data.pop(f"voice_{voice_id}", None)
+        await state.update_data(**state_data)
+        
+        # Показать расшифровку
+        from utils.message_helpers import markdown_to_html
+        html_text = markdown_to_html(transcribed_text)
+        response = f"🎤 <b>Расшифровка:</b>\n\n{html_text}"
+        if language and language != "unknown":
+            response += f"\n\n🌐 Язык: {language}"
+        
+        await callback.message.answer(response, parse_mode=ParseMode.HTML)
+        
+        # Удалить временный файл
+        try:
+            if audio_path.exists():
+                audio_path.unlink()
+        except Exception as e:
+            logger.warning(f"Не удалось удалить временный файл {audio_path}: {e}")
+        
+        # Удалить сообщение с кнопками
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        
+    except Exception as e:
+        logger.error(f"Ошибка при транскрибации голосового: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_send_query_"))
+async def voice_send_query_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка отправки голосового как запроса к БЗ"""
+    await callback.answer("📤 Отправляю запрос...")
+    
+    try:
+        voice_id = callback.data.replace("voice_send_query_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Получить данные
+        transcribed_text = voice_data["transcribed_text"]
+        audio_path = Path(voice_data["audio_path"])
+        file_id = voice_data["file_id"]
+        file_size = voice_data.get("file_size")
+        
+        # Получить или создать сессию
+        user_id = callback.from_user.id
+        session_service = SessionService()
+        active_session = await session_service.get_or_create_active_session(
+            user_id=user_id,
+            username=callback.from_user.username,
+            session_type=SessionType.QUERY_WITH_KB
+        )
+        session_id = active_session["id"]
+        
+        # Сохранить сообщение пользователя с транскрипцией
+        db = await get_db()
+        message_obj = await db.add_message(session_id, str(MessageRole.USER), transcribed_text)
+        
+        # Сохранить вложение в БД
+        attachment = await db.add_attachment(
+            session_id=session_id,
+            message_id=message_obj["id"],
+            file_type="voice",
+            file_id=file_id,
+            file_path=str(audio_path),
+            file_name=f"{file_id}.ogg",
+            file_size=file_size
+        )
+        
+        # Сохранить транскрипцию в БД
+        await db.add_transcription(
+            attachment_id=attachment["id"],
+            text=transcribed_text,
+            language=voice_data.get("language", "unknown")
+        )
+        
+        # Удалить временные данные
+        state_data.pop(f"voice_{voice_id}", None)
+        await state.update_data(**state_data)
+        
+        # Удалить сообщение с кнопками
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        
+        # Обработать транскрибированный текст как запрос
+        query_service = QueryProcessingService()
+        fake_message = FakeMessage(callback)
+        await query_service.process_query(
+            query=transcribed_text,
+            session_id=session_id,
+            message=fake_message,
+            save_user_message=False  # Сообщение уже сохранено выше
+        )
+        
+        # Удалить временный файл
+        try:
+            if audio_path.exists():
+                audio_path.unlink()
+        except Exception as e:
+            logger.warning(f"Не удалось удалить временный файл {audio_path}: {e}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отправке запроса из голосового: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_use_as_prompt_"))
+async def voice_use_as_prompt_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка использования голосового как prompt - спрашиваем про режим сбора"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_use_as_prompt_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Показать вопрос про режим сбора
+        from handlers.keyboards import get_enable_collect_mode_keyboard
+        await callback.message.edit_text(
+            "❓ Включить режим сбора сообщений для этого prompt?",
+            reply_markup=get_enable_collect_mode_keyboard(voice_id)
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при использовании голосового как prompt: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_prompt_enable_collect_"))
+async def voice_prompt_enable_collect_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка использования голосового как prompt с включением режима сбора"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_prompt_enable_collect_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Получить данные
+        audio_path = Path(voice_data["audio_path"])
+        transcribed_text = voice_data["transcribed_text"]
+        file_id = voice_data["file_id"]
+        
+        # Включить режим сбора
+        from handlers.states import QueryStates
+        await state.set_state(QueryStates.collecting_messages)
+        
+        # Инициализировать QueryBuilder с транскрипцией
+        builder = QueryBuilder()
+        builder.add_text(transcribed_text)
+        builder.add_voice(file_id, audio_path, transcribed_text)
+        
+        # Сохранить в состояние
+        await state.update_data(**query_builder_to_state(builder))
+        
+        # Удалить временные данные
+        state_data.pop(f"voice_{voice_id}", None)
+        await state.update_data(**state_data)
+        
+        # Показать информацию
+        from handlers.keyboards import get_collecting_messages_keyboard
+        summary = builder.get_summary()
+        
+        await callback.message.edit_text(
+            f"✅ Режим сбора сообщений включен.\n\n"
+            f"📝 Prompt добавлен: {transcribed_text[:100]}{'...' if len(transcribed_text) > 100 else ''}\n\n"
+            f"{summary}\n\n"
+            f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор' для отправки.",
+            reply_markup=get_collecting_messages_keyboard(),
+            parse_mode=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при включении режима сбора с prompt: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_prompt_no_collect_"))
+async def voice_prompt_no_collect_callback(callback: CallbackQuery, state: FSMContext):
+    """Обработка использования голосового как prompt без режима сбора"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_prompt_no_collect_", "")
+        state_data = await state.get_data()
+        voice_data = state_data.get(f"voice_{voice_id}")
+        
+        if not voice_data:
+            await callback.message.answer("❌ Данные голосового сообщения не найдены.")
+            return
+        
+        # Получить данные
+        transcribed_text = voice_data["transcribed_text"]
+        audio_path = Path(voice_data["audio_path"])
+        file_id = voice_data["file_id"]
+        file_size = voice_data.get("file_size")
+        
+        # Получить или создать сессию
+        user_id = callback.from_user.id
+        session_service = SessionService()
+        active_session = await session_service.get_or_create_active_session(
+            user_id=user_id,
+            username=callback.from_user.username,
+            session_type=SessionType.QUERY_WITH_KB
+        )
+        session_id = active_session["id"]
+        
+        # Сохранить сообщение пользователя с транскрипцией
+        db = await get_db()
+        message_obj = await db.add_message(session_id, str(MessageRole.USER), transcribed_text)
+        
+        # Сохранить вложение в БД
+        attachment = await db.add_attachment(
+            session_id=session_id,
+            message_id=message_obj["id"],
+            file_type="voice",
+            file_id=file_id,
+            file_path=str(audio_path),
+            file_name=f"{file_id}.ogg",
+            file_size=file_size
+        )
+        
+        # Сохранить транскрипцию в БД
+        await db.add_transcription(
+            attachment_id=attachment["id"],
+            text=transcribed_text,
+            language=voice_data.get("language", "unknown")
+        )
+        
+        # Удалить временные данные
+        state_data.pop(f"voice_{voice_id}", None)
+        await state.update_data(**state_data)
+        
+        # Удалить сообщение с кнопками
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        
+        # Обработать транскрибированный текст как запрос
+        query_service = QueryProcessingService()
+        fake_message = FakeMessage(callback)
+        await query_service.process_query(
+            query=transcribed_text,
+            session_id=session_id,
+            message=fake_message,
+            save_user_message=False  # Сообщение уже сохранено выше
+        )
+        
+        # Удалить временный файл
+        try:
+            if audio_path.exists():
+                audio_path.unlink()
+        except Exception as e:
+            logger.warning(f"Не удалось удалить временный файл {audio_path}: {e}")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при использовании голосового как prompt: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
 
 
 # ========== Административные обработчики ==========
