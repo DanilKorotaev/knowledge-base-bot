@@ -188,13 +188,55 @@ class CursorCLIService:
         logger.debug("Промпт базы знаний не найден (это нормально, если БЗ не имеет системного промпта)")
         return ""
     
+    async def create_chat(self) -> Optional[str]:
+        """
+        Создать новый чат в Cursor CLI, вернуть chatId (UUID)
+        
+        Returns:
+            str: UUID чата или None при ошибке
+        """
+        env = os.environ.copy()
+        env["CURSOR_API_KEY"] = self.api_key
+        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
+            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "cursor-agent", "create-chat",
+                cwd=str(self.kb_path),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                chat_id = stdout.decode().strip()
+                if chat_id:
+                    logger.info(f"Создан новый чат Cursor CLI: {chat_id}")
+                    return chat_id
+                else:
+                    logger.warning("cursor-agent create-chat вернул пустой ответ")
+                    return None
+            else:
+                error = stderr.decode().strip()
+                logger.error(f"Ошибка при создании чата Cursor CLI (код: {process.returncode}): {error}")
+                return None
+        except FileNotFoundError:
+            logger.error("Команда 'cursor-agent' не найдена для create-chat")
+            return None
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при создании чата Cursor CLI: {e}")
+            return None
+    
     async def process_query(
         self,
         query: str,
         session_id: Optional[int] = None,
         model: Optional[str] = None,
         session_messages: Optional[List[Dict[str, Any]]] = None,
-        attached_files: Optional[List[Path]] = None
+        attached_files: Optional[List[Path]] = None,
+        cursor_chat_id: Optional[str] = None
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -205,6 +247,7 @@ class CursorCLIService:
             model: Модель для использования (опционально, по умолчанию из конфига)
             session_messages: История сообщений сессии для контекста (опционально)
             attached_files: Список путей к прикрепленным файлам (фото, документы) (опционально)
+            cursor_chat_id: ID чата Cursor CLI для --resume (опционально)
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -231,15 +274,17 @@ class CursorCLIService:
         # Сохранить состояние файлов до выполнения (для отслеживания изменений)
         file_states_before = await self._save_file_states()
         
-        # Подготовить запрос с контекстом сессии и прикрепленными файлами
-        # Системные промпты теперь в .cursor/rules/, поэтому не добавляем их в запрос
-        # Это оптимизирует производительность - Cursor CLI автоматически загружает промпты из .cursor/rules/
-        # 
-        # Обработка файлов:
-        # Cursor CLI не поддерживает флаг --file (см. https://forum.cursor.com/t/image-support-in-headless-cli/135007)
-        # Вместо этого нужно упомянуть пути к файлам в промпте, и Cursor CLI автоматически прочитает их через tool calling
-        # См. документацию: https://cursor.com/docs/cli/headless#working-with-images
-        full_query = self._build_query_with_context(query, session_messages, attached_files)
+        # Определяем режим работы: --resume (встроенные сессии) или ручная передача истории
+        use_resume = bool(cursor_chat_id)
+        
+        if use_resume:
+            # Режим --resume: Cursor CLI сам помнит контекст, передаём только текущий запрос
+            logger.info(f"Используется --resume с chatId: {cursor_chat_id}")
+            full_query = self._build_query_with_files_only(query, attached_files)
+        else:
+            # Старый режим: передаём историю в промпте
+            full_query = self._build_query_with_context(query, session_messages, attached_files)
+        
         if self.system_prompt:
             logger.debug(f"Системные промпты доступны в .cursor/rules/ ({len(self.system_prompt)} символов)")
         
@@ -247,6 +292,10 @@ class CursorCLIService:
         # -p: prompt mode (интерактивный режим)
         # --force: принудительное выполнение
         cmd = ["cursor-agent", "-p", "--force"]
+        
+        # Добавить --resume, если есть cursor_chat_id
+        if use_resume:
+            cmd.extend(["--resume", cursor_chat_id])
         
         # Добавить модель, если указана конкретная (не auto)
         # Если model = "auto" или пустая — Cursor CLI сам выберет модель
@@ -262,7 +311,7 @@ class CursorCLIService:
         if additional_flags:
             cmd.extend(additional_flags.split())
         
-        # Добавить полный запрос (с системным промптом, если есть)
+        # Добавить полный запрос
         cmd.append(full_query)
         
         # Подготовить окружение с API ключом
@@ -478,6 +527,40 @@ class CursorCLIService:
     async def get_file_changes(self) -> List[Dict[str, Any]]:
         """Получить список измененных файлов (через git diff)"""
         return await self._get_file_changes({})
+    
+    def _build_query_with_files_only(
+        self,
+        query: str,
+        attached_files: Optional[List[Path]] = None
+    ) -> str:
+        """
+        Построить запрос только с прикрепленными файлами (без истории).
+        Используется в режиме --resume, где Cursor CLI сам помнит контекст.
+        
+        Args:
+            query: Текущий запрос пользователя
+            attached_files: Список путей к прикрепленным файлам
+        
+        Returns:
+            str: Запрос с упоминанием файлов (без истории)
+        """
+        if not attached_files:
+            return query
+        
+        file_paths_in_prompt = []
+        for file_path in attached_files:
+            if file_path and file_path.exists():
+                try:
+                    relative_path = file_path.relative_to(self.kb_path)
+                    file_paths_in_prompt.append(str(relative_path))
+                except ValueError:
+                    file_paths_in_prompt.append(str(file_path))
+        
+        if file_paths_in_prompt:
+            files_list = ", ".join(file_paths_in_prompt)
+            return f"{query}\n\n[Прикрепленные файлы для анализа: {files_list}]"
+        
+        return query
     
     def _build_query_with_context(
         self,

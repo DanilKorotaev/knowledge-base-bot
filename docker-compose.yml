@@ -13,6 +13,8 @@ services:
       - ~/.local/share/knowledge-base-bot/kb:/var/knowledge-base-bot/kb
       # Логи бота
       - ./logs:/app/logs
+      # Персистентность чатов Cursor CLI (сессии --resume)
+      - cursor_chats:/root/.cursor/chats
       # Для локальной разработки: монтировать код (опционально)
       # - .:/app
     depends_on:
@@ -38,6 +40,7 @@ services:
 
 volumes:
   postgres_data:
+  cursor_chats:
 
 networks:
   bot-network:

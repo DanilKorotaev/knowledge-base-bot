@@ -109,13 +109,41 @@ class QueryProcessingService:
             cursor_start = time.time()
             cursor_service = self._get_cursor_service()
             
-            # Обработать запрос через Cursor CLI с контекстом сессии и прикрепленными файлами
+            # Получить cursor_chat_id из сессии
+            session_data = await db.get_session(session_id)
+            cursor_chat_id = session_data.get("cursor_chat_id") if session_data else None
+            
+            # Если cursor_chat_id нет (первый запрос в сессии) — создать чат
+            if not cursor_chat_id:
+                cursor_chat_id = await cursor_service.create_chat()
+                if cursor_chat_id:
+                    await db.update_session(session_id, cursor_chat_id=cursor_chat_id)
+                    logger.info(f"Создан и сохранён cursor_chat_id={cursor_chat_id} для сессии #{session_id}")
+                else:
+                    logger.warning(f"Не удалось создать чат Cursor CLI для сессии #{session_id}, используем fallback")
+            
+            # Обработать запрос через Cursor CLI
             response, changes = await cursor_service.process_query(
                 query=query,
                 session_id=session_id,
                 session_messages=session_messages,
-                attached_files=attached_files
+                attached_files=attached_files,
+                cursor_chat_id=cursor_chat_id
             )
+            
+            # Если --resume вернул ошибку, пробуем fallback без cursor_chat_id
+            if cursor_chat_id and response.startswith("❌") and "код: 1" in response:
+                logger.warning(f"--resume не сработал для chatId={cursor_chat_id}, fallback на ручную историю")
+                # Обнулить cursor_chat_id в БД
+                await db.update_session(session_id, cursor_chat_id="")
+                # Повторить запрос без --resume (с ручной передачей истории)
+                response, changes = await cursor_service.process_query(
+                    query=query,
+                    session_id=session_id,
+                    session_messages=session_messages,
+                    attached_files=attached_files,
+                    cursor_chat_id=None
+                )
             
             cursor_time = time.time() - cursor_start
             logger.info(f"⏱️ Cursor CLI обработка заняла: {cursor_time:.2f}с")

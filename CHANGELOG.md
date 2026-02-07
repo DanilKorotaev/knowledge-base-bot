@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Added
+- **Встроенные сессии Cursor CLI (`--resume`):**
+  - Гибридный подход: собственные сессии БД + встроенные сессии Cursor CLI
+  - Новый метод `CursorCLIService.create_chat()` для создания чатов через `cursor-agent create-chat`
+  - Поле `cursor_chat_id` в таблице `sessions` (миграция для SQLite и PostgreSQL)
+  - Автоматическое создание чата при первом запросе в сессии (lazy initialization)
+  - Использование `--resume <chatId>` для продолжения диалога без передачи истории
+  - Fallback на ручную передачу истории при ошибке `--resume`
+  - Docker volume `cursor_chats` для персистентности чатов Cursor CLI
 - Базовая структура проекта
 - Конфигурация через переменные окружения
 - Поддержка PostgreSQL и SQLite

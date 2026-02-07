@@ -71,10 +71,22 @@ class PostgreSQLDatabase(DatabaseInterface):
                     session_type VARCHAR(50) NOT NULL,
                     status VARCHAR(50) DEFAULT 'active',
                     context_files TEXT[],
+                    cursor_chat_id VARCHAR(255),
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            
+            # Миграция: добавить поле cursor_chat_id, если его нет
+            session_column_check = await conn.fetch("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='sessions' AND column_name = 'cursor_chat_id'
+            """)
+            if not session_column_check:
+                await conn.execute("""
+                    ALTER TABLE sessions ADD COLUMN cursor_chat_id VARCHAR(255)
+                """)
             
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -213,7 +225,8 @@ class PostgreSQLDatabase(DatabaseInterface):
         self,
         session_id: int,
         status: Optional[str] = None,
-        context_files: Optional[List[str]] = None
+        context_files: Optional[List[str]] = None,
+        cursor_chat_id: Optional[str] = None
     ) -> None:
         """Обновить сессию"""
         updates = []
@@ -228,6 +241,12 @@ class PostgreSQLDatabase(DatabaseInterface):
         if context_files is not None:
             updates.append(f"context_files = ${param_num}")
             params.append(context_files)
+            param_num += 1
+        
+        if cursor_chat_id is not None:
+            updates.append(f"cursor_chat_id = ${param_num}")
+            # Пустая строка означает сброс cursor_chat_id
+            params.append(cursor_chat_id if cursor_chat_id else None)
             param_num += 1
         
         updates.append(f"updated_at = NOW()")

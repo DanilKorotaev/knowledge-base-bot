@@ -55,10 +55,20 @@ class SQLiteDatabase(DatabaseInterface):
                     session_type TEXT NOT NULL,
                     status TEXT DEFAULT 'active',
                     context_files TEXT,
+                    cursor_chat_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Миграция: добавить поле cursor_chat_id, если его нет
+            cursor = await db.execute("PRAGMA table_info(sessions)")
+            session_columns = {row[1] for row in await cursor.fetchall()}
+            
+            if 'cursor_chat_id' not in session_columns:
+                await db.execute("ALTER TABLE sessions ADD COLUMN cursor_chat_id TEXT")
+            
+            await db.commit()
             
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
@@ -174,7 +184,7 @@ class SQLiteDatabase(DatabaseInterface):
             
             session_id = cursor.lastrowid
             cursor = await db.execute("""
-                SELECT id, user_id, session_type, status, context_files, created_at, updated_at
+                SELECT id, user_id, session_type, status, context_files, cursor_chat_id, created_at, updated_at
                 FROM sessions WHERE id = ?
             """, (session_id,))
             row = await cursor.fetchone()
@@ -184,8 +194,9 @@ class SQLiteDatabase(DatabaseInterface):
                 "session_type": row[2],
                 "status": row[3],
                 "context_files": json.loads(row[4]) if row[4] else [],
-                "created_at": row[5],
-                "updated_at": row[6]
+                "cursor_chat_id": row[5],
+                "created_at": row[6],
+                "updated_at": row[7]
             }
     
     async def get_session(self, session_id: int) -> Optional[Dict[str, Any]]:
@@ -193,7 +204,8 @@ class SQLiteDatabase(DatabaseInterface):
         import json
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                SELECT * FROM sessions WHERE id = ?
+                SELECT id, user_id, session_type, status, context_files, cursor_chat_id, created_at, updated_at
+                FROM sessions WHERE id = ?
             """, (session_id,))
             row = await cursor.fetchone()
             if not row:
@@ -205,8 +217,9 @@ class SQLiteDatabase(DatabaseInterface):
                 "session_type": row[2],
                 "status": row[3],
                 "context_files": json.loads(row[4]) if row[4] else [],
-                "created_at": row[5],
-                "updated_at": row[6]
+                "cursor_chat_id": row[5],
+                "created_at": row[6],
+                "updated_at": row[7]
             }
     
     async def get_active_session(self, user_id: int) -> Optional[Dict[str, Any]]:
@@ -214,7 +227,8 @@ class SQLiteDatabase(DatabaseInterface):
         import json
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                SELECT * FROM sessions 
+                SELECT id, user_id, session_type, status, context_files, cursor_chat_id, created_at, updated_at
+                FROM sessions 
                 WHERE user_id = ? AND status = 'active'
                 ORDER BY created_at DESC
                 LIMIT 1
@@ -229,8 +243,9 @@ class SQLiteDatabase(DatabaseInterface):
                 "session_type": row[2],
                 "status": row[3],
                 "context_files": json.loads(row[4]) if row[4] else [],
-                "created_at": row[5],
-                "updated_at": row[6]
+                "cursor_chat_id": row[5],
+                "created_at": row[6],
+                "updated_at": row[7]
             }
     
     async def get_user_sessions(
@@ -242,7 +257,7 @@ class SQLiteDatabase(DatabaseInterface):
         """Получить список сессий пользователя"""
         import json
         async with aiosqlite.connect(self.db_path) as db:
-            query = "SELECT * FROM sessions WHERE user_id = ?"
+            query = "SELECT id, user_id, session_type, status, context_files, cursor_chat_id, created_at, updated_at FROM sessions WHERE user_id = ?"
             params = [user_id]
             
             if status:
@@ -265,8 +280,9 @@ class SQLiteDatabase(DatabaseInterface):
                     "session_type": row[2],
                     "status": row[3],
                     "context_files": json.loads(row[4]) if row[4] else [],
-                    "created_at": row[5],
-                    "updated_at": row[6]
+                    "cursor_chat_id": row[5],
+                    "created_at": row[6],
+                    "updated_at": row[7]
                 })
             
             return sessions
@@ -275,7 +291,8 @@ class SQLiteDatabase(DatabaseInterface):
         self,
         session_id: int,
         status: Optional[str] = None,
-        context_files: Optional[List[str]] = None
+        context_files: Optional[List[str]] = None,
+        cursor_chat_id: Optional[str] = None
     ) -> None:
         """Обновить сессию"""
         import json
@@ -289,6 +306,11 @@ class SQLiteDatabase(DatabaseInterface):
         if context_files is not None:
             updates.append("context_files = ?")
             params.append(json.dumps(context_files))
+        
+        if cursor_chat_id is not None:
+            updates.append("cursor_chat_id = ?")
+            # Пустая строка означает сброс cursor_chat_id
+            params.append(cursor_chat_id if cursor_chat_id else None)
         
         updates.append("updated_at = CURRENT_TIMESTAMP")
         params.append(session_id)

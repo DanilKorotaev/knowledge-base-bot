@@ -54,7 +54,8 @@ class DatabaseInterface(ABC):
         self,
         session_id: int,
         status: Optional[str] = None,
-        context_files: Optional[List[str]] = None
+        context_files: Optional[List[str]] = None,
+        cursor_chat_id: Optional[str] = None
     ) -> None:
         """Обновить сессию"""
         pass
