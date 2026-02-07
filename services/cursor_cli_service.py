@@ -36,45 +36,56 @@ class CursorCLIService:
     
     def _ensure_cursorignore(self) -> None:
         """
-        Скопировать .cursorignore в базу знаний для оптимизации сканирования
+        Скопировать файлы игнорирования в базу знаний для оптимизации сканирования
+        
+        Поддерживаются два типа файлов:
+        - .cursorignore: полное исключение файлов (нельзя читать)
+        - .cursorindexingignore: не индексировать, но можно читать по запросу
         
         Приоритет загрузки:
         1. Путь из переменной окружения CURSOR_IGNORE_PATH (если указан)
-        2. Файл из проекта: .cursorignore
+        2. Файл из проекта
         3. Если не найден, не создавать (пользователь может создать свой)
         """
-        cursorignore_dest = self.kb_path / ".cursorignore"
+        # Копируем оба типа файлов
+        for ignore_file in [".cursorignore", ".cursorindexingignore"]:
+            self._copy_ignore_file(ignore_file)
+    
+    def _copy_ignore_file(self, filename: str) -> None:
+        """Скопировать файл игнорирования если он не существует"""
+        dest = self.kb_path / filename
         
-        # Если файл уже существует в БЗ, не перезаписываем его (пользователь мог настроить свой)
-        if cursorignore_dest.exists():
-            logger.debug(f".cursorignore уже существует в БЗ: {cursorignore_dest}")
+        # Если файл уже существует в БЗ, не перезаписываем его
+        if dest.exists():
+            logger.debug(f"{filename} уже существует в БЗ: {dest}")
             return
         
         # Проверяем, указан ли путь в переменной окружения
-        custom_path = os.getenv("CURSOR_IGNORE_PATH")
+        env_var = f"CURSOR_{filename.upper().replace('.', '_')}_PATH"
+        custom_path = os.getenv(env_var) or os.getenv("CURSOR_IGNORE_PATH") if filename == ".cursorignore" else None
+        
         if custom_path:
             ignore_source = Path(custom_path)
             if not ignore_source.is_absolute():
-                # Относительный путь - от проекта
                 project_root = Path(__file__).parent.parent
                 ignore_source = project_root / ignore_source
             if ignore_source.exists():
                 import shutil
-                shutil.copy2(ignore_source, cursorignore_dest)
-                logger.info(f"Скопирован .cursorignore из указанного пути: {ignore_source}")
+                shutil.copy2(ignore_source, dest)
+                logger.info(f"Скопирован {filename} из указанного пути: {ignore_source}")
                 return
             else:
-                logger.warning(f"Указанный путь к .cursorignore не найден: {ignore_source}")
+                logger.warning(f"Указанный путь к {filename} не найден: {ignore_source}")
         
         # Пробуем загрузить из проекта
         project_root = Path(__file__).parent.parent
-        project_ignore_path = project_root / ".cursorignore"
+        project_ignore_path = project_root / filename
         if project_ignore_path.exists():
             import shutil
-            shutil.copy2(project_ignore_path, cursorignore_dest)
-            logger.info(f"Скопирован .cursorignore из проекта: {project_ignore_path}")
+            shutil.copy2(project_ignore_path, dest)
+            logger.info(f"Скопирован {filename} из проекта: {project_ignore_path}")
         else:
-            logger.debug("Файл .cursorignore не найден в проекте (это нормально, можно создать свой)")
+            logger.debug(f"Файл {filename} не найден в проекте (это нормально, можно создать свой)")
     
     def _ensure_cursor_rules(self) -> None:
         """Создать .cursor/rules/ и скопировать системные промпты"""
@@ -237,10 +248,13 @@ class CursorCLIService:
         # --force: принудительное выполнение
         cmd = ["cursor-agent", "-p", "--force"]
         
-        # Добавить модель, если указана
+        # Добавить модель, если указана конкретная (не auto)
+        # Если model = "auto" или пустая — Cursor CLI сам выберет модель
         model_to_use = model or self.model
-        if model_to_use:
+        if model_to_use and model_to_use.lower() != "auto":
             cmd.extend(["--model", model_to_use])
+        else:
+            logger.debug("Модель не указана или 'auto' — Cursor CLI выберет автоматически")
         
         # Дополнительные флаги для оптимизации (если доступны)
         # Можно добавить через переменные окружения для экспериментов
