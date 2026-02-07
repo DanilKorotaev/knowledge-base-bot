@@ -94,8 +94,11 @@ class SessionService:
         """
         db = await self._get_db()
         
-        # Получить активную сессию
-        active_session = await db.get_active_session(user_id)
+        # Преобразовать Telegram ID в внутренний DB ID
+        user = await db.ensure_user(user_id)
+        
+        # Получить активную сессию по внутреннему DB ID
+        active_session = await db.get_active_session(user["id"])
         
         if active_session:
             await db.update_session(active_session["id"], status=str(SessionStatus.COMPLETED))
