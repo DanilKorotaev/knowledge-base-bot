@@ -23,6 +23,9 @@
 
 ### Улучшения UX
 
+- [ ] [Исправить отображение путей к файлам в Telegram](tasks/pending/task-ux-fix-file-paths-in-telegram.md)
+- [ ] [Стриминг ответов Cursor CLI в Telegram](tasks/pending/task-feature-streaming-responses.md)
+- [ ] [Прямые ссылки на файлы в NextCloud Web UI](tasks/pending/task-feature-nextcloud-web-links.md)
 - [ ] [Улучшение интерфейса команд](tasks/pending/task-ux-commands-improvement.md)
 
 ### Технические улучшения
