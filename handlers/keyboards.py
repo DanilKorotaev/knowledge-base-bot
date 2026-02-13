@@ -4,7 +4,7 @@
 from typing import List, Dict, Optional
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton,
-    KeyboardButtonRequestUsers
+    KeyboardButtonRequestUsers, WebAppInfo
 )
 
 
@@ -439,6 +439,8 @@ def get_main_menu_inline_keyboard_with_admin(
         is_admin: Является ли пользователь администратором
         active_session: Информация об активной сессии (если есть)
     """
+    from config import config
+    
     keyboard = [
         [
             InlineKeyboardButton(text="📚 Новый запрос", callback_data="main_new_query"),
@@ -453,6 +455,15 @@ def get_main_menu_inline_keyboard_with_admin(
             InlineKeyboardButton(text="❓ Помощь", callback_data="main_help")
         ]
     ]
+    
+    # Добавить кнопку Mini App для управления сессиями (если настроен URL)
+    if config.MINIAPP_URL:
+        keyboard.append([
+            InlineKeyboardButton(
+                text="🌐 Открыть Mini App",
+                web_app=WebAppInfo(url=config.MINIAPP_URL)
+            )
+        ])
     
     # Добавить кнопку режима сбора, если есть активная сессия
     if active_session:
@@ -544,6 +555,48 @@ def get_users_selection_keyboard(
     ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_miniapp_inline_keyboard(web_app_url: str = None) -> Optional[InlineKeyboardMarkup]:
+    """Клавиатура с кнопкой Mini App для управления сессиями"""
+    from config import config
+    if web_app_url is None:
+        web_app_url = config.MINIAPP_URL
+    
+    if not web_app_url:
+        return None
+    
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📋 Управление сессиями",
+                    web_app=WebAppInfo(url=web_app_url)
+                )
+            ]
+        ]
+    )
+
+
+def get_file_view_button(web_app_url: str, file_path: str) -> Optional[InlineKeyboardMarkup]:
+    """Кнопка для просмотра файла в Mini App"""
+    if not web_app_url:
+        return None
+    
+    # URL для просмотра конкретного файла
+    import urllib.parse
+    view_url = f"{web_app_url}#file:{urllib.parse.quote(file_path)}"
+    
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👁 Просмотреть файл",
+                    web_app=WebAppInfo(url=view_url)
+                )
+            ]
+        ]
+    )
 
 
 def get_admin_contact_request_keyboard(action: str) -> tuple[ReplyKeyboardMarkup, InlineKeyboardMarkup]:

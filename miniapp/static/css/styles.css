@@ -1,0 +1,806 @@
+/* ============================================
+   Knowledge Base Bot — Mini App Styles
+   Telegram Web App Compatible
+   ============================================ */
+
+/* CSS Variables — Telegram Theme Integration */
+:root {
+    --tg-theme-bg-color: #ffffff;
+    --tg-theme-text-color: #000000;
+    --tg-theme-hint-color: #999999;
+    --tg-theme-link-color: #2481cc;
+    --tg-theme-button-color: #2481cc;
+    --tg-theme-button-text-color: #ffffff;
+    --tg-theme-secondary-bg-color: #f0f0f0;
+
+    --bg: var(--tg-theme-bg-color);
+    --text: var(--tg-theme-text-color);
+    --hint: var(--tg-theme-hint-color);
+    --link: var(--tg-theme-link-color);
+    --btn: var(--tg-theme-button-color);
+    --btn-text: var(--tg-theme-button-text-color);
+    --secondary-bg: var(--tg-theme-secondary-bg-color);
+
+    --success: #34c759;
+    --danger: #ff3b30;
+    --warning: #ff9500;
+    --info: #5ac8fa;
+
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
+    --transition: 0.2s ease;
+}
+
+/* Reset & Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+        Ubuntu, Cantarell, sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+    min-height: 100vh;
+}
+
+#app {
+    max-width: 600px;
+    margin: 0 auto;
+    padding-bottom: 20px;
+}
+
+/* ============================================
+   Screens
+   ============================================ */
+.screen {
+    display: none;
+    padding: 16px;
+    animation: fadeIn 0.2s ease;
+}
+
+.screen.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================
+   Loading Screen
+   ============================================ */
+.loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    gap: 16px;
+}
+
+.spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid var(--secondary-bg);
+    border-top: 3px solid var(--btn);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loader p {
+    color: var(--hint);
+    font-size: 14px;
+}
+
+/* ============================================
+   Header
+   ============================================ */
+.header {
+    margin-bottom: 16px;
+}
+
+.header h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 12px;
+}
+
+.header h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.back-btn {
+    background: none;
+    border: none;
+    color: var(--link);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 0;
+    margin-bottom: 8px;
+    display: inline-block;
+    font-weight: 500;
+}
+
+.back-btn:active {
+    opacity: 0.6;
+}
+
+/* ============================================
+   Search Bar
+   ============================================ */
+.search-bar {
+    margin-bottom: 10px;
+}
+
+.search-bar input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 2px solid var(--secondary-bg);
+    border-radius: var(--radius);
+    font-size: 14px;
+    background: var(--secondary-bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color var(--transition);
+    font-family: inherit;
+}
+
+.search-bar input:focus {
+    border-color: var(--btn);
+    background: var(--bg);
+}
+
+.search-bar input::placeholder {
+    color: var(--hint);
+}
+
+/* ============================================
+   Filters
+   ============================================ */
+.filters {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+}
+
+.filter-btn {
+    background: var(--secondary-bg);
+    border: none;
+    border-radius: 20px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all var(--transition);
+    font-weight: 500;
+}
+
+.filter-btn.active {
+    background: var(--btn);
+    color: var(--btn-text);
+}
+
+.filter-btn:active {
+    transform: scale(0.95);
+}
+
+/* ============================================
+   Sessions List
+   ============================================ */
+.sessions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.session-card {
+    background: var(--secondary-bg);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all var(--transition);
+    position: relative;
+    border: 2px solid transparent;
+}
+
+.session-card:active {
+    transform: scale(0.98);
+}
+
+.session-card.active {
+    border-color: var(--success);
+}
+
+.session-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.session-id {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+.session-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.session-status.active {
+    background: rgba(52, 199, 89, 0.15);
+    color: var(--success);
+}
+
+.session-status.completed {
+    background: rgba(153, 153, 153, 0.15);
+    color: var(--hint);
+}
+
+.session-card-body {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--hint);
+}
+
+.session-type {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.session-messages-count {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.session-date {
+    margin-left: auto;
+    font-size: 12px;
+}
+
+/* ============================================
+   Empty State
+   ============================================ */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 40vh;
+    text-align: center;
+    gap: 8px;
+}
+
+.empty-icon {
+    font-size: 48px;
+    margin-bottom: 8px;
+}
+
+.empty-state p {
+    font-size: 16px;
+    color: var(--text);
+    font-weight: 500;
+}
+
+.empty-state .hint {
+    font-size: 14px;
+    color: var(--hint);
+    font-weight: 400;
+}
+
+/* ============================================
+   Session Detail
+   ============================================ */
+.session-info {
+    background: var(--secondary-bg);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+
+.session-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 14px;
+}
+
+.session-info-label {
+    color: var(--hint);
+}
+
+.session-info-value {
+    font-weight: 600;
+}
+
+/* ============================================
+   Messages (Chat Style)
+   ============================================ */
+.messages-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0;
+}
+
+.message {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    position: relative;
+    word-break: break-word;
+}
+
+.message.user {
+    background: var(--btn);
+    color: var(--btn-text);
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+}
+
+.message.assistant {
+    background: var(--secondary-bg);
+    color: var(--text);
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+}
+
+.message-role {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    opacity: 0.7;
+    text-transform: uppercase;
+}
+
+.message-content {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.message-content pre {
+    background: rgba(0,0,0,0.08);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    overflow-x: auto;
+    font-size: 13px;
+    margin: 8px 0;
+}
+
+.message-content code {
+    background: rgba(0,0,0,0.06);
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.message-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.message-content ul, .message-content ol {
+    padding-left: 20px;
+    margin: 6px 0;
+}
+
+.message-content p {
+    margin: 4px 0;
+}
+
+.message-content h1, .message-content h2, .message-content h3 {
+    margin: 8px 0 4px;
+}
+
+.message-time {
+    font-size: 11px;
+    opacity: 0.5;
+    margin-top: 4px;
+    text-align: right;
+}
+
+.message.user .message-content pre {
+    background: rgba(255,255,255,0.15);
+}
+
+.message.user .message-content code {
+    background: rgba(255,255,255,0.2);
+}
+
+/* ============================================
+   Session Actions
+   ============================================ */
+.session-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0;
+}
+
+.btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    width: 100%;
+}
+
+.btn:active {
+    transform: scale(0.97);
+}
+
+.btn-primary {
+    background: var(--btn);
+    color: var(--btn-text);
+}
+
+.btn-secondary {
+    background: var(--secondary-bg);
+    color: var(--text);
+}
+
+.btn-success {
+    background: var(--success);
+    color: white;
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-warning {
+    background: var(--warning);
+    color: white;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-row {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-row .btn {
+    flex: 1;
+}
+
+/* ============================================
+   Files Browser
+   ============================================ */
+.breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--hint);
+}
+
+.breadcrumb-item {
+    cursor: pointer;
+    color: var(--link);
+}
+
+.breadcrumb-item:last-child {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.breadcrumb-separator {
+    color: var(--hint);
+}
+
+.files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.file-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--secondary-bg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.file-item:active {
+    transform: scale(0.98);
+}
+
+.file-icon {
+    font-size: 20px;
+}
+
+.file-name {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.file-size {
+    font-size: 12px;
+    color: var(--hint);
+}
+
+/* ============================================
+   File View
+   ============================================ */
+.file-content {
+    background: var(--secondary-bg);
+    border-radius: var(--radius);
+    padding: 16px;
+    font-size: 14px;
+    line-height: 1.7;
+    overflow-x: auto;
+}
+
+.file-content pre {
+    background: rgba(0,0,0,0.06);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    overflow-x: auto;
+    font-size: 13px;
+    margin: 10px 0;
+}
+
+.file-content code {
+    background: rgba(0,0,0,0.04);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.file-content pre code {
+    background: none;
+    padding: 0;
+}
+
+.file-content h1 { font-size: 22px; margin: 16px 0 8px; }
+.file-content h2 { font-size: 19px; margin: 14px 0 6px; }
+.file-content h3 { font-size: 16px; margin: 12px 0 4px; }
+
+.file-content ul, .file-content ol {
+    padding-left: 24px;
+    margin: 8px 0;
+}
+
+.file-content img {
+    max-width: 100%;
+    border-radius: var(--radius-sm);
+}
+
+.file-content blockquote {
+    border-left: 3px solid var(--btn);
+    padding-left: 12px;
+    margin: 8px 0;
+    color: var(--hint);
+}
+
+.file-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 13px;
+}
+
+.file-content th, .file-content td {
+    border: 1px solid rgba(0,0,0,0.1);
+    padding: 6px 10px;
+    text-align: left;
+}
+
+.file-content th {
+    background: rgba(0,0,0,0.04);
+    font-weight: 600;
+}
+
+/* ============================================
+   Modal
+   ============================================ */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    position: relative;
+    background: var(--bg);
+    border-radius: var(--radius);
+    padding: 24px;
+    max-width: 300px;
+    width: 90%;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+    z-index: 1;
+}
+
+.modal-content p {
+    font-size: 15px;
+    margin-bottom: 20px;
+    font-weight: 500;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.modal-actions .btn {
+    flex: 1;
+    padding: 10px;
+}
+
+/* ============================================
+   Toast
+   ============================================ */
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.toast {
+    background: var(--text);
+    color: var(--bg);
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    animation: toastIn 0.3s ease, toastOut 0.3s ease 2.5s forwards;
+    white-space: nowrap;
+    pointer-events: auto;
+}
+
+.toast.success {
+    background: var(--success);
+    color: white;
+}
+
+.toast.error {
+    background: var(--danger);
+    color: white;
+}
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toastOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+/* ============================================
+   Utilities
+   ============================================ */
+.hidden {
+    display: none !important;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.text-hint {
+    color: var(--hint);
+    font-size: 13px;
+}
+
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+
+/* Skeleton loading */
+.skeleton {
+    background: linear-gradient(90deg, var(--secondary-bg) 25%, rgba(0,0,0,0.04) 50%, var(--secondary-bg) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease infinite;
+    border-radius: var(--radius-sm);
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.skeleton-card {
+    height: 72px;
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+}
+
+.skeleton-message {
+    height: 48px;
+    margin-bottom: 12px;
+    width: 70%;
+}
+
+.skeleton-message:nth-child(even) {
+    align-self: flex-end;
+    width: 60%;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.15);
+    border-radius: 2px;
+}
+

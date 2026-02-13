@@ -50,6 +50,11 @@ class Config:
     MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "5"))
     ENABLE_CHANGE_TRACKING: bool = os.getenv("ENABLE_CHANGE_TRACKING", "true").lower() == "true"
     
+    # Mini App
+    MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)
+    MINIAPP_PORT: int = int(os.getenv("MINIAPP_PORT", "8080"))
+    MINIAPP_HOST: str = os.getenv("MINIAPP_HOST", "0.0.0.0")
+    
     # Access control
     ACCESS_MODE: str = os.getenv("ACCESS_MODE", "restricted")  # "open" or "restricted"
     ADMIN_TELEGRAM_IDS: List[int] = [
