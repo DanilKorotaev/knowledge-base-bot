@@ -5,6 +5,7 @@ import asyncio
 import subprocess
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from config import config
@@ -331,59 +332,89 @@ class CursorCLIService:
             logger.info(f"Таймаут: {timeout} секунд")
             logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")
             
+            # Попробовать stdbuf для принудительного сброса буфера stdout
+            # stdbuf -oL = line-buffered output (каждая строка сбрасывается сразу)
+            # Это помогает получить полный ответ без ожидания завершения процесса
+            use_stdbuf = os.getenv("CURSOR_CLI_USE_STDBUF", "true").lower() in ("true", "1", "yes")
+            if use_stdbuf:
+                cmd = ["stdbuf", "-oL"] + cmd
+                logger.debug("Используется stdbuf -oL для принудительного сброса буфера stdout")
+            
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.kb_path),
                 env=env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
             logger.info(f"Процесс Cursor CLI запущен (PID: {process.pid})")
             
-            # Собирать вывод в реальном времени
+            # Собирать вывод
             stdout_chunks = []
             stderr_chunks = []
+            process_start_time = time.time()
+            first_chunk_time = None
+            last_chunk_time = None
             
-            async def read_stream(stream, chunks_list, stream_name):
-                """Читать поток и логировать в реальном времени"""
-                try:
-                    while True:
-                        chunk = await stream.read(1024)
-                        if not chunk:
-                            break
-                        decoded = chunk.decode('utf-8', errors='ignore')
-                        chunks_list.append(decoded)
-                        # Логировать важные сообщения
-                        if decoded.strip():
-                            logger.debug(f"Cursor CLI {stream_name}: {decoded.strip()[:200]}")
-                except Exception as e:
-                    logger.warning(f"Ошибка при чтении {stream_name}: {e}")
+            # Таймаут бездействия: если stdout замолчал после получения первых данных
+            idle_timeout = int(os.getenv("CURSOR_CLI_IDLE_TIMEOUT", "30"))
             
-            # Читать потоки параллельно
+            # === Фаза 1: Читаем stdout с обнаружением idle ===
+            stdout_eof = False
             try:
-                await asyncio.wait_for(
-                    asyncio.gather(
-                        read_stream(process.stdout, stdout_chunks, "stdout"),
-                        read_stream(process.stderr, stderr_chunks, "stderr"),
-                        process.wait()
-                    ),
-                    timeout=timeout
-                )
+                while True:
+                    # До первого чанка: ждём до общего таймаута (AI может думать долго)
+                    # После первого чанка: ждём idle_timeout (ответ уже пошёл)
+                    read_timeout = idle_timeout if first_chunk_time else timeout
+                    try:
+                        chunk = await asyncio.wait_for(
+                            process.stdout.read(4096),
+                            timeout=read_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        if first_chunk_time and stdout_chunks:
+                            idle_elapsed = time.time() - (last_chunk_time or first_chunk_time)
+                            logger.info(
+                                f"Cursor CLI stdout: нет данных {idle_elapsed:.1f}с "
+                                f"после последнего чанка — завершаем чтение"
+                            )
+                            break  # Idle timeout — переходим к завершению процесса
+                        else:
+                            # Полный таймаут — ни одного чанка не получили
+                            raise
+                    
+                    if not chunk:
+                        stdout_eof = True
+                        break  # EOF — процесс завершился сам
+                    
+                    decoded = chunk.decode('utf-8', errors='ignore')
+                    stdout_chunks.append(decoded)
+                    last_chunk_time = time.time()
+                    
+                    if first_chunk_time is None and decoded.strip():
+                        first_chunk_time = time.time()
+                        elapsed = first_chunk_time - process_start_time
+                        logger.info(f"Cursor CLI: первый ответ через {elapsed:.1f}с")
+                    if decoded.strip():
+                        logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
+                        
             except asyncio.TimeoutError:
-                logger.error(f"Превышен таймаут ({timeout} секунд). Завершение процесса...")
+                # Полный таймаут — AI не ответил вообще
+                logger.error(f"Превышен таймаут ожидания ответа ({timeout}с). Завершаем процесс...")
                 try:
                     process.kill()
                     await asyncio.wait_for(process.wait(), timeout=5.0)
-                except (ProcessLookupError, asyncio.TimeoutError) as e:
-                    logger.warning(f"Ошибка при завершении процесса: {e}")
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    pass
                 
-                # Собрать весь вывод до таймаута
-                stdout_text = ''.join(stdout_chunks)
-                stderr_text = ''.join(stderr_chunks)
-                
-                logger.error(f"Вывод Cursor CLI (stdout): {stdout_text[:500]}")
-                logger.error(f"Вывод Cursor CLI (stderr): {stderr_text[:500]}")
+                stderr_text = ''
+                try:
+                    stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
+                    stderr_text = stderr_data.decode('utf-8', errors='ignore') if stderr_data else ''
+                except (asyncio.TimeoutError, Exception):
+                    pass
                 
                 error_msg = f"Превышено время ожидания ответа от Cursor CLI ({timeout} секунд)"
                 if stderr_text:
@@ -391,21 +422,91 @@ class CursorCLIService:
                 logger.error(error_msg)
                 return f"❌ {error_msg}", []
             
-            # Получить код возврата
-            returncode = await process.wait() if process.returncode is None else process.returncode
+            # === Фаза 2: Завершаем процесс и дочитываем буфер ===
+            process_killed_early = False
+            
+            if stdout_eof:
+                # Процесс завершился сам — все данные уже получены
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                logger.info(f"Cursor CLI: процесс завершился естественно")
+            else:
+                # Idle timeout — процесс ещё жив, но stdout замолчал
+                # Отправляем SIGTERM для корректного завершения (flush буферов)
+                if process.returncode is None:
+                    logger.info("Cursor CLI: stdout idle, отправляем SIGTERM для сброса буферов...")
+                    try:
+                        process.terminate()  # SIGTERM — позволяет процессу сбросить буферы
+                    except ProcessLookupError:
+                        pass
+                    
+                    # Ждём завершения (SIGTERM обычно вызывает flush stdout)
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=10.0)
+                        logger.info(f"Cursor CLI: процесс завершился по SIGTERM")
+                    except asyncio.TimeoutError:
+                        # SIGTERM не помог — SIGKILL
+                        logger.warning("Cursor CLI: SIGTERM не помог за 10с, отправляем SIGKILL...")
+                        try:
+                            process.kill()
+                            process_killed_early = True
+                            await asyncio.wait_for(process.wait(), timeout=5.0)
+                        except (ProcessLookupError, asyncio.TimeoutError):
+                            pass
+                
+                # Дочитать оставшиеся данные из stdout (сброшенные при завершении)
+                try:
+                    remaining = await asyncio.wait_for(process.stdout.read(), timeout=5.0)
+                    if remaining:
+                        decoded = remaining.decode('utf-8', errors='ignore')
+                        stdout_chunks.append(decoded)
+                        logger.info(
+                            f"Cursor CLI: дочитано ещё {len(remaining)} байт из stdout "
+                            f"после завершения процесса"
+                        )
+                except (asyncio.TimeoutError, Exception) as e:
+                    logger.debug(f"Cursor CLI: не удалось дочитать stdout: {e}")
+            
+            # Прочитать stderr (что есть)
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
+                if stderr_data:
+                    stderr_chunks.append(stderr_data.decode('utf-8', errors='ignore'))
+            except (asyncio.TimeoutError, Exception):
+                pass
+            
+            # === Фаза 3: Логирование и обработка результата ===
+            returncode = process.returncode
+            total_process_time = time.time() - process_start_time
+            
+            if process_killed_early:
+                logger.info(
+                    f"Cursor CLI процесс завершён принудительно (SIGKILL) за {total_process_time:.1f}с"
+                )
+            elif not stdout_eof:
+                logger.info(
+                    f"Cursor CLI процесс завершён (SIGTERM) за {total_process_time:.1f}с"
+                )
+            else:
+                logger.info(f"Cursor CLI процесс завершён за {total_process_time:.1f}с (код: {returncode})")
+            
+            if first_chunk_time:
+                response_to_done = time.time() - first_chunk_time
+                logger.info(f"Cursor CLI: от первого ответа до готовности: {response_to_done:.1f}с")
             
             # Собрать весь вывод
             stdout_text = ''.join(stdout_chunks)
             stderr_text = ''.join(stderr_chunks)
             
-            # Логировать вывод
             if stdout_text:
-                logger.debug(f"Cursor CLI stdout (полный): {stdout_text[:1000]}")
+                logger.debug(f"Cursor CLI stdout ({len(stdout_text)} символов): {stdout_text[:1000]}")
             if stderr_text:
                 logger.info(f"Cursor CLI stderr: {stderr_text[:1000]}")
             
-            # Проверить код возврата
-            if returncode != 0:
+            # Проверить код возврата (игнорируем если мы сами завершили процесс)
+            if returncode != 0 and not process_killed_early and stdout_eof:
                 error_msg = f"Ошибка выполнения Cursor CLI (код: {returncode})"
                 if stderr_text:
                     error_msg += f"\n\nОшибка:\n{stderr_text}"
@@ -436,96 +537,130 @@ class CursorCLIService:
             logger.error(error_msg, exc_info=True)
             return f"❌ {error_msg}", []
     
-    async def _save_file_states(self) -> Dict[str, str]:
-        """Сохранить состояние файлов для отслеживания изменений"""
+    async def _save_file_states(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Сохранить снимок файловой системы для отслеживания изменений.
+        
+        Сканирует файлы рекурсивно и сохраняет путь → {mtime, size}.
+        Не использует git — работает в любом окружении (Docker и т.д.).
+        
+        Returns:
+            Dict[str, Dict]: Словарь {относительный_путь: {mtime, size}}
+        """
         file_states = {}
         try:
-            # Простой способ - использовать git для отслеживания изменений
-            # Если git не инициализирован, просто вернуть пустой словарь
-            if (self.kb_path / ".git").exists():
-                # Получить список всех файлов в git
-                process = await asyncio.create_subprocess_exec(
-                    "git", "ls-files",
-                    cwd=str(self.kb_path),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await process.communicate()
-                if process.returncode == 0:
-                    files = stdout.decode('utf-8').strip().split('\n')
-                    for file_path in files:
-                        if file_path:
-                            full_path = self.kb_path / file_path
-                            if full_path.exists():
-                                try:
-                                    file_states[str(full_path)] = full_path.read_text(encoding='utf-8', errors='ignore')
-                                except Exception:
-                                    pass
+            for item in self.kb_path.rglob('*'):
+                if item.is_file():
+                    # Пропустить служебные файлы и директории
+                    rel_path = str(item.relative_to(self.kb_path))
+                    parts = Path(rel_path).parts
+                    if any(part.startswith('.') for part in parts):
+                        continue
+                    if any(part in ('__pycache__', 'node_modules') for part in parts):
+                        continue
+                    
+                    try:
+                        stat = item.stat()
+                        file_states[rel_path] = {
+                            'mtime': stat.st_mtime,
+                            'size': stat.st_size,
+                        }
+                    except OSError:
+                        pass
+            
+            logger.debug(f"Снимок файловой системы: {len(file_states)} файлов")
         except Exception as e:
-            logger.debug(f"Не удалось сохранить состояние файлов: {e}")
+            logger.warning(f"Не удалось сохранить состояние файлов: {e}")
         
         return file_states
     
-    async def _get_file_changes(self, file_states_before: Dict[str, str]) -> List[Dict[str, Any]]:
-        """Получить список измененных файлов"""
+    async def _get_file_changes(self, file_states_before: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Получить список изменённых файлов, сравнивая снимки файловой системы.
+        
+        Обнаруживает:
+        - Новые файлы (есть сейчас, не было до)
+        - Изменённые файлы (mtime или size изменились)
+        - Удалённые файлы (были до, нет сейчас)
+        
+        Args:
+            file_states_before: Снимок файловой системы ДО выполнения запроса
+        
+        Returns:
+            List[Dict]: Список изменений [{path, type, old_content, new_content}]
+        """
         changes = []
         
         try:
-            # Попробовать использовать git diff
-            if (self.kb_path / ".git").exists():
-                process = await asyncio.create_subprocess_exec(
-                    "git", "diff", "--name-only",
-                    cwd=str(self.kb_path),
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await process.communicate()
-                if process.returncode == 0:
-                    changed_files = stdout.decode('utf-8').strip().split('\n')
-                    for file_path in changed_files:
-                        if file_path:
-                            full_path = self.kb_path / file_path
-                            if full_path.exists():
-                                try:
-                                    new_content = full_path.read_text(encoding='utf-8', errors='ignore')
-                                    old_content = file_states_before.get(str(full_path), "")
-                                    
-                                    change_type = "modified"
-                                    if str(full_path) not in file_states_before:
-                                        change_type = "created"
-                                    
-                                    changes.append({
-                                        "path": file_path,
-                                        "type": change_type,
-                                        "old_content": old_content,
-                                        "new_content": new_content
-                                    })
-                                except Exception as e:
-                                    logger.debug(f"Ошибка при чтении файла {file_path}: {e}")
+            # Сделать снимок "после"
+            file_states_after = await self._save_file_states()
             
-            # Если git не используется, попробовать сравнить с сохраненными состояниями
-            if not changes:
-                for file_path, old_content in file_states_before.items():
-                    full_path = Path(file_path)
-                    if full_path.exists():
-                        try:
-                            new_content = full_path.read_text(encoding='utf-8', errors='ignore')
-                            if old_content != new_content:
-                                changes.append({
-                                    "path": str(full_path.relative_to(self.kb_path)),
-                                    "type": "modified",
-                                    "old_content": old_content,
-                                    "new_content": new_content
-                                })
-                        except Exception:
-                            pass
+            paths_before = set(file_states_before.keys())
+            paths_after = set(file_states_after.keys())
+            
+            # Новые файлы (created)
+            new_files = paths_after - paths_before
+            for rel_path in new_files:
+                full_path = self.kb_path / rel_path
+                try:
+                    new_content = full_path.read_text(encoding='utf-8', errors='ignore')
+                    changes.append({
+                        "path": rel_path,
+                        "type": "created",
+                        "old_content": None,
+                        "new_content": new_content
+                    })
+                    logger.info(f"Обнаружен новый файл: {rel_path}")
+                except Exception as e:
+                    logger.debug(f"Ошибка при чтении нового файла {rel_path}: {e}")
+            
+            # Изменённые файлы (modified) — mtime или size изменились
+            common_files = paths_before & paths_after
+            for rel_path in common_files:
+                before = file_states_before[rel_path]
+                after = file_states_after[rel_path]
+                
+                if before['mtime'] != after['mtime'] or before['size'] != after['size']:
+                    full_path = self.kb_path / rel_path
+                    try:
+                        new_content = full_path.read_text(encoding='utf-8', errors='ignore')
+                        changes.append({
+                            "path": rel_path,
+                            "type": "modified",
+                            "old_content": None,  # Не храним полное содержимое до
+                            "new_content": new_content
+                        })
+                        logger.info(f"Обнаружен изменённый файл: {rel_path}")
+                    except Exception as e:
+                        logger.debug(f"Ошибка при чтении изменённого файла {rel_path}: {e}")
+            
+            # Удалённые файлы (deleted)
+            deleted_files = paths_before - paths_after
+            for rel_path in deleted_files:
+                changes.append({
+                    "path": rel_path,
+                    "type": "deleted",
+                    "old_content": None,
+                    "new_content": None
+                })
+                logger.info(f"Обнаружен удалённый файл: {rel_path}")
+            
+            if changes:
+                logger.info(
+                    f"Обнаружено изменений: {len(changes)} "
+                    f"(новых: {len(new_files)}, изменённых: {len(changes) - len(new_files) - len(deleted_files)}, "
+                    f"удалённых: {len(deleted_files)})"
+                )
+            else:
+                logger.debug("Изменений файлов не обнаружено")
+                
         except Exception as e:
-            logger.debug(f"Ошибка при получении изменений файлов: {e}")
+            logger.warning(f"Ошибка при получении изменений файлов: {e}")
         
         return changes
     
     async def get_file_changes(self) -> List[Dict[str, Any]]:
-        """Получить список измененных файлов (через git diff)"""
+        """Получить список изменённых файлов (сравнение с пустым состоянием)"""
         return await self._get_file_changes({})
     
     def _build_query_with_files_only(

@@ -674,10 +674,11 @@ class SyncService:
     
     async def sync_changes(self, changes: List[Dict[str, Any]]) -> bool:
         """
-        Синхронизировать список изменений
+        Синхронизировать список изменений (загрузить новые/изменённые, удалить удалённые)
         
         Args:
-            changes: Список изменений файлов (из cursor_cli_service)
+            changes: Список изменений файлов (из cursor_cli_service).
+                     Каждый элемент: {path, type: "created"|"modified"|"deleted", ...}
         
         Returns:
             bool: True если синхронизация успешна
@@ -686,8 +687,37 @@ class SyncService:
             return False
         
         try:
-            file_paths = [change['path'] for change in changes]
-            return await self.sync_to_nextcloud(file_paths)
+            # Разделить изменения по типу
+            files_to_upload = [
+                change['path'] for change in changes 
+                if change.get('type') in ('created', 'modified')
+            ]
+            files_to_delete = [
+                change['path'] for change in changes 
+                if change.get('type') == 'deleted'
+            ]
+            
+            success = True
+            
+            # Загрузить новые/изменённые файлы
+            if files_to_upload:
+                logger.info(f"Синхронизация в NextCloud: загрузка {len(files_to_upload)} файлов")
+                upload_result = await self.sync_to_nextcloud(files_to_upload)
+                if not upload_result:
+                    success = False
+            
+            # Удалить удалённые файлы из NextCloud
+            if files_to_delete:
+                logger.info(f"Синхронизация в NextCloud: удаление {len(files_to_delete)} файлов")
+                for file_path in files_to_delete:
+                    try:
+                        await self.nextcloud_service.delete_file(file_path)
+                        logger.debug(f"Удалён файл из NextCloud: {file_path}")
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить файл из NextCloud {file_path}: {e}")
+                        success = False
+            
+            return success
         except Exception as e:
             logger.error(f"Ошибка при синхронизации изменений: {e}")
             return False

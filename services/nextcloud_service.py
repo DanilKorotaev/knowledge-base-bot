@@ -111,9 +111,48 @@ class NextCloudService:
             logger.error(f"Ошибка при скачивании файла {remote_path}: {e}")
             return False
     
+    def _ensure_remote_directory(self, remote_dir_path: str) -> None:
+        """
+        Создать директорию в NextCloud (рекурсивно, если нужно).
+        Используется MKCOL запрос. Игнорирует ошибку, если директория уже существует (405).
+        
+        Args:
+            remote_dir_path: Путь к директории (относительно base_path)
+        """
+        if not remote_dir_path or remote_dir_path == '/':
+            return
+        
+        # Собрать все уровни пути
+        parts = Path(remote_dir_path).parts
+        current_path = ""
+        
+        for part in parts:
+            current_path = f"{current_path}/{part}".lstrip('/')
+            url = self._get_webdav_url(current_path)
+            auth = HTTPBasicAuth(self.username, self.password)
+            
+            try:
+                response = requests.request(
+                    method='MKCOL',
+                    url=url,
+                    auth=auth,
+                    timeout=15
+                )
+                # 201 Created, 405 Already Exists — оба варианта OK
+                if response.status_code in (201, 405):
+                    continue
+                elif response.status_code == 409:
+                    # Родительская директория не существует — странно, мы идём рекурсивно
+                    logger.warning(f"MKCOL 409 для {current_path}")
+                else:
+                    logger.debug(f"MKCOL {current_path}: статус {response.status_code}")
+            except Exception as e:
+                logger.debug(f"Ошибка MKCOL для {current_path}: {e}")
+    
     async def upload_file(self, local_path: Path, remote_path: str) -> bool:
         """
-        Загрузить файл в NextCloud
+        Загрузить файл в NextCloud.
+        Автоматически создаёт родительские директории, если они не существуют.
         
         Args:
             local_path: Локальный путь к файлу
@@ -131,7 +170,20 @@ class NextCloudService:
         
         try:
             file_content = local_path.read_bytes()
-            self._make_request('PUT', remote_path, data=file_content)
+            
+            try:
+                self._make_request('PUT', remote_path, data=file_content)
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 409:
+                    # 409 Conflict — родительская директория не существует
+                    # Создать директории и повторить загрузку
+                    parent_dir = str(Path(remote_path).parent)
+                    logger.info(f"Создаю директорию в NextCloud: {parent_dir}")
+                    self._ensure_remote_directory(parent_dir)
+                    self._make_request('PUT', remote_path, data=file_content)
+                else:
+                    raise
+            
             logger.info(f"Файл загружен: {local_path} -> {remote_path}")
             return True
         except Exception as e:
