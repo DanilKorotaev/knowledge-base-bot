@@ -14,6 +14,7 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from .auth import verify_telegram_auth
+from .notify import send_chat_notification
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -156,11 +157,30 @@ async def get_session_messages(
     limit: Optional[int] = Query(None, ge=1, le=500, description="Максимальное количество сообщений"),
     telegram_id: int = Depends(verify_telegram_auth)
 ):
-    """Получить сообщения сессии"""
+    """Получить сообщения сессии с вложениями"""
     session, user = await _verify_session_access(session_id, telegram_id)
     
     db = await _get_db()
     messages = await db.get_session_messages(session_id, limit=limit)
+    
+    # Получаем вложения сессии и группируем по message_id
+    attachments = await db.get_session_attachments(session_id)
+    attachments_by_msg = {}
+    for att in attachments:
+        msg_id = att.get("message_id")
+        if msg_id not in attachments_by_msg:
+            attachments_by_msg[msg_id] = []
+        attachments_by_msg[msg_id].append({
+            "id": att["id"],
+            "file_type": att["file_type"],
+            "file_name": att.get("file_name"),
+            "file_size": att.get("file_size"),
+            "created_at": str(att.get("created_at", "")),
+        })
+    
+    # Добавляем вложения к сообщениям
+    for msg in messages:
+        msg["attachments"] = attachments_by_msg.get(msg["id"], [])
     
     return {
         "messages": messages,
@@ -189,6 +209,20 @@ async def switch_session(
     
     logger.info(f"Пользователь {telegram_id} переключился на сессию #{session_id}")
     
+    # Уведомление в чат
+    session_type = session.get("session_type", "")
+    type_label = "📚 с контекстом БЗ" if session_type == "query_with_kb" else "💬 без контекста"
+    messages = await db.get_session_messages(session_id)
+    msg_count = len(messages)
+    
+    await send_chat_notification(
+        telegram_id,
+        f"🔄 <b>Сессия переключена</b>\n\n"
+        f"Активна сессия <b>#{session_id}</b> ({type_label})\n"
+        f"Сообщений в сессии: {msg_count}\n\n"
+        f"<i>Продолжайте общение — бот использует контекст этой сессии.</i>"
+    )
+    
     return {
         "success": True,
         "session_id": session_id,
@@ -212,6 +246,13 @@ async def end_session(
     
     logger.info(f"Пользователь {telegram_id} завершил сессию #{session_id}")
     
+    # Уведомление в чат
+    await send_chat_notification(
+        telegram_id,
+        f"⏹ <b>Сессия #{session_id} завершена</b>\n\n"
+        f"Следующее сообщение начнёт новую сессию."
+    )
+    
     return {
         "success": True,
         "session_id": session_id,
@@ -228,15 +269,114 @@ async def delete_session(
     session, user = await _verify_session_access(session_id, telegram_id)
     
     db = await _get_db()
+    was_active = session["status"] == "active"
     await db.update_session(session_id, status="deleted")
     
     logger.info(f"Пользователь {telegram_id} удалил сессию #{session_id}")
+    
+    # Уведомление в чат
+    extra = "\nСледующее сообщение начнёт новую сессию." if was_active else ""
+    await send_chat_notification(
+        telegram_id,
+        f"🗑 <b>Сессия #{session_id} удалена</b>{extra}"
+    )
     
     return {
         "success": True,
         "session_id": session_id,
         "message": f"Сессия #{session_id} удалена"
     }
+
+
+@router.get("/attachments/{attachment_id}/file")
+async def get_attachment_file(
+    attachment_id: int,
+    telegram_id: int = Depends(verify_telegram_auth)
+):
+    """
+    Прокси для скачивания файла вложения через Telegram Bot API.
+    Не выставляет токен бота на фронтенд.
+    """
+    import httpx
+    from fastapi.responses import StreamingResponse
+    from config import config
+    
+    db = await _get_db()
+    
+    # Найти вложение
+    # Получаем все вложения для проверки доступа
+    # (нужно найти session_id, чтобы проверить что пользователь владеет сессией)
+    user = await db.ensure_user(telegram_id)
+    
+    # Пробуем найти вложение в сессиях пользователя
+    all_sessions = await db.get_user_sessions(user["id"], limit=200)
+    
+    target_attachment = None
+    for session in all_sessions:
+        attachments = await db.get_session_attachments(session["id"])
+        for att in attachments:
+            if att["id"] == attachment_id:
+                target_attachment = att
+                break
+        if target_attachment:
+            break
+    
+    if not target_attachment:
+        raise HTTPException(status_code=404, detail="Вложение не найдено")
+    
+    file_id = target_attachment["file_id"]
+    file_type = target_attachment.get("file_type", "")
+    file_name = target_attachment.get("file_name", f"file_{attachment_id}")
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Получаем file_path от Telegram
+            resp = await client.get(
+                f"https://api.telegram.org/bot{config.TELEGRAM_TOKEN}/getFile",
+                params={"file_id": file_id}
+            )
+            data = resp.json()
+            
+            if not data.get("ok"):
+                raise HTTPException(status_code=404, detail="Файл недоступен в Telegram")
+            
+            tg_file_path = data["result"]["file_path"]
+            file_url = f"https://api.telegram.org/file/bot{config.TELEGRAM_TOKEN}/{tg_file_path}"
+            
+            # Стримим файл
+            tg_resp = await client.get(file_url)
+            
+            # Определяем content-type
+            content_type_map = {
+                "photo": "image/jpeg",
+                "voice": "audio/ogg",
+                "audio": "audio/mpeg",
+                "video": "video/mp4",
+                "document": "application/octet-stream",
+            }
+            content_type = content_type_map.get(file_type, "application/octet-stream")
+            
+            # Для фото берём content-type из расширения
+            if tg_file_path.endswith(".jpg") or tg_file_path.endswith(".jpeg"):
+                content_type = "image/jpeg"
+            elif tg_file_path.endswith(".png"):
+                content_type = "image/png"
+            elif tg_file_path.endswith(".webp"):
+                content_type = "image/webp"
+            
+            return StreamingResponse(
+                iter([tg_resp.content]),
+                media_type=content_type,
+                headers={
+                    "Content-Disposition": f'inline; filename="{file_name}"',
+                    "Cache-Control": "public, max-age=3600",
+                }
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка загрузки вложения {attachment_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка загрузки файла")
 
 
 @router.get("/files/view")
