@@ -339,7 +339,7 @@ def get_transcribe_inline_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_voice_action_collecting_keyboard(voice_id: str) -> InlineKeyboardMarkup:
-    """Клавиатура выбора действия для голосового в режиме сбора сообщений"""
+    """Клавиатура выбора действия для голосового в режиме сбора сообщений (legacy)"""
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -352,6 +352,22 @@ def get_voice_action_collecting_keyboard(voice_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text="🎤 Только транскрибировать",
                     callback_data=f"voice_transcribe_only_{voice_id}"
+                )
+            ]
+        ]
+    )
+    return keyboard
+
+
+def get_voice_collected_keyboard(voice_id: str) -> InlineKeyboardMarkup:
+    """Клавиатура для голосового, автоматически добавленного в режиме сбора.
+    Полная расшифровка отправляется отдельным сообщением, поэтому здесь только кнопка исправления."""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✏️ Исправить расшифровку",
+                    callback_data=f"voice_correct_{voice_id}"
                 )
             ]
         ]

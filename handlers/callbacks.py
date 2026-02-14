@@ -1020,7 +1020,95 @@ async def transcribe_last_voice_callback(callback: CallbackQuery):
     await callback.answer("🎤 Расшифровка начата")
 
 
-# ========== Обработчики выбора действия с голосовым сообщением ==========
+# ========== Обработчики для голосовых в режиме сбора (авто-прикрепление) ==========
+
+@router.callback_query(lambda c: c.data.startswith("voice_show_full_"))
+async def voice_show_full_callback(callback: CallbackQuery, state: FSMContext):
+    """Показать полную расшифровку голосового сообщения в режиме сбора"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_show_full_", "")
+        state_data = await state.get_data()
+        voice_ref = state_data.get(f"voice_ref_{voice_id}")
+        
+        if not voice_ref:
+            await callback.message.answer("❌ Данные расшифровки не найдены.")
+            return
+        
+        transcription = voice_ref["transcription"]
+        
+        # Показать полную расшифровку отдельным сообщением для удобного копирования
+        from utils.message_helpers import markdown_to_html
+        try:
+            html_text = markdown_to_html(transcription)
+            await callback.message.answer(
+                f"🎤 <b>Полная расшифровка:</b>\n\n{html_text}",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            await callback.message.answer(
+                f"🎤 Полная расшифровка:\n\n{transcription}",
+                parse_mode=None
+            )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при показе полной расшифровки: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.callback_query(lambda c: c.data.startswith("voice_correct_"))
+async def voice_correct_callback(callback: CallbackQuery, state: FSMContext):
+    """Исправить расшифровку голосового — удаляет голосовое из билдера и показывает текст для копирования"""
+    await callback.answer()
+    
+    try:
+        voice_id = callback.data.replace("voice_correct_", "")
+        state_data = await state.get_data()
+        voice_ref = state_data.get(f"voice_ref_{voice_id}")
+        
+        if not voice_ref:
+            await callback.message.answer("❌ Данные расшифровки не найдены.")
+            return
+        
+        file_id = voice_ref["file_id"]
+        transcription = voice_ref["transcription"]
+        
+        # Удалить голосовое из QueryBuilder
+        builder = query_builder_from_state(state_data)
+        builder.voice_files = [v for v in builder.voice_files if v.get("file_id") != file_id]
+        
+        # Сохранить builder и очистить ссылку
+        new_state = query_builder_to_state(builder)
+        new_state[f"voice_ref_{voice_id}"] = None
+        await state.update_data(**new_state)
+        
+        summary = builder.get_summary()
+        
+        logger.info(f"Голосовое {file_id} удалено из билдера для исправления. Осталось голосовых: {len(builder.voice_files)}")
+        
+        # Обновить сообщение — убрать кнопки
+        try:
+            await callback.message.edit_text(
+                f"✏️ Расшифровка удалена из запроса.\n\n{summary}" if summary != "Пусто" else "✏️ Расшифровка удалена из запроса.",
+                reply_markup=None,
+                parse_mode=None
+            )
+        except Exception:
+            pass
+        
+        # Показать текст расшифровки для копирования
+        await callback.message.answer(
+            f"📋 Скопируйте текст, исправьте и отправьте как сообщение:\n\n{transcription}",
+            parse_mode=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при исправлении расшифровки: {e}", exc_info=True)
+        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+
+
+# ========== Обработчики выбора действия с голосовым сообщением (обычный режим) ==========
 
 @router.callback_query(lambda c: c.data.startswith("voice_add_to_collect_"))
 async def voice_add_to_collect_callback(callback: CallbackQuery, state: FSMContext):
@@ -1045,12 +1133,10 @@ async def voice_add_to_collect_callback(callback: CallbackQuery, state: FSMConte
         builder = query_builder_from_state(state_data) if (state_data.get("text_parts") or state_data.get("voice_files") or state_data.get("media_files")) else QueryBuilder()
         builder.add_voice(file_id, audio_path, transcribed_text)
         
-        # Сохранить обратно в состояние
-        await state.update_data(**query_builder_to_state(builder))
-        
-        # Удалить временные данные голосового
-        state_data.pop(f"voice_{voice_id}", None)
-        await state.update_data(**state_data)
+        # Сохранить обратно в состояние и удалить временные данные голосового за один вызов
+        new_state = query_builder_to_state(builder)
+        new_state[f"voice_{voice_id}"] = None  # Пометить временные данные как удалённые
+        await state.update_data(**new_state)
         
         # Показать информацию
         summary = builder.get_summary()
@@ -1096,9 +1182,8 @@ async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMCont
         language = voice_data.get("language", "unknown")
         audio_path = Path(voice_data["audio_path"])
         
-        # Удалить временные данные
-        state_data.pop(f"voice_{voice_id}", None)
-        await state.update_data(**state_data)
+        # Удалить временные данные голосового (не перезаписывая остальное состояние)
+        await state.update_data(**{f"voice_{voice_id}": None})
         
         # Показать расшифровку
         from utils.message_helpers import markdown_to_html
@@ -1179,9 +1264,8 @@ async def voice_send_query_callback(callback: CallbackQuery, state: FSMContext):
             language=voice_data.get("language", "unknown")
         )
         
-        # Удалить временные данные
-        state_data.pop(f"voice_{voice_id}", None)
-        await state.update_data(**state_data)
+        # Удалить временные данные голосового (не перезаписывая остальное состояние)
+        await state.update_data(**{f"voice_{voice_id}": None})
         
         # Удалить сообщение с кнопками
         try:
@@ -1260,34 +1344,41 @@ async def voice_prompt_enable_collect_callback(callback: CallbackQuery, state: F
         from handlers.states import QueryStates
         await state.set_state(QueryStates.collecting_messages)
         
-        # Инициализировать QueryBuilder с транскрипцией
+        # Инициализировать QueryBuilder с транскрипцией (только через add_voice, без дублирования в text_parts)
         builder = QueryBuilder()
-        builder.add_text(transcribed_text)
         builder.add_voice(file_id, audio_path, transcribed_text)
         
-        # Сохранить в состояние
-        await state.update_data(**query_builder_to_state(builder))
-        
-        # Удалить временные данные
-        state_data.pop(f"voice_{voice_id}", None)
-        await state.update_data(**state_data)
+        # Сохранить в состояние и удалить временные данные голосового за один вызов
+        new_state = query_builder_to_state(builder)
+        new_state[f"voice_{voice_id}"] = None  # Пометить временные данные как удалённые
+        await state.update_data(**new_state)
         
         # Показать информацию
         from handlers.keyboards import get_collecting_messages_keyboard
         summary = builder.get_summary()
         
+        # edit_text принимает только InlineKeyboardMarkup, поэтому убираем кнопки
         await callback.message.edit_text(
             f"✅ Режим сбора сообщений включен.\n\n"
             f"📝 Prompt добавлен: {transcribed_text[:100]}{'...' if len(transcribed_text) > 100 else ''}\n\n"
             f"{summary}\n\n"
             f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор' для отправки.",
-            reply_markup=get_collecting_messages_keyboard(),
+            reply_markup=None,
             parse_mode=None
+        )
+        
+        # Отправить reply-клавиатуру отдельным сообщением
+        await callback.message.answer(
+            "Готовы отправить запрос?",
+            reply_markup=get_collecting_messages_keyboard()
         )
         
     except Exception as e:
         logger.error(f"Ошибка при включении режима сбора с prompt: {e}", exc_info=True)
-        await callback.message.answer(f"❌ Ошибка: {str(e)}")
+        try:
+            await callback.message.answer(f"❌ Ошибка: {str(e)}", parse_mode=None)
+        except Exception:
+            pass
 
 
 @router.callback_query(lambda c: c.data.startswith("voice_prompt_no_collect_"))
@@ -1342,9 +1433,8 @@ async def voice_prompt_no_collect_callback(callback: CallbackQuery, state: FSMCo
             language=voice_data.get("language", "unknown")
         )
         
-        # Удалить временные данные
-        state_data.pop(f"voice_{voice_id}", None)
-        await state.update_data(**state_data)
+        # Удалить временные данные голосового (не перезаписывая остальное состояние)
+        await state.update_data(**{f"voice_{voice_id}": None})
         
         # Удалить сообщение с кнопками
         try:
