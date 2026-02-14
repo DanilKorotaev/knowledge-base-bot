@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from aiogram.types import Message, InlineKeyboardMarkup
 
+from config import config as app_config
 from services.cursor_cli_service import CursorCLIService
 from services.sync_service import SyncService
 from utils.db_helpers import get_db
-from utils.message_helpers import send_formatted_message, format_file_changes_info
+from utils.message_helpers import send_formatted_message, format_file_changes_info, StreamingMessageUpdater
 from utils.constants import MessageRole, ChangeType
 from handlers.keyboards import get_active_session_keyboard
 
@@ -76,6 +77,7 @@ class QueryProcessingService:
         typing_message = await message.answer("⏳ Обрабатываю запрос...")
         
         start_time = time.time()
+        updater = None
         
         try:
             # Проверить актуальность базы знаний (быстрая синхронизация из NextCloud)
@@ -95,8 +97,7 @@ class QueryProcessingService:
                     
                     sync_service.set_notify_callback(notify_sync)
                     
-                    from config import config
-                    if config.AUTO_SYNC:
+                    if app_config.AUTO_SYNC:
                         sync_updated = await sync_service.sync_from_nextcloud(show_notification=True)
                 except Exception as e:
                     logger.warning(f"Ошибка при проверке синхронизации: {e}")
@@ -122,13 +123,28 @@ class QueryProcessingService:
                 else:
                     logger.warning(f"Не удалось создать чат Cursor CLI для сессии #{session_id}, используем fallback")
             
+            # Создать StreamingMessageUpdater (если стриминг включён)
+            streaming_enabled = app_config.STREAMING_ENABLED
+            updater = None
+            on_chunk_cb = None
+            
+            if streaming_enabled:
+                updater = StreamingMessageUpdater(
+                    message=message,
+                    typing_message=typing_message,
+                    update_interval=app_config.STREAMING_UPDATE_INTERVAL,
+                    min_buffer_size=app_config.STREAMING_MIN_BUFFER,
+                )
+                on_chunk_cb = updater.on_chunk
+            
             # Обработать запрос через Cursor CLI
             response, changes = await cursor_service.process_query(
                 query=query,
                 session_id=session_id,
                 session_messages=session_messages,
                 attached_files=attached_files,
-                cursor_chat_id=cursor_chat_id
+                cursor_chat_id=cursor_chat_id,
+                on_chunk=on_chunk_cb,
             )
             
             # Если --resume вернул ошибку, пробуем fallback без cursor_chat_id
@@ -136,26 +152,40 @@ class QueryProcessingService:
                 logger.warning(f"--resume не сработал для chatId={cursor_chat_id}, fallback на ручную историю")
                 # Обнулить cursor_chat_id в БД
                 await db.update_session(session_id, cursor_chat_id="")
+                
+                # Сбросить updater для повторного запроса
+                if streaming_enabled:
+                    updater = StreamingMessageUpdater(
+                        message=message,
+                        typing_message=typing_message,
+                        update_interval=app_config.STREAMING_UPDATE_INTERVAL,
+                        min_buffer_size=app_config.STREAMING_MIN_BUFFER,
+                    )
+                    on_chunk_cb = updater.on_chunk
+                
                 # Повторить запрос без --resume (с ручной передачей истории)
                 response, changes = await cursor_service.process_query(
                     query=query,
                     session_id=session_id,
                     session_messages=session_messages,
                     attached_files=attached_files,
-                    cursor_chat_id=None
+                    cursor_chat_id=None,
+                    on_chunk=on_chunk_cb,
                 )
             
             cursor_time = time.time() - cursor_start
             logger.info(f"⏱️ Cursor CLI обработка заняла: {cursor_time:.2f}с")
             
-            # Удалить индикатор "печатает..."
-            try:
-                await typing_message.delete()
-            except Exception:
-                pass
-            
-            # Отправить ответ пользователю
-            await send_formatted_message(message, response)
+            if updater and updater.full_text.strip():
+                # Стриминг использовался и есть текст — финализируем
+                await updater.finalize()
+            else:
+                # Стриминг не использовался или текст пустой — старое поведение
+                try:
+                    await typing_message.delete()
+                except Exception:
+                    pass
+                await send_formatted_message(message, response)
             
             # Сохранить сообщение пользователя в сессию (ПОСЛЕ обработки, чтобы избежать дублирования в контексте)
             if save_user_message:
@@ -173,8 +203,12 @@ class QueryProcessingService:
             return response, changes
             
         except Exception as e:
+            # При ошибке: финализировать стриминг или удалить typing_message
             try:
-                await typing_message.delete()
+                if updater and updater.full_text.strip():
+                    await updater.finalize()
+                else:
+                    await typing_message.delete()
             except Exception:
                 pass
             

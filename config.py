@@ -50,6 +50,11 @@ class Config:
     MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "5"))
     ENABLE_CHANGE_TRACKING: bool = os.getenv("ENABLE_CHANGE_TRACKING", "true").lower() == "true"
     
+    # Streaming
+    STREAMING_ENABLED: bool = os.getenv("STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")
+    STREAMING_UPDATE_INTERVAL: float = float(os.getenv("STREAMING_UPDATE_INTERVAL", "1.5"))
+    STREAMING_MIN_BUFFER: int = int(os.getenv("STREAMING_MIN_BUFFER", "100"))
+    
     # Mini App
     MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)
     MINIAPP_PORT: int = int(os.getenv("MINIAPP_PORT", "8080"))

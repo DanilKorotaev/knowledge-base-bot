@@ -1,6 +1,6 @@
 # Задача: Стриминг ответов Cursor CLI в Telegram
 
-**Статус**: 📋 Запланировано  
+**Статус**: ✅ Выполнено  
 **Приоритет**: 🔴 Высокий  
 **Категория**: Новые функции
 
@@ -30,8 +30,8 @@ Cursor CLI stdout → чанк → on_chunk callback → StreamingMessageUpdater
 
 ### 1. StreamingMessageUpdater
 
-- [ ] Создать класс `StreamingMessageUpdater` в `utils/message_helpers.py`
-- [ ] Поля:
+- [x] Создать класс `StreamingMessageUpdater` в `utils/message_helpers.py`
+- [x] Поля:
   - `message: Message` — исходное сообщение пользователя
   - `typing_message: Message` — сообщение "⏳ Обрабатываю..." (будет обновляться стримом)
   - `buffer: str` — текущий буфер неотправленного текста
@@ -40,29 +40,29 @@ Cursor CLI stdout → чанк → on_chunk callback → StreamingMessageUpdater
   - `update_interval: float = 1.5` — минимальный интервал между обновлениями (секунды)
   - `min_buffer_size: int = 100` — минимальный размер буфера для обновления
   - `first_chunk: bool = True` — первый чанк (обновлять сразу)
-- [ ] Метод `async on_chunk(chunk: str)`:
+- [x] Метод `async on_chunk(chunk: str)`:
   - Накапливать текст в `buffer` и `full_text`
   - Первый чанк — обновлять сразу (пользователь видит начало ответа)
   - Последующие — обновлять не чаще `update_interval` И не менее `min_buffer_size` символов
-- [ ] Метод `async _update_message()`:
+- [x] Метод `async _update_message()`:
   - Добавлять `▌` (курсор) в конце текста — показывает что ответ генерируется
   - Если текст > 4000 символов — показывать хвост с `...` в начале
   - `parse_mode=None` (plain text) — иначе незакрытые теги ломают HTML при стриминге
   - Обработка `"message is not modified"` — игнорировать
   - Обработка `"Flood control"` — увеличить `update_interval` (×2), подождать
   - Другие ошибки — логировать, не прерывать стриминг
-- [ ] Метод `async finalize()`:
+- [x] Метод `async finalize()`:
   - Удалить курсор `▌`
   - Конвертировать полный текст в HTML через `markdown_to_html()`
   - Финально обновить сообщение с `parse_mode=ParseMode.HTML`
   - Если HTML не удалось — fallback на plain text
-  - Если текст > 4000 символов — разбить на несколько сообщений (удалить typing_message, отправить новые)
-- [ ] Метод `async flush()` — принудительный сброс буфера (вызывается перед finalize)
+  - Если текст > 4000 символов — разбить на несколько сообщений (первая часть через edit_text, остальные — новыми сообщениями)
+- [x] Метод `async flush()` — принудительный сброс буфера (вызывается перед finalize)
 
 ### 2. Callback в CursorCLIService
 
-- [ ] Добавить параметр `on_chunk: Optional[Callable[[str], Awaitable[None]]] = None` в `process_query()`
-- [ ] В цикле чтения stdout (после `stdout_chunks.append(decoded)`, строка ~393) вызывать callback:
+- [x] Добавить параметр `on_chunk: Optional[Callable[[str], Awaitable[None]]] = None` в `process_query()`
+- [x] В цикле чтения stdout (после `stdout_chunks.append(decoded)`) вызывать callback:
   ```python
   if on_chunk and decoded.strip():
       try:
@@ -73,22 +73,24 @@ Cursor CLI stdout → чанк → on_chunk callback → StreamingMessageUpdater
 
 ### 3. Интеграция в QueryProcessingService
 
-- [ ] Создавать `StreamingMessageUpdater` в `process_query()`:
+- [x] Создавать `StreamingMessageUpdater` в `process_query()`:
   ```python
   typing_message = await message.answer("⏳ Обрабатываю запрос...")
   updater = StreamingMessageUpdater(message, typing_message)
   ```
-- [ ] Передавать `updater.on_chunk` в `cursor_service.process_query(on_chunk=updater.on_chunk)`
-- [ ] После получения ответа — вызывать `await updater.finalize()`
-- [ ] Не удалять `typing_message` отдельно — `finalize()` превращает его в финальное сообщение
-- [ ] При ошибке — вызвать `finalize()` или удалить `typing_message` (чтобы не зависало)
+- [x] Передавать `updater.on_chunk` в `cursor_service.process_query(on_chunk=updater.on_chunk)`
+- [x] После получения ответа — вызывать `await updater.finalize()`
+- [x] Не удалять `typing_message` отдельно — `finalize()` превращает его в финальное сообщение
+- [x] При ошибке — вызвать `finalize()` или удалить `typing_message` (чтобы не зависало)
+- [x] Если стриминг выключен (`STREAMING_ENABLED=false`) — старое поведение (удалить typing_message, отправить ответ)
 
 ### 4. Конфигурация
 
-- [ ] Добавить переменные окружения (опционально):
+- [x] Добавить переменные окружения:
   - `STREAMING_UPDATE_INTERVAL` — интервал обновления (по умолчанию 1.5с)
   - `STREAMING_MIN_BUFFER` — минимальный размер буфера (по умолчанию 100 символов)
   - `STREAMING_ENABLED` — включить/выключить стриминг (по умолчанию true)
+- [x] Добавить переменные в `.env.example`
 
 ## Ограничения Telegram
 
@@ -124,8 +126,9 @@ Cursor CLI stdout → чанк → on_chunk callback → StreamingMessageUpdater
 
 ## Связанные файлы
 
-- `utils/message_helpers.py` — новый класс `StreamingMessageUpdater`
+- `utils/message_helpers.py` — класс `StreamingMessageUpdater`
 - `services/cursor_cli_service.py` — параметр `on_chunk` в `process_query()`
 - `services/query_processing_service.py` — использование `StreamingMessageUpdater`
-- `config.py` — опциональные переменные стриминга
+- `config.py` — переменные стриминга (`STREAMING_ENABLED`, `STREAMING_UPDATE_INTERVAL`, `STREAMING_MIN_BUFFER`)
+- `.env.example` — документация переменных окружения
 

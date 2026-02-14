@@ -30,12 +30,13 @@
 ## Новые функции
 
 - [x] [Telegram Mini App для управления сессиями](tasks/completed/task-feature-miniapp-sessions.md)
+- [x] [Стриминг ответов Cursor CLI в Telegram](tasks/completed/task-feature-streaming-responses.md)
 
 ---
 
 ## Статистика
 
-**Всего выполнено задач**: 5  
+**Всего выполнено задач**: 6  
 **Последнее обновление**: 2026-02-14
 
 ---

@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -237,7 +237,8 @@ class CursorCLIService:
         model: Optional[str] = None,
         session_messages: Optional[List[Dict[str, Any]]] = None,
         attached_files: Optional[List[Path]] = None,
-        cursor_chat_id: Optional[str] = None
+        cursor_chat_id: Optional[str] = None,
+        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -249,6 +250,7 @@ class CursorCLIService:
             session_messages: История сообщений сессии для контекста (опционально)
             attached_files: Список путей к прикрепленным файлам (фото, документы) (опционально)
             cursor_chat_id: ID чата Cursor CLI для --resume (опционально)
+            on_chunk: Async callback для стриминга чанков stdout (опционально)
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -399,6 +401,13 @@ class CursorCLIService:
                         logger.info(f"Cursor CLI: первый ответ через {elapsed:.1f}с")
                     if decoded.strip():
                         logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
+                    
+                    # Стриминг: передать чанк через callback
+                    if on_chunk and decoded.strip():
+                        try:
+                            await on_chunk(decoded)
+                        except Exception as e:
+                            logger.debug(f"Ошибка в on_chunk callback: {e}")
                         
             except asyncio.TimeoutError:
                 # Полный таймаут — AI не ответил вообще
