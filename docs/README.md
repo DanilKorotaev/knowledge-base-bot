@@ -8,6 +8,7 @@
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Руководство для разработчиков
 - [DEPLOYMENT.md](DEPLOYMENT.md) - Инструкции по развертыванию
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Описание архитектуры
+- [MINIAPP.md](MINIAPP.md) - Telegram Mini App (сессии, файлы, вложения)
 - [REFACTORING.md](REFACTORING.md) - Документация по рефакторингу проекта
 - [GIT_FLOW.md](GIT_FLOW.md) - Процесс разработки и релизов (Git Flow)
 - [TODO.md](todo.md) - Активные задачи

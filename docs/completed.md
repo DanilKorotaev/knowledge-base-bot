@@ -27,12 +27,16 @@
 - [x] [Добавление inline-кнопок для быстрых действий](tasks/completed/task-ux-inline-buttons.md)
 - [x] [Интерактивный режим команд](tasks/completed/task-ux-interactive-commands.md)
 
+## Новые функции
+
+- [x] [Telegram Mini App для управления сессиями](tasks/completed/task-feature-miniapp-sessions.md)
+
 ---
 
 ## Статистика
 
-**Всего выполнено задач**: 4  
-**Последнее обновление**: 2025-01-07
+**Всего выполнено задач**: 5  
+**Последнее обновление**: 2026-02-14
 
 ---
 

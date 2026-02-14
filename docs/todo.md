@@ -13,6 +13,7 @@
 
 ### Основной функционал
 
+- [x] [Telegram Mini App для управления сессиями](tasks/completed/task-feature-miniapp-sessions.md) ✅
 - [ ] [Интеграция с NextCloud](tasks/pending/task-feature-nextcloud-integration.md)
 - [ ] [Реализация базовой структуры проекта](tasks/pending/task-setup-project-structure.md) - _перемещено в pending для дальнейшей работы_
 - [ ] [Управление сессиями](tasks/pending/task-feature-session-management.md)

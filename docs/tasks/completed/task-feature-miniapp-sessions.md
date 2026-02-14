@@ -1,8 +1,9 @@
 # Telegram Mini App для управления сессиями
 
-**Статус**: ✅ Реализовано  
+**Статус**: ✅ Выполнено  
 **Приоритет**: 🔴 Высокий  
 **Категория**: Новые функции
+**Дата завершения**: 2026-02-14
 
 ## Описание
 
@@ -97,7 +98,34 @@
 - [x] Добавить сервис miniapp в `docker-compose.yml`
 - [x] Настроить переменные окружения (`MINIAPP_URL`, `MINIAPP_PORT`, `MINIAPP_HOST`)
 - [x] Настроить CORS для API
-- [ ] Настроить HTTPS для Web App (зависит от развертывания — nginx/reverse proxy)
+- [x] Настроить HTTPS для Web App (скрипт `scripts/dev_miniapp.sh` с cloudflared для разработки)
+
+### Уведомления в чат
+
+- [x] Реализовать модуль `miniapp/api/notify.py` для отправки сообщений через Telegram Bot API
+- [x] Уведомления при переключении сессии (🔄)
+- [x] Уведомления при завершении сессии (⏹)
+- [x] Уведомления при удалении сессии (🗑)
+
+### Отображение вложений
+
+- [x] Прокси-эндпоинт `GET /api/attachments/{id}/file` для скачивания файлов через Telegram API
+- [x] Отображение фото (lazy-load через blob URL)
+- [x] Воспроизведение голосовых сообщений (audio player)
+- [x] Отображение документов, аудио, видео с иконками и размером
+
+### Редизайн экрана сессии
+
+- [x] Компактный хедер: `← #ID ℹ️ ⋮`
+- [x] Модальное окно информации о сессии (кнопка ℹ️)
+- [x] Bottom sheet для действий (кнопка ⋮)
+- [x] Сообщения занимают весь экран (flex layout, без двойного скролла)
+
+### Автоматизация локальной разработки
+
+- [x] Скрипт `scripts/dev_miniapp.sh` для запуска с cloudflared tunnel
+- [x] Автоматическое создание туннеля и подстановка MINIAPP_URL в `.env`
+- [x] Запуск docker-compose и корректная остановка при выходе
 
 ## Технические детали
 
@@ -128,15 +156,17 @@ Telegram → Bot (aiogram) → обработчики
 ### Ключевые файлы
 
 - `miniapp/api/main.py` — FastAPI приложение (CORS, статика, lifecycle)
-- `miniapp/api/routes.py` — API маршруты (сессии, файлы, поиск)
+- `miniapp/api/routes.py` — API маршруты (сессии, файлы, вложения, поиск)
 - `miniapp/api/auth.py` — Аутентификация через Telegram initData (HMAC-SHA256)
-- `miniapp/static/index.html` — HTML с Telegram Web App API
-- `miniapp/static/css/styles.css` — Стили (Telegram theme vars, skeleton loading, chat-style)
+- `miniapp/api/notify.py` — Отправка уведомлений в чат через Telegram Bot API
+- `miniapp/static/index.html` — HTML с Telegram Web App API, модалки, bottom sheet
+- `miniapp/static/css/styles.css` — Стили (Telegram theme vars, skeleton, chat-style, bottom sheet)
 - `miniapp/static/js/sessions.js` — API клиент (SessionsManager)
-- `miniapp/static/js/app.js` — Главная логика (навигация, рендеринг, действия)
+- `miniapp/static/js/app.js` — Главная логика (навигация, рендеринг, вложения, действия)
 - `miniapp/Dockerfile` — Docker-образ
 - `config.py` — `MINIAPP_URL`, `MINIAPP_PORT`, `MINIAPP_HOST`
 - `handlers/keyboards.py` — `get_miniapp_inline_keyboard()`, `get_file_view_button()`, кнопка в главном меню
+- `scripts/dev_miniapp.sh` — Скрипт локальной разработки с cloudflared
 
 ### Настройка
 
@@ -157,8 +187,10 @@ Telegram → Bot (aiogram) → обработчики
 ## Примечания
 
 - **HTTPS обязателен** для Web Apps — Telegram требует HTTPS
-- Для разработки можно использовать ngrok или другой туннель
+- Для локальной разработки используется `cloudflared` tunnel (автоматизирован в `scripts/dev_miniapp.sh`)
 - API защищен проверкой Telegram initData (HMAC-SHA256 с bot token)
 - При переключении сессии из Mini App, Mini App закрывается и пользователь возвращается в чат
-- Bot instance создается в `bot.py:main()` и не экспортируется — прямые уведомления невозможны
+- Уведомления в чат отправляются напрямую через Telegram Bot API (`miniapp/api/notify.py`), минуя aiogram
+- Вложения отображаются через прокси-эндпоинт для безопасного доступа к файлам Telegram
 - Файловый браузер ограничен `LOCAL_KB_PATH` с защитой от path traversal
+- Экран сессии использует компактный хедер с ℹ️ (инфо) и ⋮ (действия) для максимизации области сообщений
