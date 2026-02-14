@@ -51,10 +51,10 @@ class QueryBuilder:
         if self.text_parts:
             parts.extend(self.text_parts)
         
-        # Добавить расшифровки голосовых сообщений
+        # Добавить расшифровки голосовых сообщений (как обычный текст)
         for voice in self.voice_files:
             if voice.get("transcription"):
-                parts.append(f"[Голосовое сообщение: {voice['transcription']}]")
+                parts.append(voice["transcription"])
         
         # Добавить информацию о медиа файлах
         if self.media_files:

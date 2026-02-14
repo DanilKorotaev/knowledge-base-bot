@@ -7,30 +7,31 @@
 │  Telegram User  │
 └────────┬────────┘
          │
-         ▼
-┌─────────────────┐
-│  Telegram Bot   │
-│   (aiogram)     │
-└────────┬────────┘
-         │
-         ├─────────────────┬──────────────────┐
-         │                 │                  │
-         ▼                 ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│  Cursor CLI  │  │  Local KB    │  │  PostgreSQL  │
-│  (subprocess)│  │   Copy       │  │  (БД)       │
-└──────┬───────┘  └──────┬───────┘  └──────────────┘
-       │                 │
-       │                 │ Sync (WebDAV)
-       │                 ▼
-       │         ┌─────────────────┐
-       │         │   NextCloud     │
-       │         └─────────────────┘
-       │
-       ▼
+         ├──────────────────────────────────┐
+         │                                  │
+         ▼                                  ▼
+┌─────────────────┐              ┌──────────────────┐
+│  Telegram Bot   │              │  Mini App        │
+│   (aiogram)     │              │  (FastAPI)       │
+└────────┬────────┘              └────────┬─────────┘
+         │                                │
+         ├──────────┬──────────┐          │
+         │          │          │          │
+         ▼          ▼          ▼          ▼
+┌────────────┐ ┌──────────┐ ┌──────────────┐
+│ Cursor CLI │ │ Local KB │ │  PostgreSQL  │
+│(subprocess)│ │  Copy    │ │    (БД)      │
+└─────┬──────┘ └────┬─────┘ └──────────────┘
+      │              │
+      │              │ Sync (WebDAV)
+      │              ▼
+      │      ┌─────────────────┐
+      │      │   NextCloud     │
+      │      └─────────────────┘
+      ▼
 ┌──────────────┐
 │  OpenAI API  │
-│  (GPT+Whisper)│
+│ (GPT+Whisper)│
 └──────────────┘
 ```
 
@@ -94,16 +95,25 @@
 #### constants.py
 - Константы проекта (SessionType, SessionStatus, MessageRole, ChangeType)
 
-### 5. Database Layer
+### 5. Mini App (Telegram Web App)
+- Отдельный FastAPI-сервис (`miniapp/`)
+- Управление сессиями: список, переключение, завершение, удаление
+- Просмотр истории сообщений с вложениями (фото, голосовые, документы)
+- Файловый браузер базы знаний
+- Аутентификация через Telegram initData (HMAC-SHA256)
+- Уведомления в чат через Telegram Bot API
+- Подробнее: [MINIAPP.md](MINIAPP.md)
+
+### 6. Database Layer
 - PostgreSQL для продакшена
 - SQLite для локальной разработки
 - Абстракция через DatabaseInterface
 
-### 6. NextCloud Integration
+### 7. NextCloud Integration
 - Синхронизация локальной копии с NextCloud
 - WebDAV API для работы с файлами
 
-### 7. Middleware
+### 8. Middleware
 
 #### AccessControlMiddleware
 - Проверка доступа пользователей

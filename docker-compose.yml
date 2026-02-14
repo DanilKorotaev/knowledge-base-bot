@@ -25,6 +25,26 @@ services:
     # stdin_open: true
     # tty: true
 
+  miniapp:
+    build:
+      context: .
+      dockerfile: miniapp/Dockerfile
+    container_name: knowledge-base-bot-miniapp
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${MINIAPP_PORT:-8080}:8080"
+    volumes:
+      # Доступ к базе знаний для просмотра файлов
+      - ~/.local/share/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:ro
+      # Логи
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+    networks:
+      - bot-network
+
   postgres:
     image: postgres:15-alpine
     container_name: knowledge-base-bot-db

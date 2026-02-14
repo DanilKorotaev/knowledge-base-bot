@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Сессии — Knowledge Base Bot</title>
+    
+    <!-- Telegram Web App API -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Marked.js для Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    
+    <!-- Стили -->
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Экран загрузки -->
+        <div id="loading-screen" class="screen active">
+            <div class="loader">
+                <div class="spinner"></div>
+                <p>Загрузка...</p>
+            </div>
+        </div>
+        
+        <!-- Список сессий -->
+        <div id="sessions-screen" class="screen">
+            <div class="header">
+                <h1>📋 Мои сессии</h1>
+                <div class="search-bar">
+                    <input type="text" id="search-input" placeholder="🔍 Поиск по ID или содержимому..." autocomplete="off">
+                </div>
+                <div class="filters">
+                    <button class="filter-btn active" data-filter="all">Все</button>
+                    <button class="filter-btn" data-filter="active">Активные</button>
+                    <button class="filter-btn" data-filter="completed">Завершённые</button>
+                </div>
+            </div>
+            <div id="sessions-list" class="sessions-list">
+                <!-- Сессии будут загружены через JS -->
+            </div>
+            <div id="sessions-empty" class="empty-state hidden">
+                <div class="empty-icon">📭</div>
+                <p>Нет сессий</p>
+                <p class="hint">Начните новый запрос в чате бота</p>
+            </div>
+        </div>
+        
+        <!-- Детали сессии / Просмотр сообщений -->
+        <div id="session-detail-screen" class="screen session-detail-screen">
+            <div class="session-detail-header">
+                <button id="back-to-sessions" class="sd-header-btn sd-back-btn" title="Назад">←</button>
+                <h2 id="session-title" class="sd-title">Сессия</h2>
+                <button id="btn-session-info" class="sd-header-btn" title="Информация о сессии">ℹ️</button>
+                <button id="btn-session-menu" class="sd-header-btn" title="Действия">⋮</button>
+            </div>
+            <div id="messages-list" class="messages-list">
+                <!-- Сообщения будут загружены через JS -->
+            </div>
+        </div>
+
+        <!-- Просмотр файла -->
+        <div id="file-view-screen" class="screen">
+            <div class="header">
+                <button id="back-from-file" class="back-btn">← Назад</button>
+                <h2 id="file-title">Файл</h2>
+            </div>
+            <div id="file-content" class="file-content">
+                <!-- Содержимое файла -->
+            </div>
+        </div>
+
+        <!-- Обзор файлов -->
+        <div id="files-browser-screen" class="screen">
+            <div class="header">
+                <button id="back-from-files" class="back-btn">← Назад</button>
+                <h2 id="files-title">📁 Файлы базы знаний</h2>
+            </div>
+            <div id="files-breadcrumb" class="breadcrumb">
+                <!-- Хлебные крошки -->
+            </div>
+            <div id="files-list" class="files-list">
+                <!-- Список файлов -->
+            </div>
+        </div>
+
+        <!-- Модальное окно: Информация о сессии -->
+        <div id="session-info-modal" class="modal hidden">
+            <div class="modal-overlay"></div>
+            <div class="modal-content modal-info">
+                <h3 class="modal-title">Информация о сессии</h3>
+                <div id="session-info" class="session-info-body">
+                    <!-- Динамически заполняется -->
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="session-info-close">Закрыть</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom sheet: Действия с сессией -->
+        <div id="session-actions-sheet" class="bottom-sheet hidden">
+            <div class="bottom-sheet-overlay"></div>
+            <div class="bottom-sheet-content">
+                <div class="bottom-sheet-handle"></div>
+                <div id="session-actions" class="session-actions-list">
+                    <!-- Динамически заполняется -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно подтверждения -->
+        <div id="confirm-modal" class="modal hidden">
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <p id="confirm-text">Вы уверены?</p>
+                <div class="modal-actions">
+                    <button id="confirm-yes" class="btn btn-danger">Да</button>
+                    <button id="confirm-no" class="btn btn-secondary">Отмена</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast уведомления -->
+        <div id="toast-container" class="toast-container"></div>
+    </div>
+
+    <!-- JS -->
+    <script src="/static/js/sessions.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+

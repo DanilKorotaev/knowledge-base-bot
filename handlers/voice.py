@@ -12,7 +12,8 @@ from aiogram.types import Message
 
 from handlers.keyboards import (
     get_confirm_query_keyboard, get_transcribe_inline_keyboard, get_collecting_messages_keyboard,
-    get_voice_action_collecting_keyboard, get_voice_action_normal_keyboard
+    get_voice_action_collecting_keyboard, get_voice_action_normal_keyboard,
+    get_voice_collected_keyboard
 )
 from handlers.states import QueryStates
 from services.openai_service import OpenAIService
@@ -75,6 +76,53 @@ async def voice_handler(message: Message, state: FSMContext):
         
         logger.info(f"Транскрибация завершена, язык: {language}, длина текста: {len(transcribed_text)}")
         
+        # === Проверить режим сбора сообщений ===
+        current_state = await state.get_state()
+        if current_state == QueryStates.collecting_messages.state:
+            # Режим сбора: автоматически прикрепить голосовое к запросу
+            state_data = await state.get_data()
+            builder = query_builder_from_state(state_data) if (
+                state_data.get("text_parts") or state_data.get("voice_files") or state_data.get("media_files")
+            ) else QueryBuilder()
+            builder.add_voice(voice.file_id, audio_path, transcribed_text)
+            
+            # Сохранить builder + ссылку на транскрипцию для кнопок
+            voice_id = str(uuid.uuid4())
+            new_state = query_builder_to_state(builder)
+            new_state[f"voice_ref_{voice_id}"] = {
+                "transcription": transcribed_text,
+                "file_id": voice.file_id
+            }
+            await state.update_data(**new_state)
+            
+            logger.info(f"Голосовое автоматически добавлено в режим сбора. Всего голосовых: {len(builder.voice_files)}")
+            
+            # Показать информационное сообщение со сводкой и кнопкой исправления
+            summary = builder.get_summary()
+            
+            await processing_message.edit_text(
+                f"✅ Голосовое сообщение добавлено.\n\n"
+                f"{summary}\n\n"
+                f"Продолжайте добавлять сообщения или нажмите '✅ Завершить сбор'.",
+                reply_markup=get_voice_collected_keyboard(voice_id),
+                parse_mode=None
+            )
+            
+            # Отправить чистую расшифровку отдельным сообщением для проверки и удобного копирования
+            try:
+                html_text = markdown_to_html(transcribed_text)
+                await message.answer(html_text, parse_mode=ParseMode.HTML)
+            except Exception:
+                await message.answer(transcribed_text)
+            
+            # Показать кнопку подтверждения отправки
+            await message.answer(
+                "Готовы отправить запрос?",
+                reply_markup=get_confirm_query_keyboard()
+            )
+            return
+        
+        # === Обычный режим ===
         # Создать уникальный ID для этого голосового сообщения
         voice_id = str(uuid.uuid4())
         
@@ -109,20 +157,11 @@ async def voice_handler(message: Message, state: FSMContext):
         except Exception:
             await message.answer(transcribed_text)
         
-        # Проверить режим сбора сообщений
-        current_state = await state.get_state()
-        if current_state == QueryStates.collecting_messages.state:
-            # Режим сбора сообщений - показать выбор: прикрепить к запросу или только транскрибировать
-            await message.answer(
-                "❓ Что сделать с этим голосовым сообщением?",
-                reply_markup=get_voice_action_collecting_keyboard(voice_id)
-            )
-        else:
-            # Обычный режим - показать выбор: отправить запрос, использовать как prompt или только транскрибировать
-            await message.answer(
-                "❓ Что сделать с этим голосовым сообщением?",
-                reply_markup=get_voice_action_normal_keyboard(voice_id)
-            )
+        # Обычный режим - показать выбор: отправить запрос, использовать как prompt или только транскрибировать
+        await message.answer(
+            "❓ Что сделать с этим голосовым сообщением?",
+            reply_markup=get_voice_action_normal_keyboard(voice_id)
+        )
         
     except Exception as e:
         await send_error_message(
