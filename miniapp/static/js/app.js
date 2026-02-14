@@ -163,6 +163,99 @@
     }
 
     // ========================================
+    // Рендеринг вложений
+    // ========================================
+
+    function renderAttachments(attachments) {
+        if (!attachments || attachments.length === 0) return '';
+
+        const items = attachments.map(att => {
+            const type = att.file_type;
+            const name = att.file_name || `file_${att.id}`;
+            const size = formatFileSize(att.file_size);
+
+            if (type === 'photo') {
+                return `
+                    <div class="attachment attachment-photo" data-attachment-id="${att.id}">
+                        <div class="attachment-photo-placeholder">🖼️ Загрузка...</div>
+                    </div>
+                `;
+            }
+
+            if (type === 'voice') {
+                return `
+                    <div class="attachment attachment-voice" data-attachment-id="${att.id}">
+                        <span class="attachment-icon">🎤</span>
+                        <span class="attachment-label">Голосовое сообщение</span>
+                        <audio class="attachment-audio" controls preload="none"></audio>
+                    </div>
+                `;
+            }
+
+            if (type === 'audio') {
+                return `
+                    <div class="attachment attachment-audio-file" data-attachment-id="${att.id}">
+                        <span class="attachment-icon">🎵</span>
+                        <span class="attachment-label">${escapeHtml(name)}</span>
+                        ${size ? `<span class="attachment-size">${size}</span>` : ''}
+                    </div>
+                `;
+            }
+
+            if (type === 'video') {
+                return `
+                    <div class="attachment attachment-video" data-attachment-id="${att.id}">
+                        <span class="attachment-icon">🎬</span>
+                        <span class="attachment-label">${escapeHtml(name)}</span>
+                        ${size ? `<span class="attachment-size">${size}</span>` : ''}
+                    </div>
+                `;
+            }
+
+            // document и прочие
+            const icon = getFileIcon(name);
+            return `
+                <div class="attachment attachment-document" data-attachment-id="${att.id}">
+                    <span class="attachment-icon">${icon}</span>
+                    <span class="attachment-label">${escapeHtml(name)}</span>
+                    ${size ? `<span class="attachment-size">${size}</span>` : ''}
+                </div>
+            `;
+        }).join('');
+
+        return `<div class="attachments-list">${items}</div>`;
+    }
+
+    async function loadAttachmentImages() {
+        // Загружаем фото через blob URL
+        const photoEls = document.querySelectorAll('.attachment-photo[data-attachment-id]');
+        for (const el of photoEls) {
+            const attId = el.dataset.attachmentId;
+            try {
+                const blobUrl = await api.getAttachmentBlobUrl(attId);
+                el.innerHTML = `<img src="${blobUrl}" class="attachment-img" alt="Фото" onclick="window.open('${blobUrl}', '_blank')">`;
+            } catch {
+                el.innerHTML = `<div class="attachment-photo-placeholder">🖼️ Не удалось загрузить</div>`;
+            }
+        }
+
+        // Загружаем аудио для голосовых
+        const voiceEls = document.querySelectorAll('.attachment-voice[data-attachment-id]');
+        for (const el of voiceEls) {
+            const attId = el.dataset.attachmentId;
+            const audioEl = el.querySelector('audio');
+            if (audioEl) {
+                try {
+                    const blobUrl = await api.getAttachmentBlobUrl(attId);
+                    audioEl.src = blobUrl;
+                } catch {
+                    el.querySelector('.attachment-label').textContent = 'Аудио недоступно';
+                }
+            }
+        }
+    }
+
+    // ========================================
     // Загрузка и отображение сессий
     // ========================================
 
@@ -261,9 +354,10 @@
         const status = formatStatus(session.status);
         const isActive = session.is_active;
 
-        title.textContent = `${type.emoji} Сессия #${session.id}`;
+        // Компактный заголовок
+        title.textContent = `${type.emoji} #${session.id}`;
 
-        // Информация о сессии
+        // Информация о сессии (для модального окна)
         info.innerHTML = `
             <div class="session-info-row">
                 <span class="session-info-label">Статус</span>
@@ -295,15 +389,20 @@
                 const isUser = msg.role === 'user';
                 const roleLabel = isUser ? '👤 Вы' : '🤖 Ассистент';
                 const content = isUser ? escapeHtml(msg.content) : renderMarkdown(msg.content);
+                const attachmentsHtml = renderAttachments(msg.attachments || []);
 
                 return `
                     <div class="message ${isUser ? 'user' : 'assistant'}">
                         <div class="message-role">${roleLabel}</div>
+                        ${attachmentsHtml}
                         <div class="message-content">${content}</div>
                         <div class="message-time">${formatDate(msg.created_at)}</div>
                     </div>
                 `;
             }).join('');
+
+            // Загрузить фото вложений (blob URLs)
+            loadAttachmentImages();
 
             // Прокрутка к последнему сообщению
             requestAnimationFrame(() => {
@@ -311,45 +410,48 @@
             });
         }
 
-        // Кнопки действий
+        // Действия (для bottom sheet)
         let actionsHtml = '';
 
         if (!isActive && session.status !== 'deleted') {
-            actionsHtml += `<button class="btn btn-primary" id="btn-switch">🔄 Переключиться на эту сессию</button>`;
+            actionsHtml += `<button class="action-item" id="btn-switch"><span class="action-icon">🔄</span><span>Переключиться на эту сессию</span></button>`;
         }
 
         if (isActive) {
-            actionsHtml += `<button class="btn btn-warning" id="btn-end">⏹ Завершить сессию</button>`;
+            actionsHtml += `<button class="action-item" id="btn-end"><span class="action-icon">⏹</span><span>Завершить сессию</span></button>`;
         }
 
         if (session.status !== 'deleted') {
-            actionsHtml += `<button class="btn btn-danger" id="btn-delete">🗑 Удалить сессию</button>`;
+            actionsHtml += `<button class="action-item danger" id="btn-delete"><span class="action-icon">🗑</span><span>Удалить сессию</span></button>`;
         }
 
-        actionsHtml += `<button class="btn btn-secondary" id="btn-close-miniapp">💬 Вернуться в чат</button>`;
+        actionsHtml += `<button class="action-item" id="btn-close-miniapp"><span class="action-icon">💬</span><span>Вернуться в чат</span></button>`;
 
         actions.innerHTML = actionsHtml;
 
-        // Привязать действия
+        // Привязать действия (закрывают sheet перед выполнением)
+        const closeSheet = () => {
+            document.getElementById('session-actions-sheet').classList.add('hidden');
+        };
+
         const switchBtn = document.getElementById('btn-switch');
         const endBtn = document.getElementById('btn-end');
         const deleteBtn = document.getElementById('btn-delete');
         const closeBtn = document.getElementById('btn-close-miniapp');
 
         if (switchBtn) {
-            switchBtn.addEventListener('click', () => handleSwitchSession(session.id));
+            switchBtn.addEventListener('click', () => { closeSheet(); handleSwitchSession(session.id); });
         }
         if (endBtn) {
-            endBtn.addEventListener('click', () => handleEndSession(session.id));
+            endBtn.addEventListener('click', () => { closeSheet(); handleEndSession(session.id); });
         }
         if (deleteBtn) {
-            deleteBtn.addEventListener('click', () => handleDeleteSession(session.id));
+            deleteBtn.addEventListener('click', () => { closeSheet(); handleDeleteSession(session.id); });
         }
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
-                if (tg) {
-                    tg.close();
-                }
+                closeSheet();
+                if (tg) tg.close();
             });
         }
     }
@@ -547,6 +649,15 @@
 
     const debouncedSearch = debounce(handleSearch, 400);
 
+    // ========================================
+    // Вспомогательные функции для модалов/шитов
+    // ========================================
+
+    function closeAllOverlays() {
+        document.getElementById('session-info-modal').classList.add('hidden');
+        document.getElementById('session-actions-sheet').classList.add('hidden');
+    }
+
     function bindEvents() {
         // Поиск
         const searchInput = document.getElementById('search-input');
@@ -570,7 +681,31 @@
 
         // Кнопка "Назад" к списку сессий
         document.getElementById('back-to-sessions').addEventListener('click', () => {
+            closeAllOverlays();
             loadSessions();
+        });
+
+        // Кнопка ℹ️ — показать информацию о сессии
+        document.getElementById('btn-session-info').addEventListener('click', () => {
+            document.getElementById('session-info-modal').classList.remove('hidden');
+        });
+
+        // Закрыть модалку информации
+        document.getElementById('session-info-close').addEventListener('click', () => {
+            document.getElementById('session-info-modal').classList.add('hidden');
+        });
+        document.querySelector('#session-info-modal .modal-overlay').addEventListener('click', () => {
+            document.getElementById('session-info-modal').classList.add('hidden');
+        });
+
+        // Кнопка ⋮ — показать меню действий
+        document.getElementById('btn-session-menu').addEventListener('click', () => {
+            document.getElementById('session-actions-sheet').classList.remove('hidden');
+        });
+
+        // Закрыть bottom sheet по overlay
+        document.querySelector('#session-actions-sheet .bottom-sheet-overlay').addEventListener('click', () => {
+            document.getElementById('session-actions-sheet').classList.add('hidden');
         });
 
         // Кнопка "Назад" из просмотра файла
@@ -616,6 +751,7 @@
 
         // Обработка кнопки "Назад" в Telegram
         tg.BackButton.onClick(() => {
+            closeAllOverlays();
             if (state.currentScreen === 'sessionDetail') {
                 loadSessions();
             } else if (state.currentScreen === 'fileView') {

@@ -115,6 +115,33 @@ class SessionsManager {
     }
 
     /**
+     * Получить URL файла вложения (через прокси)
+     * @param {number} attachmentId - ID вложения
+     * @returns {string} URL для загрузки/отображения файла
+     */
+    getAttachmentUrl(attachmentId) {
+        // URL с auth header нельзя использовать в <img src>, поэтому
+        // для отображения будем загружать через fetch + blob
+        return `${this.apiUrl}/attachments/${attachmentId}/file`;
+    }
+
+    /**
+     * Загрузить файл вложения как blob URL (для img/audio)
+     * @param {number} attachmentId - ID вложения
+     * @returns {Promise<string>} blob URL
+     */
+    async getAttachmentBlobUrl(attachmentId) {
+        const response = await fetch(`${this.apiUrl}/attachments/${attachmentId}/file`, {
+            headers: this._getHeaders()
+        });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        return URL.createObjectURL(blob);
+    }
+
+    /**
      * Получить содержимое файла
      * @param {string} filePath - Путь к файлу
      */

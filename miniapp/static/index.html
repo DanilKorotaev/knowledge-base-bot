@@ -48,19 +48,15 @@
         </div>
         
         <!-- Детали сессии / Просмотр сообщений -->
-        <div id="session-detail-screen" class="screen">
-            <div class="header">
-                <button id="back-to-sessions" class="back-btn">← Назад</button>
-                <h2 id="session-title">Сессия</h2>
-            </div>
-            <div id="session-info" class="session-info">
-                <!-- Информация о сессии -->
+        <div id="session-detail-screen" class="screen session-detail-screen">
+            <div class="session-detail-header">
+                <button id="back-to-sessions" class="sd-header-btn sd-back-btn" title="Назад">←</button>
+                <h2 id="session-title" class="sd-title">Сессия</h2>
+                <button id="btn-session-info" class="sd-header-btn" title="Информация о сессии">ℹ️</button>
+                <button id="btn-session-menu" class="sd-header-btn" title="Действия">⋮</button>
             </div>
             <div id="messages-list" class="messages-list">
                 <!-- Сообщения будут загружены через JS -->
-            </div>
-            <div id="session-actions" class="session-actions">
-                <!-- Кнопки действий -->
             </div>
         </div>
 
@@ -86,6 +82,31 @@
             </div>
             <div id="files-list" class="files-list">
                 <!-- Список файлов -->
+            </div>
+        </div>
+
+        <!-- Модальное окно: Информация о сессии -->
+        <div id="session-info-modal" class="modal hidden">
+            <div class="modal-overlay"></div>
+            <div class="modal-content modal-info">
+                <h3 class="modal-title">Информация о сессии</h3>
+                <div id="session-info" class="session-info-body">
+                    <!-- Динамически заполняется -->
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" id="session-info-close">Закрыть</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom sheet: Действия с сессией -->
+        <div id="session-actions-sheet" class="bottom-sheet hidden">
+            <div class="bottom-sheet-overlay"></div>
+            <div class="bottom-sheet-content">
+                <div class="bottom-sheet-handle"></div>
+                <div id="session-actions" class="session-actions-list">
+                    <!-- Динамически заполняется -->
+                </div>
             </div>
         </div>
 
