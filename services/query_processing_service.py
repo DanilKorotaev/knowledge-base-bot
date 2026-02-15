@@ -1,14 +1,18 @@
 """
 Сервис для обработки запросов пользователей
 """
+import asyncio
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from aiogram.types import Message, InlineKeyboardMarkup
+from aiogram.types import Message, LinkPreviewOptions
+from aiogram.enums import ParseMode
 
 from config import config as app_config
 from services.cursor_cli_service import CursorCLIService
+from services.nextcloud_service import NextCloudService
 from services.sync_service import SyncService
 from utils.db_helpers import get_db
 from utils.message_helpers import send_formatted_message, format_file_changes_info, StreamingMessageUpdater
@@ -26,6 +30,7 @@ class QueryProcessingService:
         self._db = None
         self._sync_service = None
         self._cursor_service = None
+        self._nextcloud_service = None
     
     async def _get_db(self):
         """Получить экземпляр БД (lazy loading)"""
@@ -44,6 +49,12 @@ class QueryProcessingService:
         if self._cursor_service is None:
             self._cursor_service = CursorCLIService()
         return self._cursor_service
+    
+    def _get_nextcloud_service(self) -> NextCloudService:
+        """Получить экземпляр NextCloudService"""
+        if self._nextcloud_service is None:
+            self._nextcloud_service = NextCloudService()
+        return self._nextcloud_service
     
     async def process_query(
         self,
@@ -263,12 +274,58 @@ class QueryProcessingService:
         # Синхронизировать изменения с NextCloud
         sync_success = await sync_service.sync_changes(changes)
         
-        # Форматировать информацию об изменениях
-        changes_info = format_file_changes_info(changes, sync_success)
+        # Получить ссылки на файлы в NextCloud (если включено)
+        file_urls: Optional[Dict[str, str]] = None
+        link_mode = getattr(app_config, 'NEXTCLOUD_LINK_MODE', 'disabled')
         
-        # Отправить информацию об изменениях
+        if link_mode != "disabled" and sync_success:
+            nc_service = self._get_nextcloud_service()
+            if nc_service.enabled:
+                file_urls = {}
+                
+                async def get_link_for_change(change: Dict[str, Any]) -> tuple[str, Optional[str]]:
+                    path = change.get("path", "")
+                    try:
+                        url = await nc_service.get_file_link(path)
+                        return path, url
+                    except Exception as e:
+                        logger.debug(f"Не удалось получить ссылку для {path}: {e}")
+                        return path, None
+                
+                # Получить ссылки параллельно
+                results = await asyncio.gather(
+                    *[get_link_for_change(ch) for ch in changes],
+                    return_exceptions=True
+                )
+                
+                for result in results:
+                    if isinstance(result, tuple) and result[1]:
+                        file_urls[result[0]] = result[1]
+                
+                if not file_urls:
+                    file_urls = None  # Нет ссылок — не передаём
+        
+        # Форматировать информацию об изменениях
+        changes_info = format_file_changes_info(
+            changes, sync_success, file_urls=file_urls, link_mode=link_mode
+        )
+        
+        session_keyboard = get_active_session_keyboard()
+        
+        # Отправить информацию об изменениях (HTML для ссылок и предотвращения авто-ссылок)
         try:
-            await message.answer(changes_info, reply_markup=get_active_session_keyboard())
+            await message.answer(
+                changes_info,
+                parse_mode=ParseMode.HTML,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+                reply_markup=session_keyboard
+            )
         except Exception as e:
-            logger.warning(f"Не удалось отправить информацию об изменениях: {e}")
+            logger.warning(f"Не удалось отправить информацию об изменениях с HTML: {e}")
+            # Fallback: отправить без форматирования
+            try:
+                plain_text = re.sub(r'<[^>]+>', '', changes_info)
+                await message.answer(plain_text, reply_markup=session_keyboard)
+            except Exception as e2:
+                logger.warning(f"Не удалось отправить информацию об изменениях: {e2}")
 

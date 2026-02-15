@@ -2,11 +2,12 @@
 Помощники для работы с сообщениями
 """
 import asyncio
+import html
 import logging
 import re
 import time
 from typing import List, Optional, Dict, Any, Callable, Awaitable
-from aiogram.types import Message, InlineKeyboardMarkup
+from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.enums import ParseMode
 
@@ -116,7 +117,7 @@ def split_long_message(text: str, max_length: int = 4096) -> List[str]:
 async def send_formatted_message(
     message: Message,
     text: str,
-    reply_markup: Optional[InlineKeyboardMarkup] = None
+    reply_markup = None
 ) -> None:
     """
     Отправить форматированное сообщение с автоматическим fallback
@@ -336,33 +337,53 @@ class StreamingMessageUpdater:
                     logger.warning(f"Streaming finalize split: не удалось отправить часть: {e}")
 
 
-def format_file_changes_info(changes: List[Dict[str, Any]], sync_success: bool) -> str:
+def format_file_changes_info(
+    changes: List[Dict[str, Any]],
+    sync_success: bool,
+    file_urls: Optional[Dict[str, str]] = None,
+    link_mode: str = "share"
+) -> str:
     """
-    Форматировать информацию об изменениях файлов
+    Форматировать информацию об изменениях файлов (HTML формат)
     
     Args:
         changes: Список изменений файлов
         sync_success: Успешна ли синхронизация с NextCloud
+        file_urls: Словарь {путь_файла: URL} для кликабельных ссылок (опционально)
+        link_mode: Режим ссылок ("share" | "direct" | "disabled")
     
     Returns:
-        str: Отформатированная строка с информацией об изменениях
+        str: HTML строка с информацией об изменениях
     """
     if not changes:
         return ""
     
     changes_info = f"\n\n📝 Изменено файлов: {len(changes)}"
     
-    if len(changes) <= 5:
-        changes_list = "\n".join([f"  • {ch.get('path', 'unknown')}" for ch in changes])
-        changes_info += f"\n{changes_list}"
-    else:
-        changes_list = "\n".join([f"  • {ch.get('path', 'unknown')}" for ch in changes[:5]])
-        changes_info += f"\n{changes_list}\n  ... и еще {len(changes) - 5}"
+    display_changes = changes[:5]
+    
+    for ch in display_changes:
+        path = ch.get('path', 'unknown')
+        filename = path.rsplit('/', 1)[-1] if '/' in path else path
+        escaped_path = html.escape(path)
+        
+        url = file_urls.get(path) if file_urls else None
+        if url:
+            link_icon = "📎" if link_mode == "share" else "🔗"
+            changes_info += f"\n  • <code>{html.escape(filename)}</code>  <a href=\"{html.escape(url)}\">{link_icon} Открыть</a>"
+        else:
+            changes_info += f"\n  • <code>{escaped_path}</code>"
+    
+    if len(changes) > 5:
+        changes_info += f"\n  ... и ещё {len(changes) - 5}"
     
     if sync_success:
         changes_info += "\n✅ Изменения синхронизированы с NextCloud"
     else:
         changes_info += "\n⚠️ Не удалось синхронизировать с NextCloud"
+    
+    if file_urls and link_mode == "direct":
+        changes_info += "\n⚠️ Ссылки требуют авторизации в NextCloud"
     
     return changes_info
 

@@ -163,16 +163,15 @@ class SyncService:
                                 file_path
                             )
                             uploaded += 1
-                        except requests.exceptions.HTTPError as e:
-                            if e.response.status_code == 404:
-                                logger.warning(f"Файл не найден в NextCloud (возможно, был удален): {file_path}")
-                            else:
-                                logger.error(f"Ошибка при загрузке файла {file_path}: {e}")
                         except Exception as e:
                             logger.error(f"Ошибка при загрузке файла {file_path}: {e}")
                         
                         if self.progress_callback:
                             await self.progress_callback("upload", uploaded, total)
+                
+                if uploaded < total:
+                    logger.warning(f"Загружено {uploaded} из {total} файлов")
+                    return uploaded > 0  # Частичный успех, если хоть что-то загрузилось
             else:
                 # Синхронизировать все файлы (рекурсивно)
                 # Сначала подсчитаем количество файлов

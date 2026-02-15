@@ -28,6 +28,11 @@ class Config:
     NEXTCLOUD_BOT_PASSWORD: Optional[str] = os.getenv("NEXTCLOUD_BOT_PASSWORD")
     NEXTCLOUD_KNOWLEDGE_BASE_PATH: str = os.getenv("NEXTCLOUD_KNOWLEDGE_BASE_PATH", "/KnowledgeBase")
     
+    # NextCloud Web Links
+    NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")  # Fallback на NEXTCLOUD_URL
+    NEXTCLOUD_LINK_MODE: str = os.getenv("NEXTCLOUD_LINK_MODE", "disabled")  # "share" | "direct" | "disabled"
+    NEXTCLOUD_SHARE_EXPIRATION_HOURS: int = int(os.getenv("NEXTCLOUD_SHARE_EXPIRATION_HOURS", "24"))
+    
     # Local Knowledge Base
     LOCAL_KB_PATH: Path = Path(os.getenv("LOCAL_KB_PATH", "/var/knowledge-base-bot/kb"))
     SYNC_INTERVAL: int = int(os.getenv("SYNC_INTERVAL", "300"))

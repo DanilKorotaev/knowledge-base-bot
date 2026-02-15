@@ -1,9 +1,10 @@
 """
-Сервис для работы с NextCloud через WebDAV API
+Сервис для работы с NextCloud через WebDAV API и OCS Share API
 """
 import logging
 import requests
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from requests.auth import HTTPBasicAuth
@@ -15,13 +16,18 @@ logger = logging.getLogger(__name__)
 
 
 class NextCloudService:
-    """Сервис для работы с NextCloud через WebDAV"""
+    """Сервис для работы с NextCloud через WebDAV и OCS API"""
     
     def __init__(self):
         self.url = config.NEXTCLOUD_URL
         self.username = config.NEXTCLOUD_BOT_USERNAME
         self.password = config.NEXTCLOUD_BOT_PASSWORD
         self.base_path = config.NEXTCLOUD_KNOWLEDGE_BASE_PATH
+        
+        # Настройки ссылок
+        self.web_url = getattr(config, 'NEXTCLOUD_WEB_URL', None) or self.url
+        self.link_mode = getattr(config, 'NEXTCLOUD_LINK_MODE', 'disabled')
+        self.share_expiration_hours = getattr(config, 'NEXTCLOUD_SHARE_EXPIRATION_HOURS', 24)
         
         if not self.url or not self.username or not self.password:
             logger.warning("NextCloud не настроен. Синхронизация будет отключена.")
@@ -30,8 +36,12 @@ class NextCloudService:
             self.enabled = True
             # Убрать trailing slash из URL
             self.url = self.url.rstrip('/')
+            if self.web_url:
+                self.web_url = self.web_url.rstrip('/')
             # WebDAV base URL
             self.webdav_url = f"{self.url}/remote.php/dav/files/{self.username}"
+            # OCS Share API base URL
+            self.ocs_share_url = f"{self.url}/ocs/v2.php/apps/files_sharing/api/v1/shares"
             # Убрать leading slash из base_path
             self.base_path = self.base_path.lstrip('/')
     
@@ -174,8 +184,8 @@ class NextCloudService:
             try:
                 self._make_request('PUT', remote_path, data=file_content)
             except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 409:
-                    # 409 Conflict — родительская директория не существует
+                if e.response is not None and e.response.status_code in (404, 409):
+                    # 404 Not Found / 409 Conflict — родительская директория не существует
                     # Создать директории и повторить загрузку
                     parent_dir = str(Path(remote_path).parent)
                     logger.info(f"Создаю директорию в NextCloud: {parent_dir}")
@@ -214,11 +224,12 @@ class NextCloudService:
             }
             
             propfind_body = '''<?xml version="1.0"?>
-            <d:propfind xmlns:d="DAV:">
+            <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
                 <d:prop>
                     <d:getlastmodified/>
                     <d:getcontentlength/>
                     <d:resourcetype/>
+                    <oc:fileid/>
                 </d:prop>
             </d:propfind>'''
             
@@ -335,6 +346,7 @@ class NextCloudService:
                 last_modified = prop.find('d:getlastmodified', namespaces)
                 content_length = prop.find('d:getcontentlength', namespaces)
                 resource_type = prop.find('d:resourcetype', namespaces)
+                fileid_elem = prop.find('oc:fileid', namespaces)
                 
                 # Проверить, что это файл, а не директория
                 if resource_type is not None:
@@ -342,11 +354,20 @@ class NextCloudService:
                     if collection is not None:
                         continue  # Пропустить директории
                 
+                # Извлечь fileid (если есть)
+                fileid = None
+                if fileid_elem is not None and fileid_elem.text:
+                    try:
+                        fileid = int(fileid_elem.text)
+                    except (ValueError, TypeError):
+                        pass
+                
                 file_info = {
                     'path': relative_path,
                     'href': href,
                     'last_modified': last_modified.text if last_modified is not None else None,
                     'size': int(content_length.text) if content_length is not None and content_length.text else 0,
+                    'fileid': fileid,
                 }
                 
                 files.append(file_info)
@@ -438,4 +459,230 @@ class NextCloudService:
         except Exception as e:
             logger.debug(f"Не удалось прочитать файл {remote_path}: {e}")
             return None
+    
+    # ==================== OCS Share API ====================
+    
+    async def create_share_link(self, remote_path: str, expire_hours: Optional[int] = None) -> Optional[str]:
+        """
+        Создать публичную share-ссылку через OCS Share API
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+            expire_hours: Срок жизни ссылки в часах (по умолчанию из конфигурации)
+        
+        Returns:
+            str: URL публичной ссылки или None если не удалось создать
+        """
+        if not self.enabled:
+            return None
+        
+        if expire_hours is None:
+            expire_hours = self.share_expiration_hours
+        
+        full_path = self._get_full_path(remote_path)
+        
+        # Дата истечения
+        expire_date = (datetime.now() + timedelta(hours=expire_hours)).strftime("%Y-%m-%d")
+        
+        try:
+            auth = HTTPBasicAuth(self.username, self.password)
+            headers = {
+                'OCS-APIREQUEST': 'true',
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded',
+            }
+            data = {
+                'path': f'/{full_path}',
+                'shareType': 3,  # public link
+                'permissions': 1,  # read-only
+                'expireDate': expire_date,
+            }
+            
+            response = requests.post(
+                self.ocs_share_url,
+                auth=auth,
+                headers=headers,
+                data=data,
+                timeout=15
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            ocs_data = result.get('ocs', {}).get('data', {})
+            share_url = ocs_data.get('url')
+            share_id = ocs_data.get('id')
+            
+            if share_url:
+                logger.debug(f"Создана share-ссылка для {remote_path}: {share_url} (id={share_id}, expire={expire_date})")
+                return share_url
+            else:
+                logger.warning(f"OCS Share API вернул ответ без URL для {remote_path}: {result}")
+                return None
+                
+        except requests.exceptions.HTTPError as e:
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code == 404:
+                logger.warning(f"OCS Share API: файл не найден: {remote_path}")
+            elif status_code == 403:
+                logger.warning(f"OCS Share API: нет прав для создания share-ссылки: {remote_path}")
+            else:
+                logger.warning(f"OCS Share API ошибка HTTP {status_code} для {remote_path}: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Не удалось создать share-ссылку для {remote_path}: {e}")
+            return None
+    
+    async def delete_share(self, share_id: int) -> bool:
+        """
+        Удалить share-ссылку
+        
+        Args:
+            share_id: ID share-ссылки
+        
+        Returns:
+            bool: True если успешно удалена
+        """
+        if not self.enabled:
+            return False
+        
+        try:
+            auth = HTTPBasicAuth(self.username, self.password)
+            headers = {
+                'OCS-APIREQUEST': 'true',
+                'Accept': 'application/json',
+            }
+            
+            response = requests.delete(
+                f"{self.ocs_share_url}/{share_id}",
+                auth=auth,
+                headers=headers,
+                timeout=15
+            )
+            response.raise_for_status()
+            logger.debug(f"Удалена share-ссылка: id={share_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"Не удалось удалить share-ссылку {share_id}: {e}")
+            return False
+    
+    async def get_file_id(self, remote_path: str) -> Optional[int]:
+        """
+        Получить file ID через PROPFIND с oc:fileid
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+        
+        Returns:
+            int: File ID или None если не удалось получить
+        """
+        if not self.enabled:
+            return None
+        
+        try:
+            url = self._get_webdav_url(remote_path)
+            auth = HTTPBasicAuth(self.username, self.password)
+            
+            propfind_body = '''<?xml version="1.0"?>
+            <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+                <d:prop>
+                    <oc:fileid/>
+                </d:prop>
+            </d:propfind>'''
+            
+            headers = {
+                'Depth': '0',
+                'Content-Type': 'application/xml',
+            }
+            
+            response = requests.request(
+                method='PROPFIND',
+                url=url,
+                auth=auth,
+                data=propfind_body,
+                headers=headers,
+                timeout=15
+            )
+            response.raise_for_status()
+            
+            # Парсить XML для извлечения fileid
+            root = ET.fromstring(response.text)
+            namespaces = {
+                'd': 'DAV:',
+                'oc': 'http://owncloud.org/ns',
+            }
+            
+            fileid_elem = root.find('.//oc:fileid', namespaces)
+            if fileid_elem is not None and fileid_elem.text:
+                return int(fileid_elem.text)
+            
+            return None
+        except Exception as e:
+            logger.debug(f"Не удалось получить file ID для {remote_path}: {e}")
+            return None
+    
+    def get_web_url(self, remote_path: str, file_id: Optional[int] = None) -> str:
+        """
+        Сконструировать прямую ссылку на веб-интерфейс NextCloud
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+            file_id: File ID (если известен, используется для короткой ссылки)
+        
+        Returns:
+            str: URL на файл в веб-интерфейсе NextCloud
+        """
+        web_base = self.web_url or self.url
+        if not web_base:
+            return ""
+        
+        web_base = web_base.rstrip('/')
+        
+        if file_id:
+            # Короткая ссылка: /f/{fileid}
+            return f"{web_base}/f/{file_id}"
+        
+        # Fallback: /apps/files/?dir={parent_dir}&scrollto={filename}
+        full_path = self._get_full_path(remote_path)
+        parent_dir = str(Path(full_path).parent)
+        filename = Path(full_path).name
+        
+        # URL-encode для параметров
+        return f"{web_base}/apps/files/?dir=/{quote(parent_dir)}&scrollto={quote(filename)}"
+    
+    async def get_file_link(self, remote_path: str) -> Optional[str]:
+        """
+        Получить ссылку на файл в зависимости от настроенного режима
+        
+        Порядок:
+        - share → create_share_link(), fallback → direct
+        - direct → get_web_url() с file_id, fallback → get_web_url() без file_id
+        - disabled → None
+        
+        Args:
+            remote_path: Путь к файлу (относительно base_path)
+        
+        Returns:
+            str: URL ссылки или None
+        """
+        if not self.enabled or self.link_mode == "disabled":
+            return None
+        
+        if self.link_mode == "share":
+            # Попробовать создать share-ссылку
+            url = await self.create_share_link(remote_path)
+            if url:
+                return url
+            # Share не удался — НЕ fallback на direct (требует авторизации, бесполезно из Telegram)
+            logger.warning(f"Share-ссылка не удалась для {remote_path}, ссылка не будет создана")
+            return None
+        
+        # Режим direct (пользователь осознанно выбрал, знает что нужна авторизация)
+        if self.link_mode == "direct":
+            # Попробовать получить file_id для короткой ссылки
+            file_id = await self.get_file_id(remote_path)
+            web_url = self.get_web_url(remote_path, file_id=file_id)
+            if web_url:
+                return web_url
+        
+        return None
 
