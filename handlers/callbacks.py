@@ -1165,7 +1165,7 @@ async def voice_add_to_collect_callback(callback: CallbackQuery, state: FSMConte
 
 @router.callback_query(lambda c: c.data.startswith("voice_transcribe_only_"))
 async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMContext):
-    """Обработка только транскрибации голосового (без запроса к БЗ)"""
+    """Обработка только транскрибации голосового (без запроса к БЗ) с полировкой текста"""
     await callback.answer()
     
     try:
@@ -1185,9 +1185,35 @@ async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMCont
         # Удалить временные данные голосового (не перезаписывая остальное состояние)
         await state.update_data(**{f"voice_{voice_id}": None})
         
+        # Полировка транскрипции через LLM
+        result_text = transcribed_text
+        polish_warning = ""
+        
+        if config.TRANSCRIPTION_POLISH_ENABLED:
+            # Показать статус полировки
+            try:
+                await callback.message.edit_text("✨ Оформляю текст...")
+            except Exception:
+                pass
+            
+            from services.transcription_service import TranscriptionService
+            
+            # Лёгкая инициализация: для полировки нужен только run_simple_prompt,
+            # без полной инициализации CursorCLIService (промпты БЗ, cursor rules и т.д.)
+            polished_text = await TranscriptionService.polish_transcription_simple(
+                text=transcribed_text,
+                language=language if language != "unknown" else None
+            )
+            
+            if polished_text and polished_text != transcribed_text:
+                result_text = polished_text
+            elif polished_text == transcribed_text:
+                # Полировка не изменила текст (или вернула оригинал при ошибке)
+                logger.debug("Полировка не изменила текст")
+        
         # Показать расшифровку
         from utils.message_helpers import markdown_to_html
-        html_text = markdown_to_html(transcribed_text)
+        html_text = markdown_to_html(result_text)
         response = f"🎤 <b>Расшифровка:</b>\n\n{html_text}"
         if language and language != "unknown":
             response += f"\n\n🌐 Язык: {language}"
@@ -1201,7 +1227,7 @@ async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMCont
         except Exception as e:
             logger.warning(f"Не удалось удалить временный файл {audio_path}: {e}")
         
-        # Удалить сообщение с кнопками
+        # Удалить сообщение с кнопками / статусом полировки
         try:
             await callback.message.delete()
         except Exception:

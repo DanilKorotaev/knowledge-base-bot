@@ -189,6 +189,158 @@ class CursorCLIService:
         logger.debug("Промпт базы знаний не найден (это нормально, если БЗ не имеет системного промпта)")
         return ""
     
+    async def run_simple_prompt(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        timeout: int = 60
+    ) -> str:
+        """
+        Выполнить простой промпт через Cursor CLI без отслеживания файлов,
+        без контекста сессии и без стриминга.
+        
+        Используется для вспомогательных задач (полировка текста и т.п.).
+        Использует чтение stdout с idle-детекцией (как process_query),
+        чтобы не зависать если cursor-agent не завершается сам.
+        
+        Args:
+            prompt: Текст промпта
+            model: Модель (по умолчанию из TRANSCRIPTION_POLISH_MODEL)
+            timeout: Таймаут в секундах
+        
+        Returns:
+            str: Ответ модели (пустая строка при ошибке)
+        """
+        if not self.api_key:
+            logger.error("API ключ не установлен для run_simple_prompt")
+            return ""
+        
+        model_to_use = model or config.TRANSCRIPTION_POLISH_MODEL
+        
+        cmd = ["cursor-agent", "-p", "--force"]
+        
+        # Добавить модель
+        if model_to_use and model_to_use.lower() != "auto":
+            cmd.extend(["--model", model_to_use])
+        
+        cmd.append(prompt)
+        
+        # stdbuf для принудительного сброса буфера stdout (как в process_query)
+        use_stdbuf = os.getenv("CURSOR_CLI_USE_STDBUF", "true").lower() in ("true", "1", "yes")
+        if use_stdbuf:
+            cmd = ["stdbuf", "-oL"] + cmd
+        
+        # Подготовить окружение с API ключом
+        env = os.environ.copy()
+        env["CURSOR_API_KEY"] = self.api_key
+        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
+            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        
+        try:
+            logger.info(f"run_simple_prompt: запуск (модель: {model_to_use}, таймаут: {timeout}с)")
+            
+            # Запускаем из /tmp чтобы не подхватывать .cursor/rules/ из БЗ
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd="/tmp",
+                env=env,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            # Читаем stdout с idle-детекцией (как в process_query)
+            # cursor-agent может не завершаться после вывода ответа
+            stdout_chunks = []
+            first_chunk_time = None
+            last_chunk_time = None
+            idle_timeout = 15  # Если stdout замолчал 15с после первых данных — ответ получен
+            process_start = time.time()
+            
+            try:
+                while True:
+                    # До первого чанка: ждём до общего таймаута
+                    # После первого чанка: ждём idle_timeout
+                    read_timeout = idle_timeout if first_chunk_time else timeout
+                    try:
+                        chunk = await asyncio.wait_for(
+                            process.stdout.read(4096),
+                            timeout=read_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        if first_chunk_time and stdout_chunks:
+                            logger.info(
+                                f"run_simple_prompt: stdout idle {idle_timeout}с после "
+                                f"последнего чанка — завершаем чтение"
+                            )
+                            break  # Idle timeout — ответ получен
+                        else:
+                            raise  # Полный таймаут — ни одного чанка
+                    
+                    if not chunk:
+                        break  # EOF — процесс завершился сам
+                    
+                    decoded = chunk.decode('utf-8', errors='ignore')
+                    stdout_chunks.append(decoded)
+                    last_chunk_time = time.time()
+                    
+                    if first_chunk_time is None and decoded.strip():
+                        first_chunk_time = time.time()
+                        elapsed = first_chunk_time - process_start
+                        logger.info(f"run_simple_prompt: первый ответ через {elapsed:.1f}с")
+                        
+            except asyncio.TimeoutError:
+                logger.warning(f"run_simple_prompt: таймаут ({timeout}с), завершаем процесс")
+                try:
+                    process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    pass
+                return ""
+            
+            # Завершить процесс если ещё жив (idle timeout)
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=3.0)
+                    except (ProcessLookupError, asyncio.TimeoutError):
+                        pass
+            
+            # Прочитать stderr
+            stderr_text = ""
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
+                stderr_text = stderr_data.decode('utf-8', errors='ignore').strip() if stderr_data else ""
+            except (asyncio.TimeoutError, Exception):
+                pass
+            
+            stdout_text = ''.join(stdout_chunks).strip()
+            total_time = time.time() - process_start
+            
+            if not stdout_text and stderr_text:
+                logger.warning(
+                    f"run_simple_prompt: пустой stdout за {total_time:.1f}с, "
+                    f"stderr: {stderr_text[:300]}"
+                )
+                return ""
+            
+            if stderr_text:
+                logger.debug(f"run_simple_prompt stderr: {stderr_text[:200]}")
+            
+            logger.info(f"run_simple_prompt: успех ({len(stdout_text)} символов за {total_time:.1f}с)")
+            return stdout_text
+            
+        except FileNotFoundError:
+            logger.error("run_simple_prompt: команда 'cursor-agent' не найдена")
+            return ""
+        except Exception as e:
+            logger.error(f"run_simple_prompt: неожиданная ошибка: {e}", exc_info=True)
+            return ""
+    
     async def create_chat(self) -> Optional[str]:
         """
         Создать новый чат в Cursor CLI, вернуть chatId (UUID)

@@ -55,6 +55,11 @@ class Config:
     MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "5"))
     ENABLE_CHANGE_TRACKING: bool = os.getenv("ENABLE_CHANGE_TRACKING", "true").lower() == "true"
     
+    # Transcription polish (постобработка транскрипции через LLM)
+    TRANSCRIPTION_POLISH_ENABLED: bool = os.getenv("TRANSCRIPTION_POLISH_ENABLED", "true").lower() in ("true", "1", "yes")
+    TRANSCRIPTION_POLISH_MODEL: str = os.getenv("TRANSCRIPTION_POLISH_MODEL", "auto")
+    TRANSCRIPTION_POLISH_PROMPT_PATH: Optional[str] = os.getenv("TRANSCRIPTION_POLISH_PROMPT_PATH")  # Путь к файлу промпта (по умолчанию agent/transcription_polish_prompt.md)
+    
     # Streaming
     STREAMING_ENABLED: bool = os.getenv("STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")
     STREAMING_UPDATE_INTERVAL: float = float(os.getenv("STREAMING_UPDATE_INTERVAL", "1.5"))
