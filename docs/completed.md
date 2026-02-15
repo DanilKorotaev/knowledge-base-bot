@@ -26,6 +26,8 @@
 
 - [x] [Добавление inline-кнопок для быстрых действий](tasks/completed/task-ux-inline-buttons.md)
 - [x] [Интерактивный режим команд](tasks/completed/task-ux-interactive-commands.md)
+- [x] [Исправить отображение путей к файлам в Telegram](tasks/completed/task-ux-fix-file-paths-in-telegram.md)
+- [x] [Прямые ссылки на файлы в NextCloud Web UI](tasks/completed/task-feature-nextcloud-web-links.md)
 
 ## Новые функции
 
@@ -36,7 +38,7 @@
 
 ## Статистика
 
-**Всего выполнено задач**: 6  
+**Всего выполнено задач**: 8  
 **Последнее обновление**: 2026-02-14
 
 ---

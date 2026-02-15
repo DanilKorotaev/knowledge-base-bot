@@ -1,6 +1,6 @@
 # Задача: Прямые ссылки на файлы в NextCloud Web UI
 
-**Статус**: 📋 Запланировано  
+**Статус**: ✅ Выполнено  
 **Приоритет**: 🟡 Средний  
 **Категория**: Новые функции
 
@@ -56,7 +56,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 1. Конфигурация
 
-- [ ] Добавить переменные в `config.py`:
+- [x] Добавить переменные в `config.py`:
   ```python
   NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")  # fallback на NEXTCLOUD_URL
   NEXTCLOUD_LINK_MODE: str = os.getenv("NEXTCLOUD_LINK_MODE", "share")  # "share" | "direct" | "disabled"
@@ -65,7 +65,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 2. OCS Share API в NextCloudService
 
-- [ ] Добавить метод `create_share_link()` в `NextCloudService`:
+- [x] Добавить метод `create_share_link()` в `NextCloudService`:
   ```python
   async def create_share_link(self, remote_path: str, expire_hours: int = 24) -> Optional[str]:
       """Создать публичную share-ссылку через OCS Share API"""
@@ -76,7 +76,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
   - Вернуть URL публичной ссылки из ответа (`url` поле)
   - Header: `OCS-APIREQUEST: true`, `Accept: application/json`
 
-- [ ] Добавить метод `delete_share()` — для очистки (опционально):
+- [x] Добавить метод `delete_share()` — для очистки (опционально):
   ```python
   async def delete_share(self, share_id: int) -> bool:
       """Удалить share-ссылку"""
@@ -84,7 +84,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 3. Получение file ID через PROPFIND (для fallback на direct-ссылки)
 
-- [ ] Добавить метод `get_file_id()` в `NextCloudService`:
+- [x] Добавить метод `get_file_id()` в `NextCloudService`:
   ```python
   async def get_file_id(self, remote_path: str) -> Optional[int]:
       """Получить file ID через PROPFIND с oc:fileid"""
@@ -94,7 +94,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 4. Генерация URL (с учётом режима)
 
-- [ ] Добавить метод `get_file_link()` в `NextCloudService`:
+- [x] Добавить метод `get_file_link()` в `NextCloudService`:
   ```python
   async def get_file_link(self, remote_path: str) -> Optional[str]:
       """Получить ссылку на файл в зависимости от настроенного режима"""
@@ -104,7 +104,7 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
   - Если `NEXTCLOUD_LINK_MODE == "disabled"` → `None`
   - Fallback: если share не удалось → direct, если direct не удалось → None
 
-- [ ] Добавить метод `get_web_url()` (для режима direct):
+- [x] Добавить метод `get_web_url()` (для режима direct):
   ```python
   def get_web_url(self, remote_path: str, file_id: Optional[int] = None) -> str:
       """Сконструировать прямую ссылку на веб-интерфейс NextCloud"""
@@ -114,8 +114,8 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 5. Расширение PROPFIND (для direct-режима)
 
-- [ ] Расширить `_parse_propfind_response()` — парсить `oc:fileid` при наличии в ответе
-- [ ] Добавить `oc:fileid` в PROPFIND запрос `list_files()`:
+- [x] Расширить `_parse_propfind_response()` — парсить `oc:fileid` при наличии в ответе
+- [x] Добавить `oc:fileid` в PROPFIND запрос `list_files()`:
   ```xml
   <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
       <d:prop>
@@ -129,12 +129,12 @@ POST /ocs/v2.php/apps/files_sharing/api/v1/shares
 
 ### 6. Обновление формата сообщений
 
-- [ ] Изменить `format_file_changes_info()` в `utils/message_helpers.py`:
+- [x] Изменить `format_file_changes_info()` в `utils/message_helpers.py`:
   - Добавить параметр `file_urls: Optional[Dict[str, str]]` (словарь путь → URL)
   - Формировать HTML-ссылку: `<a href="{url}">📎 Открыть</a>` рядом с путём
   - Если URL недоступен — показывать только путь в `<code>`
   - Для 1-2 файлов: inline-кнопки (InlineKeyboardButton с url) — удобнее на мобильных
-- [ ] Обновить `handle_file_changes()` в `QueryProcessingService`:
+- [x] Обновить `handle_file_changes()` в `QueryProcessingService`:
   - Получать ссылки для каждого изменённого файла через `get_file_link()`
   - Передавать в `format_file_changes_info()`
 

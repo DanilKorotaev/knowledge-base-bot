@@ -1,6 +1,6 @@
 # Задача: Исправить отображение путей к файлам в Telegram
 
-**Статус**: 📋 Запланировано  
+**Статус**: ✅ Выполнено  
 **Приоритет**: 🔴 Высокий  
 **Категория**: Улучшения UX
 
@@ -27,12 +27,12 @@ Telegram выделяет `TEBOIL М-2 Всходы.md` и `2026-02-08 Запр�
 
 ## Задачи
 
-- [ ] Изменить `format_file_changes_info()` в `utils/message_helpers.py`:
+- [x] Изменить `format_file_changes_info()` в `utils/message_helpers.py`:
   - Обернуть пути в `<code>` теги: `<code>{path}</code>`
   - Экранировать HTML-символы в путях через `html.escape()`
-- [ ] Убедиться, что сообщение об изменениях отправляется с `parse_mode=ParseMode.HTML`
-- [ ] Добавить `link_preview_options=LinkPreviewOptions(is_disabled=True)` при отправке сообщений с путями
-- [ ] Проверить, что в `handle_file_changes()` (`query_processing_service.py`) передаётся `parse_mode`
+- [x] Убедиться, что сообщение об изменениях отправляется с `parse_mode=ParseMode.HTML`
+- [x] Добавить `link_preview_options=LinkPreviewOptions(is_disabled=True)` при отправке сообщений с путями
+- [x] Проверить, что в `handle_file_changes()` (`query_processing_service.py`) передаётся `parse_mode`
 
 ## Пример
 
