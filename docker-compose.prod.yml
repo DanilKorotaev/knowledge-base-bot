@@ -1,0 +1,37 @@
+# ============================================================
+# Docker Compose — продакшен-оверрайд
+# ============================================================
+# Использование:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Или создайте alias в .bashrc / .zshrc:
+#   alias dc-prod='docker compose -f docker-compose.yml -f docker-compose.prod.yml'
+#
+# Отличия от базового docker-compose.yml:
+#   - Mini App порт привязан к 127.0.0.1 (только для Nginx, не наружу)
+#   - PostgreSQL порт не экспортирован наружу
+#   - Volume для базы знаний использует серверный путь
+# ============================================================
+
+version: '3.8'
+
+services:
+  bot:
+    volumes:
+      # На сервере: отдельная директория для локальной копии БЗ
+      - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb
+      - ./logs:/app/logs
+      - cursor_chats:/root/.cursor/chats
+
+  miniapp:
+    ports:
+      # Только на localhost — Nginx проксирует запросы снаружи
+      - "127.0.0.1:${MINIAPP_PORT:-8080}:8080"
+    volumes:
+      - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:ro
+      - ./logs:/app/logs
+
+  postgres:
+    # НЕ экспортируем порт наружу (доступен только через bot-network)
+    ports: []
+

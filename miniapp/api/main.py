@@ -32,9 +32,16 @@ app = FastAPI(
 )
 
 # Настройка CORS
+# MINIAPP_CORS_ORIGINS — список доменов через запятую (по умолчанию * для разработки)
+cors_origins_env = os.getenv("MINIAPP_CORS_ORIGINS", "*")
+if cors_origins_env == "*":
+    cors_origins = ["*"]
+else:
+    cors_origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене ограничить до домена Mini App
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
