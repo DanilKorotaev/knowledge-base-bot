@@ -54,6 +54,21 @@ SYNC_DELETE_MISSING=false
 
 В этом случае файлы будут только добавляться и обновляться, но не удаляться при синхронизации.
 
+### Исключение системных файлов
+
+По умолчанию из синхронизации исключаются:
+- **Dot-файлы/директории** (`.git/`, `.cursor/`, `.env`, `.DS_Store` и т.д.)
+- **Кеш и зависимости** (`__pycache__/`, `node_modules/`)
+- **IDE-конфиги** (`.idea/`, `.vscode/`)
+- **Виртуальные окружения** (`.venv/`, `venv/`)
+
+Если в базе знаний хранятся репозитории с кодом, их `.git/` директории, `node_modules/` и подобные файлы **не будут** скачиваться и загружаться.
+
+Можно настроить собственные паттерны через переменную окружения:
+```bash
+SYNC_EXCLUDE_PATTERNS=.git/,__pycache__/,node_modules/,.DS_Store,.env,.venv/,venv/,.idea/,.vscode/,*.pyc
+```
+
 ## Настройка
 
 ### Переменные окружения
@@ -66,6 +81,9 @@ ENABLE_SYNC=true
 AUTO_SYNC=true
 SYNC_INTERVAL=300  # секунд (5 минут)
 SYNC_DELETE_MISSING=true  # Удалять файлы при синхронизации (true по умолчанию)
+
+# Паттерны исключений (через запятую) — файлы/директории, которые НЕ синхронизируются
+# SYNC_EXCLUDE_PATTERNS=.git/,__pycache__/,node_modules/,.DS_Store,.env,.venv/,venv/,.idea/,.vscode/
 
 # NextCloud настройки
 NEXTCLOUD_URL=https://your-nextcloud.com

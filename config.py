@@ -40,6 +40,16 @@ class Config:
     ENABLE_SYNC: bool = os.getenv("ENABLE_SYNC", "false").lower() == "true"
     SYNC_DELETE_MISSING: bool = os.getenv("SYNC_DELETE_MISSING", "true").lower() == "true"  # Удалять файлы при синхронизации
     
+    # Паттерны исключений при синхронизации (через запятую)
+    # Каждый паттерн проверяется как подстрока в пути файла или как имя файла/директории
+    SYNC_EXCLUDE_PATTERNS: List[str] = [
+        p.strip() for p in os.getenv(
+            "SYNC_EXCLUDE_PATTERNS",
+            ".git/,.git\\,__pycache__/,__pycache__\\,node_modules/,node_modules\\,.DS_Store,.env,.venv/,venv/,.idea/,.vscode/"
+        ).split(",")
+        if p.strip()
+    ]
+    
     # Database
     DB_TYPE: str = os.getenv("DB_TYPE", "postgresql")  # postgresql или sqlite
     DB_HOST: str = os.getenv("DB_HOST", "localhost")

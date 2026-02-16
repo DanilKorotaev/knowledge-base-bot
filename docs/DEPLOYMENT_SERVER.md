@@ -136,6 +136,11 @@ AUTO_SYNC=true
 SYNC_INTERVAL=300
 SYNC_DELETE_MISSING=true
 
+# Паттерны исключений при синхронизации (через запятую)
+# Файлы/директории, совпадающие с этими паттернами, не будут скачиваться/загружаться
+# По умолчанию: .git, __pycache__, node_modules, .DS_Store, .env, .venv, venv, .idea, .vscode
+# SYNC_EXCLUDE_PATTERNS=.git/,__pycache__/,node_modules/,.DS_Store,.env,.venv/,venv/,.idea/,.vscode/
+
 # ============================================
 # Database (PostgreSQL — рекомендуется для продакшена)
 # ============================================

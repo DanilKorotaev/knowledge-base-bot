@@ -203,12 +203,13 @@ class SyncService:
         for item in directory.iterdir():
             if item.is_file():
                 # Пропустить служебные файлы
-                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
+                rel_path = str(item.relative_to(self.local_kb_path))
+                if self._is_system_file(rel_path):
                     continue
                 count += 1
             elif item.is_dir():
                 # Пропустить служебные директории
-                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
+                if self._is_system_file(item.name):
                     continue
                 count += await self._count_files(item)
         return count
@@ -260,15 +261,14 @@ class SyncService:
         # Собрать все файлы для загрузки
         for item in local_dir.iterdir():
             if item.is_file():
-                # Пропустить служебные файлы
-                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
-                    continue
-                
                 remote_path = f"{remote_base}/{item.name}".lstrip('/')
+                # Пропустить служебные файлы
+                if self._is_system_file(remote_path):
+                    continue
                 files_to_upload.append((item, remote_path))
             elif item.is_dir():
                 # Пропустить служебные директории
-                if item.name.startswith('.') or item.name in ['.git', '.cursor']:
+                if self._is_system_file(item.name):
                     continue
                 
                 new_remote_base = f"{remote_base}/{item.name}".lstrip('/')
@@ -357,7 +357,14 @@ class SyncService:
                 logger.warning("Не удалось получить список файлов из NextCloud. Возможно, папка пуста или нет доступа.")
                 return False
             
-            logger.info(f"Найдено файлов для синхронизации: {len(files)}")
+            logger.info(f"Всего файлов в NextCloud: {len(files)}")
+            
+            # Отфильтровать системные/служебные файлы
+            original_count = len(files)
+            files = [f for f in files if not self._is_system_file(f.get('path', ''))]
+            excluded_count = original_count - len(files)
+            if excluded_count > 0:
+                logger.info(f"Исключено системных файлов: {excluded_count}, к синхронизации: {len(files)}")
             
             # Показать уведомление, если синхронизация долгая (> 2 секунд)
             if show_notification and len(files) > 10:
@@ -620,25 +627,47 @@ class SyncService:
     
     def _is_system_file(self, path: str) -> bool:
         """
-        Проверить, является ли файл служебным (нужно ли его пропускать)
+        Проверить, является ли файл служебным (нужно ли его пропускать при синхронизации)
+        
+        Проверяет:
+        1. Dot-файлы/директории (начинаются с '.')
+        2. Известные служебные имена (__pycache__, node_modules и т.д.)
+        3. Паттерны из SYNC_EXCLUDE_PATTERNS
         
         Args:
-            path: Путь к файлу
+            path: Путь к файлу (относительный)
         
         Returns:
             bool: True если файл служебный
         """
-        # Проверить имя файла
-        name = Path(path).name
+        # Нормализовать разделители
+        normalized = path.replace('\\', '/')
+        path_parts = Path(normalized).parts
         
-        # Служебные файлы и директории
-        if name.startswith('.') or name in ['.git', '.cursor', '__pycache__', '.DS_Store']:
-            return True
+        # 1. Проверить: есть ли в пути dot-директории или dot-файлы
+        for part in path_parts:
+            if part.startswith('.'):
+                return True
         
-        # Проверить путь
-        path_parts = Path(path).parts
-        if any(part.startswith('.') for part in path_parts):
-            return True
+        # 2. Проверить известные служебные имена в любой части пути
+        system_names = {'__pycache__', 'node_modules', '.DS_Store'}
+        for part in path_parts:
+            if part in system_names:
+                return True
+        
+        # 3. Проверить паттерны из конфигурации
+        exclude_patterns = config.SYNC_EXCLUDE_PATTERNS
+        for pattern in exclude_patterns:
+            pattern_clean = pattern.rstrip('/').rstrip('\\')
+            # Проверить как часть пути (директория в пути)
+            if pattern_clean in path_parts:
+                return True
+            # Проверить как подстроку в нормализованном пути (для паттернов с /)
+            if '/' in pattern and pattern in normalized:
+                return True
+            # Проверить точное совпадение имени файла
+            if Path(normalized).name == pattern_clean:
+                return True
         
         return False
     
