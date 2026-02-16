@@ -28,6 +28,14 @@ class CursorCLIService:
         
         # Создать .cursorignore для оптимизации производительности
         self._ensure_cursorignore()
+    
+    def _prepare_env(self) -> dict:
+        """Подготовить окружение для subprocess: API ключи"""
+        env = os.environ.copy()
+        env["CURSOR_API_KEY"] = self.api_key
+        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
+            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        return env
         
         # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
         self._ensure_cursor_rules()
@@ -230,11 +238,8 @@ class CursorCLIService:
         if use_stdbuf:
             cmd = ["stdbuf", "-oL"] + cmd
         
-        # Подготовить окружение с API ключом
-        env = os.environ.copy()
-        env["CURSOR_API_KEY"] = self.api_key
-        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
-            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        # Подготовить окружение с API ключом и прокси
+        env = self._prepare_env()
         
         try:
             logger.info(f"run_simple_prompt: запуск (модель: {model_to_use}, таймаут: {timeout}с)")
@@ -348,10 +353,7 @@ class CursorCLIService:
         Returns:
             str: UUID чата или None при ошибке
         """
-        env = os.environ.copy()
-        env["CURSOR_API_KEY"] = self.api_key
-        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
-            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        env = self._prepare_env()
         
         try:
             process = await asyncio.create_subprocess_exec(
@@ -469,12 +471,8 @@ class CursorCLIService:
         # Добавить полный запрос
         cmd.append(full_query)
         
-        # Подготовить окружение с API ключом
-        env = os.environ.copy()
-        env["CURSOR_API_KEY"] = self.api_key
-        # Также пробуем OPENAI_API_KEY для совместимости
-        if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
-            env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        # Подготовить окружение с API ключом и прокси
+        env = self._prepare_env()
         
         # Таймаут из конфига (по умолчанию 10 минут)
         timeout = int(os.getenv("CURSOR_CLI_TIMEOUT", "600"))

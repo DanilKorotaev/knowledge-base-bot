@@ -19,6 +19,9 @@
 
 services:
   bot:
+    extra_hosts:
+      # Доступ к хост-машине из контейнера (для SOCKS5 прокси и т.п.)
+      - "host.docker.internal:host-gateway"
     volumes:
       # На сервере: отдельная директория для локальной копии БЗ
       - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb

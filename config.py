@@ -19,6 +19,7 @@ class Config:
     # Cursor CLI / OpenAI API
     CURSOR_API_KEY: Optional[str] = os.getenv("CURSOR_API_KEY")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    OPENAI_PROXY: Optional[str] = os.getenv("OPENAI_PROXY")  # SOCKS5/HTTP прокси для OpenAI API (например socks5://127.0.0.1:1080)
     # Модель для Cursor CLI: "auto" = автовыбор, или конкретная модель (gpt-4o, claude-sonnet, etc.)
     CURSOR_MODEL: str = os.getenv("CURSOR_MODEL", "auto")
     

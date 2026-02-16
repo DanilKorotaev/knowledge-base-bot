@@ -4,6 +4,7 @@
 import logging
 from typing import Optional
 from openai import AsyncOpenAI
+import httpx
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,14 @@ class OpenAIService:
     def __init__(self):
         if not config.OPENAI_API_KEY:
             raise ValueError("OPENAI_API_KEY не установлен")
-        self.client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+        
+        # Настроить HTTP-клиент с прокси (если указан)
+        client_kwargs = {"api_key": config.OPENAI_API_KEY}
+        if config.OPENAI_PROXY:
+            logger.info(f"OpenAI API будет использовать прокси: {config.OPENAI_PROXY}")
+            client_kwargs["http_client"] = httpx.AsyncClient(proxy=config.OPENAI_PROXY)
+        
+        self.client = AsyncOpenAI(**client_kwargs)
     
     async def transcribe_audio(
         self,
