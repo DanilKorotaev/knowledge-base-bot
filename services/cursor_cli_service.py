@@ -28,6 +28,12 @@ class CursorCLIService:
         
         # Создать .cursorignore для оптимизации производительности
         self._ensure_cursorignore()
+        
+        # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
+        self._ensure_cursor_rules()
+        
+        # Загрузить системный промпт один раз при инициализации
+        self.system_prompt = self._load_system_prompt()
     
     def _prepare_env(self) -> dict:
         """Подготовить окружение для subprocess: API ключи"""
@@ -36,12 +42,6 @@ class CursorCLIService:
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
         return env
-        
-        # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
-        self._ensure_cursor_rules()
-        
-        # Загрузить системный промпт один раз при инициализации
-        self.system_prompt = self._load_system_prompt()
     
     def _ensure_cursorignore(self) -> None:
         """
