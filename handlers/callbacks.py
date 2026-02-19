@@ -1039,18 +1039,10 @@ async def voice_show_full_callback(callback: CallbackQuery, state: FSMContext):
         transcription = voice_ref["transcription"]
         
         # Показать полную расшифровку отдельным сообщением для удобного копирования
-        from utils.message_helpers import markdown_to_html
-        try:
-            html_text = markdown_to_html(transcription)
-            await callback.message.answer(
-                f"🎤 <b>Полная расшифровка:</b>\n\n{html_text}",
-                parse_mode=ParseMode.HTML
-            )
-        except Exception:
-            await callback.message.answer(
-                f"🎤 Полная расшифровка:\n\n{transcription}",
-                parse_mode=None
-            )
+        # (с автоматической разбивкой на части при длинных текстах)
+        from utils.message_helpers import send_formatted_message
+        full_text = f"🎤 Полная расшифровка:\n\n{transcription}"
+        await send_formatted_message(callback.message, full_text)
         
     except Exception as e:
         logger.error(f"Ошибка при показе полной расшифровки: {e}", exc_info=True)
@@ -1211,14 +1203,13 @@ async def voice_transcribe_only_callback(callback: CallbackQuery, state: FSMCont
                 # Полировка не изменила текст (или вернула оригинал при ошибке)
                 logger.debug("Полировка не изменила текст")
         
-        # Показать расшифровку
-        from utils.message_helpers import markdown_to_html
-        html_text = markdown_to_html(result_text)
-        response = f"🎤 <b>Расшифровка:</b>\n\n{html_text}"
+        # Показать расшифровку (с автоматической разбивкой на части при длинных текстах)
+        from utils.message_helpers import send_formatted_message
+        response = f"🎤 Расшифровка:\n\n{result_text}"
         if language and language != "unknown":
             response += f"\n\n🌐 Язык: {language}"
         
-        await callback.message.answer(response, parse_mode=ParseMode.HTML)
+        await send_formatted_message(callback.message, response)
         
         # Удалить временный файл
         try:

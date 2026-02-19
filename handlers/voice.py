@@ -6,7 +6,6 @@ import uuid
 from pathlib import Path
 
 from aiogram import Router
-from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
@@ -24,7 +23,7 @@ from utils.constants import SessionType, MessageRole
 from utils.db_helpers import get_db
 from utils.error_helpers import send_error_message, handle_error_silently
 from utils.file_helpers import download_telegram_file
-from utils.message_helpers import markdown_to_html
+from utils.message_helpers import send_formatted_message
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
 
 router = Router()
@@ -109,11 +108,8 @@ async def voice_handler(message: Message, state: FSMContext):
             )
             
             # Отправить чистую расшифровку отдельным сообщением для проверки и удобного копирования
-            try:
-                html_text = markdown_to_html(transcribed_text)
-                await message.answer(html_text, parse_mode=ParseMode.HTML)
-            except Exception:
-                await message.answer(transcribed_text)
+            # (с автоматической разбивкой на части при длинных текстах)
+            await send_formatted_message(message, transcribed_text)
             
             # Показать кнопку подтверждения отправки
             await message.answer(
@@ -151,11 +147,8 @@ async def voice_handler(message: Message, state: FSMContext):
         await message.answer(info_text)
         
         # Отправить чистую расшифровку отдельным сообщением для удобного копирования/пересылки
-        try:
-            html_text = markdown_to_html(transcribed_text)
-            await message.answer(html_text, parse_mode=ParseMode.HTML)
-        except Exception:
-            await message.answer(transcribed_text)
+        # (с автоматической разбивкой на части при длинных текстах)
+        await send_formatted_message(message, transcribed_text)
         
         # Обычный режим - показать выбор: отправить запрос, использовать как prompt или только транскрибировать
         await message.answer(
