@@ -15,6 +15,7 @@ class Config:
     
     # Telegram
     TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
+    TELEGRAM_PROXY: Optional[str] = os.getenv("TELEGRAM_PROXY")  # SOCKS5/HTTP прокси для Telegram API (например socks5://host.docker.internal:1080)
     
     # Cursor CLI / OpenAI API
     CURSOR_API_KEY: Optional[str] = os.getenv("CURSOR_API_KEY")

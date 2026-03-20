@@ -6,6 +6,7 @@ import logging
 import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 
 from config import config
@@ -24,9 +25,16 @@ async def main():
         # Валидация конфигурации
         config.validate()
         
+        # Инициализация сессии Telegram (при необходимости через прокси)
+        session = None
+        if config.TELEGRAM_PROXY:
+            logger.info(f"Telegram API будет использовать прокси: {config.TELEGRAM_PROXY}")
+            session = AiohttpSession(proxy=config.TELEGRAM_PROXY)
+
         # Инициализация бота и диспетчера
         bot = Bot(
             token=config.TELEGRAM_TOKEN,
+            session=session,
             default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
         )
         dp = Dispatcher()

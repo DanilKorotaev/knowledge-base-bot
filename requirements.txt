@@ -1,5 +1,6 @@
 # Telegram Bot Framework
 aiogram==3.16.0
+aiohttp-socks==0.10.1
 
 # Database
 psycopg2-binary==2.9.9
@@ -14,6 +15,9 @@ httpx[socks]>=0.27.0
 # NextCloud WebDAV
 requests==2.31.0
 webdavclient3==3.14.6
+
+# MCP (Model Context Protocol) — для MCP серверов, запускаемых cursor-agent
+mcp>=1.0.0
 
 # Utilities
 python-dotenv==1.0.0
