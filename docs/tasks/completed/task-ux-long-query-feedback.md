@@ -10,7 +10,7 @@
 - **`docs/DEPLOYMENT_SERVER.md`** — шаблон `.env` для продакшена: `QUERY_PROGRESS_TIMER_INTERVAL` и закомментированные `CURSOR_CLI_*`.
 - **`.env.example`** — те же переменные для локальной копии.
 
-Деплой на сервер: `git pull` в `/opt/knowledge-base-bot`, при необходимости добавить в `.env` на сервере строку `QUERY_PROGRESS_TIMER_INTERVAL=15` (если её ещё нет), затем `docker compose -f docker-compose.yml -f docker-compose.prod.yml build bot && ... up -d bot` — см. раздел «Обновление» в `docs/DEPLOYMENT_SERVER.md`.
+Деплой на сервер: см. раздел **«Обновление»** в `docs/DEPLOYMENT_SERVER.md`. Кратко: `cd /opt/knowledge-base-bot` → `git pull` → при отсутствии строки в `.env` добавить `QUERY_PROGRESS_TIMER_INTERVAL=15` → `docker compose -f docker-compose.yml -f docker-compose.prod.yml build bot && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d bot`.
 
 ## Описание
 
