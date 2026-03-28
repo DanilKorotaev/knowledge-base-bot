@@ -41,12 +41,19 @@ class CursorCLIService:
         env["CURSOR_API_KEY"] = self.api_key
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
-        # cursor-agent ходит в облако Cursor; на заблокированных сетях нужен тот же туннель, что и для OpenAI
+        # cursor-agent (Node / global-agent): HTTP_PROXY и HTTPS_PROXY должны быть http:,
+        # иначе «Unsupported ... URL protocol must be http:"» для socks5://.
+        # Для SOCKS5 достаточно ALL_PROXY; HTTP(S)_PROXY не дублируем.
         proxy = config.CURSOR_CLI_PROXY or config.OPENAI_PROXY
         if proxy:
+            pl = proxy.strip().lower()
             env["ALL_PROXY"] = proxy
-            env["HTTPS_PROXY"] = proxy
-            env["HTTP_PROXY"] = proxy
+            if pl.startswith("socks5://") or pl.startswith("socks://"):
+                env.pop("HTTP_PROXY", None)
+                env.pop("HTTPS_PROXY", None)
+            else:
+                env["HTTPS_PROXY"] = proxy
+                env["HTTP_PROXY"] = proxy
         return env
     
     def _ensure_cursorignore(self) -> None:
