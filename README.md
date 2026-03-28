@@ -33,23 +33,27 @@ Telegram-бот для удобного взаимодействия с базо
 ### Установка
 
 1. Клонируйте репозиторий:
+
 ```bash
 git clone https://github.com/DanilKorotaev/knowledge-base-bot.git
 cd knowledge-base-bot
 ```
 
 2. Установите зависимости:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. Настройте переменные окружения:
+
 ```bash
 cp .env.example .env
 # Отредактируйте .env файл
 ```
 
 4. Запустите бота:
+
 ```bash
 python bot.py
 ```
@@ -59,14 +63,19 @@ python bot.py
 1. Создайте `.env` файл (см. `.env.example`)
 2. Настройте NextCloud (см. [docs/SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md))
 3. Запустите скрипт настройки:
+
 ```bash
 ./scripts/setup_local_testing.sh
 ```
+
 4. Запустите бота:
+
 ```bash
 docker-compose up -d
 ```
+
 5. Проверьте логи:
+
 ```bash
 docker-compose logs -f bot
 ```
@@ -113,4 +122,3 @@ DanilKorotaev
 
 - [GitHub Repository](https://github.com/DanilKorotaev/knowledge-base-bot)
 - [Документация проекта](docs/)
-

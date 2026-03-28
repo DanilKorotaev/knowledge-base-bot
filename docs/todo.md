@@ -19,6 +19,7 @@
 - [ ] [Управление сессиями](tasks/pending/task-feature-session-management.md)
 - [ ] [Обработка голосовых сообщений](tasks/pending/task-feature-voice-messages.md)
 - [ ] [Обработка файлов и фото](tasks/pending/task-feature-media-handling.md)
+- [ ] [Поддержка фото/файлов как самостоятельных запросов](tasks/pending/task-feature-photo-only-queries.md)
 - [ ] [Отслеживание изменений файлов](tasks/pending/task-feature-change-tracking.md)
 - [ ] [Синхронизация с NextCloud](tasks/pending/task-feature-sync-service.md)
 
