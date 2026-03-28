@@ -31,9 +31,28 @@ from utils.file_helpers import write_file_content, read_file_content
 from utils.query_builder import QueryBuilder, query_builder_from_state, query_builder_to_state
 from utils.session_helpers import get_user_sessions_for_display, format_sessions_list, format_session_details
 from utils.telegram_helpers import FakeMessage
+from utils.query_cancel_registry import try_cancel_query
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("cq:"))
+async def cancel_cursor_query_callback(callback: CallbackQuery):
+    """Отмена долгого запроса к Cursor CLI (inline «Отменить»)."""
+    data = callback.data or ""
+    parts = data.split(":", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        await callback.answer("Некорректные данные", show_alert=True)
+        return
+    request_id = parts[1].strip()
+    if try_cancel_query(callback.from_user.id, request_id):
+        await callback.answer("Отмена запрошена…")
+    else:
+        await callback.answer(
+            "Запрос уже завершён, устарел или не ваш",
+            show_alert=True,
+        )
 
 
 @router.callback_query(lambda c: c.data == "confirm_query")

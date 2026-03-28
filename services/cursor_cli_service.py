@@ -12,6 +12,9 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# Ответ при отмене пользователем (см. query_processing_service)
+CURSOR_QUERY_CANCELLED_MESSAGE = "⏹ Обработка запроса отменена."
+
 
 class CursorCLIService:
     """Сервис для работы с Cursor CLI"""
@@ -425,6 +428,21 @@ class CursorCLIService:
             logger.error(f"Неожиданная ошибка при создании чата Cursor CLI: {e}")
             return None
     
+    async def _drain_stderr(
+        self,
+        process: asyncio.subprocess.Process,
+        stderr_chunks: List[str],
+    ) -> None:
+        """Читать stderr параллельно с stdout, чтобы не забить pipe (~64 КБ)."""
+        try:
+            while True:
+                chunk = await process.stderr.read(4096)
+                if not chunk:
+                    break
+                stderr_chunks.append(chunk.decode("utf-8", errors="ignore"))
+        except Exception as e:
+            logger.debug(f"stderr drain: {e}")
+    
     async def process_query(
         self,
         query: str,
@@ -433,7 +451,8 @@ class CursorCLIService:
         session_messages: Optional[List[Dict[str, Any]]] = None,
         attached_files: Optional[List[Path]] = None,
         cursor_chat_id: Optional[str] = None,
-        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None
+        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -446,6 +465,7 @@ class CursorCLIService:
             attached_files: Список путей к прикрепленным файлам (фото, документы) (опционально)
             cursor_chat_id: ID чата Cursor CLI для --resume (опционально)
             on_chunk: Async callback для стриминга чанков stdout (опционально)
+            cancel_event: при set() процесс cursor-agent принудительно завершается (отмена пользователем)
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -551,54 +571,90 @@ class CursorCLIService:
             first_chunk_time = None
             last_chunk_time = None
             
+            # Параллельное чтение stderr (иначе заполнение pipe → deadlock)
+            stderr_task = asyncio.create_task(self._drain_stderr(process, stderr_chunks))
+            
+            user_cancelled = [False]
+            cancel_task = None
+            if cancel_event:
+                async def watch_cancel():
+                    await cancel_event.wait()
+                    user_cancelled[0] = True
+                    logger.info("Cursor CLI: запрошена отмена пользователем")
+                    if process.returncode is None:
+                        try:
+                            process.kill()
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            await asyncio.wait_for(process.wait(), timeout=5.0)
+                        except (ProcessLookupError, asyncio.TimeoutError):
+                            pass
+                cancel_task = asyncio.create_task(watch_cancel())
+            
             # Таймаут бездействия: если stdout замолчал после получения первых данных
             idle_timeout = int(os.getenv("CURSOR_CLI_IDLE_TIMEOUT", "30"))
             
             # === Фаза 1: Читаем stdout с обнаружением idle ===
             stdout_eof = False
             try:
-                while True:
-                    # До первого чанка: ждём до общего таймаута (AI может думать долго)
-                    # После первого чанка: ждём idle_timeout (ответ уже пошёл)
-                    read_timeout = idle_timeout if first_chunk_time else timeout
-                    try:
-                        chunk = await asyncio.wait_for(
-                            process.stdout.read(4096),
-                            timeout=read_timeout
-                        )
-                    except asyncio.TimeoutError:
-                        if first_chunk_time and stdout_chunks:
-                            idle_elapsed = time.time() - (last_chunk_time or first_chunk_time)
-                            logger.info(
-                                f"Cursor CLI stdout: нет данных {idle_elapsed:.1f}с "
-                                f"после последнего чанка — завершаем чтение"
-                            )
-                            break  # Idle timeout — переходим к завершению процесса
-                        else:
-                            # Полный таймаут — ни одного чанка не получили
-                            raise
-                    
-                    if not chunk:
-                        stdout_eof = True
-                        break  # EOF — процесс завершился сам
-                    
-                    decoded = chunk.decode('utf-8', errors='ignore')
-                    stdout_chunks.append(decoded)
-                    last_chunk_time = time.time()
-                    
-                    if first_chunk_time is None and decoded.strip():
-                        first_chunk_time = time.time()
-                        elapsed = first_chunk_time - process_start_time
-                        logger.info(f"Cursor CLI: первый ответ через {elapsed:.1f}с")
-                    if decoded.strip():
-                        logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
-                    
-                    # Стриминг: передать чанк через callback
-                    if on_chunk and decoded.strip():
+                try:
+                    while True:
+                        # До первого чанка: ждём до общего таймаута (AI может думать долго)
+                        # После первого чанка: ждём idle_timeout (ответ уже пошёл)
+                        read_timeout = idle_timeout if first_chunk_time else timeout
                         try:
-                            await on_chunk(decoded)
-                        except Exception as e:
-                            logger.debug(f"Ошибка в on_chunk callback: {e}")
+                            chunk = await asyncio.wait_for(
+                                process.stdout.read(4096),
+                                timeout=read_timeout
+                            )
+                        except asyncio.TimeoutError:
+                            if first_chunk_time and stdout_chunks:
+                                idle_elapsed = time.time() - (last_chunk_time or first_chunk_time)
+                                logger.info(
+                                    f"Cursor CLI stdout: нет данных {idle_elapsed:.1f}с "
+                                    f"после последнего чанка — завершаем чтение"
+                                )
+                                break  # Idle timeout — переходим к завершению процесса
+                            else:
+                                # Полный таймаут — ни одного чанка не получили
+                                raise
+                        
+                        if not chunk:
+                            stdout_eof = True
+                            break  # EOF — процесс завершился сам
+                        
+                        decoded = chunk.decode('utf-8', errors='ignore')
+                        stdout_chunks.append(decoded)
+                        last_chunk_time = time.time()
+                        
+                        if first_chunk_time is None and decoded.strip():
+                            first_chunk_time = time.time()
+                            elapsed = first_chunk_time - process_start_time
+                            logger.info(f"Cursor CLI: первый ответ через {elapsed:.1f}с")
+                        if decoded.strip():
+                            logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
+                        
+                        # Стриминг: передать чанк через callback
+                        if on_chunk and decoded.strip():
+                            try:
+                                await on_chunk(decoded)
+                            except Exception as e:
+                                logger.debug(f"Ошибка в on_chunk callback: {e}")
+                finally:
+                    if cancel_task:
+                        cancel_task.cancel()
+                        try:
+                            await cancel_task
+                        except asyncio.CancelledError:
+                            pass
+                
+                if user_cancelled[0]:
+                    try:
+                        await asyncio.wait_for(stderr_task, timeout=8.0)
+                    except Exception:
+                        pass
+                    return CURSOR_QUERY_CANCELLED_MESSAGE, []
                         
             except asyncio.TimeoutError:
                 # Полный таймаут — AI не ответил вообще
@@ -609,12 +665,12 @@ class CursorCLIService:
                 except (ProcessLookupError, asyncio.TimeoutError):
                     pass
                 
-                stderr_text = ''
                 try:
-                    stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
-                    stderr_text = stderr_data.decode('utf-8', errors='ignore') if stderr_data else ''
-                except (asyncio.TimeoutError, Exception):
-                    pass
+                    await asyncio.wait_for(stderr_task, timeout=8.0)
+                except Exception:
+                    if not stderr_task.done():
+                        stderr_task.cancel()
+                stderr_text = "".join(stderr_chunks)
                 
                 error_msg = f"Превышено время ожидания ответа от Cursor CLI ({timeout} секунд)"
                 if stderr_text:
@@ -669,13 +725,12 @@ class CursorCLIService:
                 except (asyncio.TimeoutError, Exception) as e:
                     logger.debug(f"Cursor CLI: не удалось дочитать stdout: {e}")
             
-            # Прочитать stderr (что есть)
+            # Дождаться завершения drain stderr
             try:
-                stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
-                if stderr_data:
-                    stderr_chunks.append(stderr_data.decode('utf-8', errors='ignore'))
-            except (asyncio.TimeoutError, Exception):
-                pass
+                await asyncio.wait_for(stderr_task, timeout=8.0)
+            except Exception:
+                if not stderr_task.done():
+                    stderr_task.cancel()
             
             # === Фаза 3: Логирование и обработка результата ===
             returncode = process.returncode

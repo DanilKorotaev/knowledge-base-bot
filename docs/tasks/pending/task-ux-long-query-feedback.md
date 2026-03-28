@@ -42,16 +42,16 @@
 
 ### Таймер и текст статуса
 
-- [ ] Периодически обновлять сообщение «⏳ Обрабатываю запрос...» с прошедшим временем (например каждые 15–30 с): «⏳ … (45 с)», «⏳ … (2 мин)».
-- [ ] Реализовать фоновую задачу (`asyncio.create_task`) + `asyncio.Event` для остановки при завершении запроса.
+- [x] Периодически обновлять сообщение «⏳ Обрабатываю запрос...» с прошедшим временем (например каждые 15–30 с): «⏳ … (45 с)», «⏳ … (2 мин)».
+- [x] Реализовать фоновую задачу (`asyncio.create_task`) + `asyncio.Event` для остановки при завершении запроса.
 - [ ] После **первого чанка** стриминга (если включён стриминг): либо остановить таймер «ожидание», либо переключить текст на «⏳ Получаю ответ...» — зафиксировать выбранный UX в реализации.
 
 ### Кнопка «Отменить»
 
-- [ ] Inline-кнопка «❌ Отменить» у сообщения со статусом.
-- [ ] Callback: найти активный `cursor-agent` для **этой** операции (см. корреляцию ниже), `process.kill()` / аккуратный SIGTERM по политике как в `process_query`.
-- [ ] Ответ пользователю: «Обработка отменена»; не падать, если процесс уже завершился.
-- [ ] Хранить ссылку на subprocess или token отмены **в контексте конкретного запроса** (не только `user_id`), чтобы не отменить чужой запрос в другой сессии.
+- [x] Inline-кнопка «❌ Отменить» у сообщения со статусом.
+- [x] Callback: найти активный `cursor-agent` для **этой** операции (см. корреляцию ниже), `process.kill()` / аккуратный SIGTERM по политике как в `process_query`.
+- [x] Ответ пользователю: «Обработка отменена»; не падать, если процесс уже завершился.
+- [x] Хранить ссылку на subprocess или token отмены **в контексте конкретного запроса** (не только `user_id`), чтобы не отменить чужой запрос в другой сессии.
 
 ### Ошибки и таймаут
 
@@ -60,7 +60,7 @@
 
 ### Диагностика и стабильность
 
-- [ ] Читать **stderr** параллельно с stdout (отдельная `asyncio.Task`), чтобы избежать заполнения pipe (~64 КБ) и deadlock.
+- [x] Читать **stderr** параллельно с stdout (отдельная `asyncio.Task`), чтобы избежать заполнения pipe (~64 КБ) и deadlock.
 - [ ] Логи: «процесс запущен», «первый чанк через N с», «idle M с», «таймаут до первого вывода».
 
 ### Параллельные сессии и ответы «не по порядку»
@@ -120,9 +120,10 @@ async def _update_typing_timer(self, typing_message, cancel_event: asyncio.Event
 
 ## Связанные файлы
 
-- `services/query_processing_service.py` — оркестрация, typing_message, сессии
-- `services/cursor_cli_service.py` — subprocess, таймауты, стриминг
-- `handlers/callbacks.py` — inline-кнопки (отмена)
-- `handlers/messages.py` — привязка сообщений к сессии
-- `utils/message_helpers.py` — `StreamingMessageUpdater`
-- `services/session_service.py` — активная сессия, создание сессий
+- `services/query_processing_service.py` — оркестрация, typing_message, таймер, отмена
+- `services/cursor_cli_service.py` — subprocess, `cancel_event`, параллельный stderr
+- `handlers/callbacks.py` — callback `cq:` (отмена)
+- `handlers/keyboards.py` — `get_query_cancel_keyboard`
+- `utils/query_cancel_registry.py` — реестр `request_id` → `Event`
+- `utils/message_helpers.py` — `StreamingMessageUpdater` (`reply_markup` при стриминге)
+- `config.py` — `QUERY_PROGRESS_TIMER_INTERVAL`

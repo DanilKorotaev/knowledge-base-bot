@@ -40,6 +40,20 @@ def get_main_menu_inline_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_query_cancel_keyboard(request_id: str) -> InlineKeyboardMarkup:
+    """Inline-кнопка отмены текущего запроса к Cursor CLI. callback_data: cq:<request_id>"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить",
+                    callback_data=f"cq:{request_id}",
+                )
+            ]
+        ]
+    )
+
+
 def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     """Клавиатура с кнопкой отмены для FSM-состояний"""
     keyboard = ReplyKeyboardMarkup(

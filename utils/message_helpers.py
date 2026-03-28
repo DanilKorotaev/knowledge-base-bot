@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from typing import List, Optional, Dict, Any, Callable, Awaitable
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.enums import ParseMode
 
@@ -169,6 +169,7 @@ class StreamingMessageUpdater:
         typing_message: Message,
         update_interval: float = 1.5,
         min_buffer_size: int = 100,
+        reply_markup: Optional[InlineKeyboardMarkup] = None,
     ):
         """
         Args:
@@ -176,9 +177,11 @@ class StreamingMessageUpdater:
             typing_message: Сообщение "⏳ Обрабатываю..." (будет обновляться стримом)
             update_interval: Минимальный интервал между обновлениями (секунды)
             min_buffer_size: Минимальный размер буфера для обновления
+            reply_markup: Сохранить inline-клавиатуру (например «Отменить») при edit_text
         """
         self.message = message
         self.typing_message = typing_message
+        self.reply_markup = reply_markup
         self.buffer: str = ""
         self.full_text: str = ""
         self.last_update_time: float = 0.0
@@ -235,7 +238,11 @@ class StreamingMessageUpdater:
                 display_text = "..." + display_text[-(max_display - 3):]
             
             try:
-                await self.typing_message.edit_text(display_text, parse_mode=None)
+                await self.typing_message.edit_text(
+                    display_text,
+                    parse_mode=None,
+                    reply_markup=self.reply_markup,
+                )
                 self.last_update_time = time.time()
                 self.buffer = ""
             except TelegramRetryAfter as e:
@@ -294,7 +301,9 @@ class StreamingMessageUpdater:
         # Попытка 1: HTML
         try:
             html_text = markdown_to_html(text)
-            await self.typing_message.edit_text(html_text, parse_mode=ParseMode.HTML)
+            await self.typing_message.edit_text(
+                html_text, parse_mode=ParseMode.HTML, reply_markup=None
+            )
             return
         except TelegramBadRequest as e:
             logger.debug(f"Streaming finalize: HTML не удался: {e}")
@@ -303,7 +312,7 @@ class StreamingMessageUpdater:
         
         # Попытка 2: plain text
         try:
-            await self.typing_message.edit_text(text, parse_mode=None)
+            await self.typing_message.edit_text(text, parse_mode=None, reply_markup=None)
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
                 logger.warning(f"Streaming finalize: не удалось обновить сообщение: {e}")

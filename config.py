@@ -78,6 +78,8 @@ class Config:
     STREAMING_ENABLED: bool = os.getenv("STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")
     STREAMING_UPDATE_INTERVAL: float = float(os.getenv("STREAMING_UPDATE_INTERVAL", "1.5"))
     STREAMING_MIN_BUFFER: int = int(os.getenv("STREAMING_MIN_BUFFER", "100"))
+    # Обновление текста «Обрабатываю запрос...» с таймером (секунды)
+    QUERY_PROGRESS_TIMER_INTERVAL: int = int(os.getenv("QUERY_PROGRESS_TIMER_INTERVAL", "15"))
     
     # Mini App
     MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)

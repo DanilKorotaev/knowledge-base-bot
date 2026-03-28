@@ -11,15 +11,52 @@ from aiogram.types import Message, LinkPreviewOptions
 from aiogram.enums import ParseMode
 
 from config import config as app_config
-from services.cursor_cli_service import CursorCLIService
+from services.cursor_cli_service import CursorCLIService, CURSOR_QUERY_CANCELLED_MESSAGE
 from services.nextcloud_service import NextCloudService
 from services.sync_service import SyncService
 from utils.db_helpers import get_db
 from utils.message_helpers import send_formatted_message, format_file_changes_info, StreamingMessageUpdater
 from utils.constants import MessageRole, ChangeType
-from handlers.keyboards import get_active_session_keyboard
+from handlers.keyboards import get_active_session_keyboard, get_query_cancel_keyboard
+from utils.query_cancel_registry import register_cancel_request, unregister_cancel_request
 
 logger = logging.getLogger(__name__)
+
+
+def _format_query_elapsed(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} с"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m} мин {s} с"
+    h, m2 = divmod(m, 60)
+    return f"{h} ч {m2} мин"
+
+
+async def _run_query_status_timer(
+    typing_message: Message,
+    stop: asyncio.Event,
+    interval_sec: int,
+    reply_markup,
+) -> None:
+    """Обновляет текст статуса с прошедшим временем, пока stop не установлен."""
+    start = time.time()
+    try:
+        while not stop.is_set():
+            await asyncio.sleep(interval_sec)
+            if stop.is_set():
+                break
+            elapsed = int(time.time() - start)
+            label = _format_query_elapsed(elapsed)
+            try:
+                await typing_message.edit_text(
+                    f"⏳ Обрабатываю запрос... ({label})",
+                    reply_markup=reply_markup,
+                )
+            except Exception:
+                pass
+    except asyncio.CancelledError:
+        raise
 
 
 class QueryProcessingService:
@@ -84,8 +121,21 @@ class QueryProcessingService:
         session_messages = await db.get_session_messages(session_id)
         logger.debug(f"Загружена история сессии: {len(session_messages)} сообщений")
         
-        # Отправить индикатор "печатает..."
-        typing_message = await message.answer("⏳ Обрабатываю запрос...")
+        user_id = message.from_user.id if message.from_user else 0
+        request_id, cancel_event = register_cancel_request(user_id)
+        progress_keyboard = get_query_cancel_keyboard(request_id)
+        timer_stop = asyncio.Event()
+        timer_interval = app_config.QUERY_PROGRESS_TIMER_INTERVAL
+        timer_task = None
+        typing_message = await message.answer(
+            "⏳ Обрабатываю запрос... (0 с)",
+            reply_markup=progress_keyboard,
+        )
+        timer_task = asyncio.create_task(
+            _run_query_status_timer(
+                typing_message, timer_stop, timer_interval, progress_keyboard
+            )
+        )
         
         start_time = time.time()
         updater = None
@@ -102,7 +152,10 @@ class QueryProcessingService:
                         """Callback для уведомлений о синхронизации"""
                         if is_important or "Синхронизирую" in msg:
                             try:
-                                await typing_message.edit_text(f"⏳ {msg}")
+                                await typing_message.edit_text(
+                                    f"⏳ {msg}",
+                                    reply_markup=progress_keyboard,
+                                )
                             except Exception:
                                 pass
                     
@@ -145,6 +198,7 @@ class QueryProcessingService:
                     typing_message=typing_message,
                     update_interval=app_config.STREAMING_UPDATE_INTERVAL,
                     min_buffer_size=app_config.STREAMING_MIN_BUFFER,
+                    reply_markup=progress_keyboard,
                 )
                 on_chunk_cb = updater.on_chunk
             
@@ -156,6 +210,7 @@ class QueryProcessingService:
                 attached_files=attached_files,
                 cursor_chat_id=cursor_chat_id,
                 on_chunk=on_chunk_cb,
+                cancel_event=cancel_event,
             )
             
             # Если --resume вернул ошибку, пробуем fallback без cursor_chat_id
@@ -171,6 +226,7 @@ class QueryProcessingService:
                         typing_message=typing_message,
                         update_interval=app_config.STREAMING_UPDATE_INTERVAL,
                         min_buffer_size=app_config.STREAMING_MIN_BUFFER,
+                        reply_markup=progress_keyboard,
                     )
                     on_chunk_cb = updater.on_chunk
                 
@@ -182,16 +238,24 @@ class QueryProcessingService:
                     attached_files=attached_files,
                     cursor_chat_id=None,
                     on_chunk=on_chunk_cb,
+                    cancel_event=cancel_event,
                 )
             
             cursor_time = time.time() - cursor_start
             logger.info(f"⏱️ Cursor CLI обработка заняла: {cursor_time:.2f}с")
             
-            if updater and updater.full_text.strip():
-                # Стриминг использовался и есть текст — финализируем
+            if response.strip() == CURSOR_QUERY_CANCELLED_MESSAGE.strip():
+                try:
+                    await typing_message.edit_text(CURSOR_QUERY_CANCELLED_MESSAGE, reply_markup=None)
+                except Exception:
+                    try:
+                        await typing_message.delete()
+                    except Exception:
+                        pass
+                    await message.answer(CURSOR_QUERY_CANCELLED_MESSAGE)
+            elif updater and updater.full_text.strip():
                 await updater.finalize()
             else:
-                # Стриминг не использовался или текст пустой — старое поведение
                 try:
                     await typing_message.delete()
                 except Exception:
@@ -232,6 +296,15 @@ class QueryProcessingService:
                 pass
             
             raise
+        finally:
+            timer_stop.set()
+            if timer_task is not None:
+                timer_task.cancel()
+                try:
+                    await timer_task
+                except asyncio.CancelledError:
+                    pass
+            unregister_cancel_request(request_id)
     
     async def handle_file_changes(
         self,
