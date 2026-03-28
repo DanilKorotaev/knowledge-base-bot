@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 # Ответ при отмене пользователем (см. query_processing_service)
 CURSOR_QUERY_CANCELLED_MESSAGE = "⏹ Обработка запроса отменена."
 
+# Тексты для Telegram (без сырого stderr / traceback)
+CURSOR_USER_TIMEOUT_FIRST_CHUNK = (
+    "❌ Слишком долго нет ответа от ассистента (нет первого вывода в потоке).\n\n"
+    "Попробуйте упростить запрос, повторить позже или проверьте сеть. "
+    "Для тяжёлых задач на сервере можно увеличить CURSOR_CLI_TIMEOUT."
+)
+
+CURSOR_USER_PROCESS_FAILED = (
+    "❌ Ошибка при выполнении запроса (процесс завершился с ошибкой). "
+    "Повторите попытку; если повторяется — сообщите администратору."
+)
+
 
 class CursorCLIService:
     """Сервис для работы с Cursor CLI"""
@@ -612,8 +624,10 @@ class CursorCLIService:
                             if first_chunk_time and stdout_chunks:
                                 idle_elapsed = time.time() - (last_chunk_time or first_chunk_time)
                                 logger.info(
-                                    f"Cursor CLI stdout: нет данных {idle_elapsed:.1f}с "
-                                    f"после последнего чанка — завершаем чтение"
+                                    "cursor_cli: idle %.1f с после последнего чанка stdout "
+                                    "(CURSOR_CLI_IDLE_TIMEOUT=%s) — завершаем чтение",
+                                    idle_elapsed,
+                                    idle_timeout,
                                 )
                                 break  # Idle timeout — переходим к завершению процесса
                             else:
@@ -631,7 +645,10 @@ class CursorCLIService:
                         if first_chunk_time is None and decoded.strip():
                             first_chunk_time = time.time()
                             elapsed = first_chunk_time - process_start_time
-                            logger.info(f"Cursor CLI: первый ответ через {elapsed:.1f}с")
+                            logger.info(
+                                "cursor_cli: первый непустой чанк stdout через %.1f с после запуска",
+                                elapsed,
+                            )
                         if decoded.strip():
                             logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
                         
@@ -657,8 +674,13 @@ class CursorCLIService:
                     return CURSOR_QUERY_CANCELLED_MESSAGE, []
                         
             except asyncio.TimeoutError:
-                # Полный таймаут — AI не ответил вообще
-                logger.error(f"Превышен таймаут ожидания ответа ({timeout}с). Завершаем процесс...")
+                # Полный таймаут — AI не ответил вообще (нет первого непустого чанка в stdout)
+                logger.error(
+                    "cursor_cli: таймаут до первого вывода — %s с (CURSOR_CLI_TIMEOUT); "
+                    "завершаем процесс (PID=%s)",
+                    timeout,
+                    getattr(process, "pid", None),
+                )
                 try:
                     process.kill()
                     await asyncio.wait_for(process.wait(), timeout=5.0)
@@ -671,12 +693,12 @@ class CursorCLIService:
                     if not stderr_task.done():
                         stderr_task.cancel()
                 stderr_text = "".join(stderr_chunks)
-                
-                error_msg = f"Превышено время ожидания ответа от Cursor CLI ({timeout} секунд)"
                 if stderr_text:
-                    error_msg += f"\n\nПоследние сообщения:\n{stderr_text[-500:]}"
-                logger.error(error_msg)
-                return f"❌ {error_msg}", []
+                    logger.error(
+                        "cursor_cli: stderr (хвост, таймаут до первого вывода): %s",
+                        stderr_text[-2000:],
+                    )
+                return CURSOR_USER_TIMEOUT_FIRST_CHUNK, []
             
             # === Фаза 2: Завершаем процесс и дочитываем буфер ===
             process_killed_early = False
@@ -762,11 +784,12 @@ class CursorCLIService:
             
             # Проверить код возврата (игнорируем если мы сами завершили процесс)
             if returncode != 0 and not process_killed_early and stdout_eof:
-                error_msg = f"Ошибка выполнения Cursor CLI (код: {returncode})"
-                if stderr_text:
-                    error_msg += f"\n\nОшибка:\n{stderr_text}"
-                logger.error(error_msg)
-                return f"❌ {error_msg}", []
+                logger.error(
+                    "cursor_cli: процесс завершился с кодом %s; stderr (хвост): %s",
+                    returncode,
+                    (stderr_text[-2000:] if stderr_text else "(пусто)"),
+                )
+                return CURSOR_USER_PROCESS_FAILED, []
             
             # Получить ответ
             response = stdout_text.strip()
@@ -788,9 +811,11 @@ class CursorCLIService:
             logger.error(error_msg)
             return f"❌ {error_msg}", []
         except Exception as e:
-            error_msg = f"Неожиданная ошибка при вызове Cursor CLI: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return f"❌ {error_msg}", []
+            logger.error("Неожиданная ошибка при вызове Cursor CLI: %s", e, exc_info=True)
+            return (
+                "❌ Не удалось выполнить запрос. Попробуйте позже или обратитесь к администратору.",
+                [],
+            )
     
     async def _save_file_states(self) -> Dict[str, Dict[str, Any]]:
         """

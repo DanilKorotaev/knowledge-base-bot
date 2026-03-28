@@ -23,6 +23,19 @@ from utils.query_cancel_registry import register_cancel_request, unregister_canc
 logger = logging.getLogger(__name__)
 
 
+def _user_facing_query_error(exc: BaseException) -> str:
+    """Краткий текст для Telegram без сырого traceback."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return (
+            "❌ Превышено время ожидания. Попробуйте ещё раз или упростите запрос."
+        )
+    if isinstance(exc, (ConnectionError, OSError)):
+        return (
+            "❌ Сетевая или системная ошибка. Проверьте соединение и повторите запрос."
+        )
+    return "❌ Произошла ошибка при обработке запроса. Попробуйте позже."
+
+
 def _format_query_elapsed(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds} с"
@@ -38,8 +51,13 @@ async def _run_query_status_timer(
     stop: asyncio.Event,
     interval_sec: int,
     reply_markup,
+    stream_phase: Optional[asyncio.Event] = None,
+    session_suffix: str = "",
 ) -> None:
-    """Обновляет текст статуса с прошедшим временем, пока stop не установлен."""
+    """
+    Обновляет текст статуса с прошедшим временем, пока stop не установлен.
+    Если stream_phase установлен (первый непустой чанк стрима) — текст «Получаю ответ...».
+    """
     start = time.time()
     try:
         while not stop.is_set():
@@ -48,15 +66,23 @@ async def _run_query_status_timer(
                 break
             elapsed = int(time.time() - start)
             label = _format_query_elapsed(elapsed)
+            streaming = stream_phase is not None and stream_phase.is_set()
+            head = "⏳ Получаю ответ..." if streaming else "⏳ Обрабатываю запрос..."
+            line = f"{head}{session_suffix} ({label})"
             try:
                 await typing_message.edit_text(
-                    f"⏳ Обрабатываю запрос... ({label})",
+                    line,
                     reply_markup=reply_markup,
                 )
             except Exception:
                 pass
     except asyncio.CancelledError:
         raise
+
+
+# Параллельные запросы: у пользователя может быть несколько долгих process_query подряд
+# (разные сообщения / сессии). Каждый вызов привязан к своему message и своему typing_message;
+# в статусе показываем номер сессии, чтобы отличать ответы.
 
 
 class QueryProcessingService:
@@ -127,13 +153,20 @@ class QueryProcessingService:
         timer_stop = asyncio.Event()
         timer_interval = app_config.QUERY_PROGRESS_TIMER_INTERVAL
         timer_task = None
+        stream_phase = asyncio.Event() if app_config.STREAMING_ENABLED else None
+        session_suffix = f" · #{session_id}"
         typing_message = await message.answer(
-            "⏳ Обрабатываю запрос... (0 с)",
+            f"⏳ Обрабатываю запрос{session_suffix}... (0 с)",
             reply_markup=progress_keyboard,
         )
         timer_task = asyncio.create_task(
             _run_query_status_timer(
-                typing_message, timer_stop, timer_interval, progress_keyboard
+                typing_message,
+                timer_stop,
+                timer_interval,
+                progress_keyboard,
+                stream_phase=stream_phase,
+                session_suffix=session_suffix,
             )
         )
         
@@ -200,7 +233,13 @@ class QueryProcessingService:
                     min_buffer_size=app_config.STREAMING_MIN_BUFFER,
                     reply_markup=progress_keyboard,
                 )
-                on_chunk_cb = updater.on_chunk
+
+                async def wrapped_on_chunk(chunk: str) -> None:
+                    if stream_phase is not None and not stream_phase.is_set() and chunk.strip():
+                        stream_phase.set()
+                    await updater.on_chunk(chunk)
+
+                on_chunk_cb = wrapped_on_chunk
             
             # Обработать запрос через Cursor CLI
             response, changes = await cursor_service.process_query(
@@ -228,7 +267,13 @@ class QueryProcessingService:
                         min_buffer_size=app_config.STREAMING_MIN_BUFFER,
                         reply_markup=progress_keyboard,
                     )
-                    on_chunk_cb = updater.on_chunk
+
+                    async def wrapped_on_chunk_fb(chunk: str) -> None:
+                        if stream_phase is not None and not stream_phase.is_set() and chunk.strip():
+                            stream_phase.set()
+                        await updater.on_chunk(chunk)
+
+                    on_chunk_cb = wrapped_on_chunk_fb
                 
                 # Повторить запрос без --resume (с ручной передачей истории)
                 response, changes = await cursor_service.process_query(
@@ -287,9 +332,8 @@ class QueryProcessingService:
             except Exception:
                 pass
             
-            error_msg = f"❌ Произошла ошибка при обработке запроса: {str(e)}"
             logger.error(f"Ошибка при обработке запроса: {e}", exc_info=True)
-            
+            error_msg = _user_facing_query_error(e)
             try:
                 await message.answer(error_msg)
             except Exception:
