@@ -41,6 +41,12 @@ class CursorCLIService:
         env["CURSOR_API_KEY"] = self.api_key
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
+        # cursor-agent ходит в облако Cursor; на заблокированных сетях нужен тот же туннель, что и для OpenAI
+        proxy = config.CURSOR_CLI_PROXY or config.OPENAI_PROXY
+        if proxy:
+            env["ALL_PROXY"] = proxy
+            env["HTTPS_PROXY"] = proxy
+            env["HTTP_PROXY"] = proxy
         return env
     
     def _ensure_cursorignore(self) -> None:
@@ -363,20 +369,48 @@ class CursorCLIService:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0:
-                chat_id = stdout.decode().strip()
-                if chat_id:
-                    logger.info(f"Создан новый чат Cursor CLI: {chat_id}")
-                    return chat_id
-                else:
-                    logger.warning("cursor-agent create-chat вернул пустой ответ")
-                    return None
-            else:
-                error = stderr.decode().strip()
-                logger.error(f"Ошибка при создании чата Cursor CLI (код: {process.returncode}): {error}")
+            # Актуальные версии cursor-agent печатают UUID в первой строке stdout, но процесс
+            # может оставаться живым — communicate() тогда зависает навсегда.
+            try:
+                first_line = await asyncio.wait_for(process.stdout.readline(), timeout=60.0)
+            except asyncio.TimeoutError:
+                logger.error("create-chat: таймаут ожидания первой строки stdout (60с)")
+                try:
+                    process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except (ProcessLookupError, asyncio.TimeoutError):
+                    pass
                 return None
+
+            chat_id = first_line.decode("utf-8", errors="ignore").strip()
+            if process.returncode is None:
+                try:
+                    process.terminate()
+                    await asyncio.wait_for(process.wait(), timeout=8.0)
+                except asyncio.TimeoutError:
+                    try:
+                        process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                    except (ProcessLookupError, asyncio.TimeoutError):
+                        pass
+
+            stderr_text = ""
+            try:
+                stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=3.0)
+                stderr_text = stderr_data.decode("utf-8", errors="ignore").strip() if stderr_data else ""
+            except (asyncio.TimeoutError, Exception):
+                pass
+
+            if chat_id:
+                logger.info(f"Создан новый чат Cursor CLI: {chat_id}")
+                if stderr_text:
+                    logger.debug(f"create-chat stderr: {stderr_text[:300]}")
+                return chat_id
+
+            logger.warning("cursor-agent create-chat вернул пустой chat id")
+            if stderr_text:
+                logger.error(f"create-chat stderr: {stderr_text[:500]}")
+            return None
         except FileNotFoundError:
             logger.error("Команда 'cursor-agent' не найдена для create-chat")
             return None
