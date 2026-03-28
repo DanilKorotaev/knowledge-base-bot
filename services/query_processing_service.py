@@ -80,6 +80,20 @@ async def _run_query_status_timer(
         raise
 
 
+async def _stop_query_progress_timer(
+    timer_stop: asyncio.Event,
+    timer_task: Optional[asyncio.Task],
+) -> None:
+    """Остановить фоновый таймер статуса до любых долгих шагов (синк, уведомления)."""
+    timer_stop.set()
+    if timer_task is not None and not timer_task.done():
+        timer_task.cancel()
+        try:
+            await timer_task
+        except asyncio.CancelledError:
+            pass
+
+
 # Параллельные запросы: у пользователя может быть несколько долгих process_query подряд
 # (разные сообщения / сессии). Каждый вызов привязан к своему message и своему typing_message;
 # в статусе показываем номер сессии, чтобы отличать ответы.
@@ -306,6 +320,9 @@ class QueryProcessingService:
                 except Exception:
                     pass
                 await send_formatted_message(message, response)
+
+            # До синка и уведомлений об файлах — иначе таймер перезапишет финальный ответ
+            await _stop_query_progress_timer(timer_stop, timer_task)
             
             # Сохранить сообщение пользователя в сессию (ПОСЛЕ обработки, чтобы избежать дублирования в контексте)
             if save_user_message:
@@ -331,6 +348,7 @@ class QueryProcessingService:
                     await typing_message.delete()
             except Exception:
                 pass
+            await _stop_query_progress_timer(timer_stop, timer_task)
             
             logger.error(f"Ошибка при обработке запроса: {e}", exc_info=True)
             error_msg = _user_facing_query_error(e)
@@ -341,13 +359,8 @@ class QueryProcessingService:
             
             raise
         finally:
-            timer_stop.set()
-            if timer_task is not None:
-                timer_task.cancel()
-                try:
-                    await timer_task
-                except asyncio.CancelledError:
-                    pass
+            # На случай если таймер ещё не остановили (ранний выход / исключение до успешного пути)
+            await _stop_query_progress_timer(timer_stop, timer_task)
             unregister_cancel_request(request_id)
     
     async def handle_file_changes(
