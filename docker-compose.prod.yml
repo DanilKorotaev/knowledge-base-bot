@@ -36,6 +36,13 @@ services:
       - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:ro
       - ./logs:/app/logs
 
+  health-sync-api:
+    ports: !override
+      - "127.0.0.1:${HEALTH_SYNC_API_PORT:-8090}:8090"
+    volumes:
+      - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:rw
+      - ./logs:/app/logs
+
   postgres:
     # НЕ экспортируем порт наружу (доступен только через bot-network)
     ports: !override []

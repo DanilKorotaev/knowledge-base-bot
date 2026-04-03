@@ -45,6 +45,25 @@ services:
     networks:
       - bot-network
 
+  # Webhook HealthSync (iOS) — связывание JSON с заметками тренировок
+  health-sync-api:
+    build:
+      context: ./health-sync-api
+    container_name: knowledge-base-bot-health-sync-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HEALTH_SYNC_KB_PATH: /var/knowledge-base-bot/kb
+    ports:
+      - "${HEALTH_SYNC_API_PORT:-8090}:8090"
+    volumes:
+      # RW: дописывает frontmatter в .md и linked_note в workout JSON
+      - ~/.local/share/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:rw
+      - ./logs:/app/logs
+    networks:
+      - bot-network
+
   postgres:
     image: postgres:15-alpine
     container_name: knowledge-base-bot-db

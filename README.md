@@ -21,6 +21,10 @@ Telegram-бот для удобного взаимодействия с базо
 - ✅ Административные команды для управления доступом
 - ✅ Универсальность: можно развернуть на любую базу знаний
 
+## Health Sync API (iOS / HealthSync)
+
+Отдельный контейнер **`health-sync-api`** (FastAPI) принимает webhook после синхронизации Apple Health: связывает `HealthData/workouts/*.json` с заметками в `Тренировки/`. См. [health-sync-api/README.md](health-sync-api/README.md). В `.env` задайте `HEALTH_SYNC_API_TOKEN` и при необходимости `HEALTH_SYNC_API_PORT`.
+
 ## Быстрый старт
 
 ### Требования
