@@ -9,8 +9,6 @@ from typing import Any
 
 import frontmatter
 
-from .config import settings
-
 logger = logging.getLogger(__name__)
 
 # Папки месяцев в базе (как в плане: Тренировки/2026/Март/...)
@@ -30,6 +28,18 @@ _MONTHS_RU = (
 )
 
 
+@dataclass(frozen=True)
+class LinkingPaths:
+    """Относительные сегменты путей внутри корня базы знаний."""
+
+    workouts_subdir: str = "HealthData/workouts"
+    daily_subdir: str = "HealthData/daily"
+    training_root: str = "Тренировки"
+
+
+DEFAULT_PATHS = LinkingPaths()
+
+
 def _month_folder(year: int, month: int) -> str:
     if not 1 <= month <= 12:
         raise ValueError(f"invalid month: {month}")
@@ -44,17 +54,17 @@ def _parse_iso_date(date_str: str) -> tuple[int, int, int] | None:
     return y, mo, d
 
 
-def _training_note_dir(kb: Path, date_str: str) -> Path | None:
+def _training_note_dir(kb: Path, date_str: str, paths: LinkingPaths) -> Path | None:
     parsed = _parse_iso_date(date_str)
     if not parsed:
         return None
     y, month, _ = parsed
-    return kb / settings.training_root / str(y) / _month_folder(y, month)
+    return kb / paths.training_root / str(y) / _month_folder(y, month)
 
 
-def find_workout_note(kb: Path, date_str: str) -> Path | None:
+def find_workout_note(kb: Path, date_str: str, paths: LinkingPaths = DEFAULT_PATHS) -> Path | None:
     """Первая заметка `YYYY-MM-DD *.md` в каталоге тренировок за месяц."""
-    tdir = _training_note_dir(kb, date_str)
+    tdir = _training_note_dir(kb, date_str, paths)
     if not tdir or not tdir.is_dir():
         return None
     prefix = f"{date_str} "
@@ -77,8 +87,8 @@ def _load_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _sleep_hours_from_daily(kb: Path, date_str: str) -> float | None:
-    daily = kb / settings.daily_subdir / f"{date_str}.json"
+def _sleep_hours_from_daily(kb: Path, date_str: str, paths: LinkingPaths) -> float | None:
+    daily = kb / paths.daily_subdir / f"{date_str}.json"
     data = _load_json(daily)
     if not data:
         return None
@@ -123,13 +133,18 @@ class LinkResult:
     errors: list[str] = field(default_factory=list)
 
 
-def process_sync_payload(kb: Path, date: str, files: list[str]) -> LinkResult:
+def process_sync_payload(
+    kb: Path,
+    date: str,
+    files: list[str],
+    paths: LinkingPaths = DEFAULT_PATHS,
+) -> LinkResult:
     """
     Для каждого gym-workout JSON из `files`: найти заметку за дату, дописать `health:` в frontmatter,
     выставить `linked_note` в JSON.
     """
     result = LinkResult()
-    prefix = settings.workouts_subdir.rstrip("/") + "/"
+    prefix = paths.workouts_subdir.rstrip("/") + "/"
     for rel in files:
         rel_norm = rel.replace("\\", "/").lstrip("/")
         if not rel_norm.startswith(prefix) or not rel_norm.endswith(".json"):
@@ -152,11 +167,11 @@ def process_sync_payload(kb: Path, date: str, files: list[str]) -> LinkResult:
         if not isinstance(wdate, str):
             result.errors.append(f"no_date:{rel_norm}")
             continue
-        note = find_workout_note(kb, wdate)
+        note = find_workout_note(kb, wdate, paths)
         if not note:
             result.skipped.append(f"no_note:{rel_norm}")
             continue
-        sleep_h = _sleep_hours_from_daily(kb, wdate)
+        sleep_h = _sleep_hours_from_daily(kb, wdate, paths)
         workout_file_posix = _relative_posix(wpath, kb)
         health: dict[str, Any] = {
             "avg_heart_rate": data.get("avg_heart_rate"),
@@ -167,7 +182,6 @@ def process_sync_payload(kb: Path, date: str, files: list[str]) -> LinkResult:
         }
         if sleep_h is not None:
             health["sleep_hours_prev_night"] = sleep_h
-        # убрать ключи с None для чище YAML
         health = {k: v for k, v in health.items() if v is not None}
         try:
             _merge_health_frontmatter(note, health)

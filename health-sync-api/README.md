@@ -1,6 +1,8 @@
 # Health Sync API
 
-Минимальный FastAPI-сервис для webhook **HealthSync** (iOS): после загрузки JSON в Nextcloud связывает `HealthData/workouts/*.json` с заметками `Тренировки/ГГГГ/<Месяц>/`.
+Минимальный FastAPI-сервис для webhook **HealthSync** (iOS): после загрузки JSON в Nextcloud связывает `HealthData/workouts/*.json` с заметками `Тренировки/ГГГГ/<Месяц>/`. Логика линковки вынесена в пакет [`packages/health_linking`](../packages/health_linking/README.md).
+
+**Сборка Docker** выполняется из **корня репозитория** `knowledge-base-bot` (`context: .`, `dockerfile: health-sync-api/Dockerfile`).
 
 ## Endpoint
 
@@ -22,11 +24,21 @@
 
 ## Локальный запуск
 
+Нужен `PYTHONPATH` на каталог, где лежит пакет `health_linking` (`packages/health_linking`):
+
 ```bash
-cd health-sync-api
-python -m venv .venv && source .venv/bin/activate
+cd knowledge-base-bot/health-sync-api
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+export PYTHONPATH=../packages/health_linking
 export HEALTH_SYNC_API_TOKEN=test
 export HEALTH_SYNC_KB_PATH=/path/to/kb
 uvicorn app.main:app --reload --port 8090
+```
+
+### Тесты
+
+```bash
+cd knowledge-base-bot
+PYTHONPATH=packages/health_linking health-sync-api/.venv/bin/python -m unittest discover -s health-sync-api/tests -p 'test*.py' -v
 ```

@@ -12,8 +12,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 # Корень репозитория knowledge-base-bot при монтировании не нужен — приложение автономно
+from health_linking import process_sync_payload
+
 from .config import settings
-from .linking import process_sync_payload
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),

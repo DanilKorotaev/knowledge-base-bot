@@ -40,4 +40,4 @@
 
 ## Зависимости
 
-- Желательно: общий модуль линковки (`task-tech-health-linking-shared-python-module.md`).
+- [x] Общий модуль линковки — [`packages/health_linking`](../completed/task-tech-health-linking-shared-python-module.md).

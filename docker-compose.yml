@@ -48,7 +48,8 @@ services:
   # Webhook HealthSync (iOS) — связывание JSON с заметками тренировок
   health-sync-api:
     build:
-      context: ./health-sync-api
+      context: .
+      dockerfile: health-sync-api/Dockerfile
     container_name: knowledge-base-bot-health-sync-api
     restart: unless-stopped
     env_file:

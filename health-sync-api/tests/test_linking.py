@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.linking import find_workout_note, process_sync_payload
+from health_linking import find_workout_note, process_sync_payload
 
 
 class TestFindWorkoutNote(unittest.TestCase):
