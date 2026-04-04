@@ -133,6 +133,23 @@ class LinkResult:
     errors: list[str] = field(default_factory=list)
 
 
+def workout_json_rel_paths_for_date(
+    kb: Path,
+    date_str: str,
+    paths: LinkingPaths = DEFAULT_PATHS,
+) -> list[str]:
+    """Относительные пути `HealthData/workouts/YYYY-MM-DD_*.json` для даты (все типы тренировок)."""
+    wo_dir = kb / paths.workouts_subdir
+    if not wo_dir.is_dir():
+        return []
+    prefix = f"{date_str}_"
+    out: list[str] = []
+    for p in wo_dir.iterdir():
+        if p.is_file() and p.suffix.lower() == ".json" and p.name.startswith(prefix):
+            out.append(p.relative_to(kb).as_posix())
+    return sorted(out)
+
+
 def process_sync_payload(
     kb: Path,
     date: str,

@@ -15,6 +15,9 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Рабочая директория
 WORKDIR /app
 
+# Пакет health_linking (import health_linking)
+ENV PYTHONPATH="/app/packages/health_linking"
+
 # Копировать зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

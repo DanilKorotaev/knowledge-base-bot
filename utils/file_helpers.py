@@ -2,9 +2,12 @@
 Помощники для работы с файлами
 """
 import hashlib
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_file_hash(file_path: Path) -> str:
@@ -29,6 +32,12 @@ def write_file_content(file_path: Path, content: str) -> bool:
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
+        try:
+            from utils.health_linking_hook import maybe_link_health_after_training_note_saved
+
+            maybe_link_health_after_training_note_saved(file_path)
+        except Exception:
+            logger.debug("Health link hook after write_file_content skipped", exc_info=True)
         return True
     except Exception:
         return False

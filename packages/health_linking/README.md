@@ -4,8 +4,8 @@
 
 Используется:
 
-- контейнером **`health-sync-api`** (webhook от iOS);
-- в перспективе — **ботом** (Path 2: заметка создана раньше JSON), см. `docs/tasks/pending/task-feature-bot-health-link-when-note-saved.md`.
+- контейнером **`health-sync-api`** (Path 1: webhook от iOS);
+- **ботом** — Path 2: `utils/health_linking_hook.py` после записи заметки / изменений Cursor CLI.
 
 ## Импорт
 

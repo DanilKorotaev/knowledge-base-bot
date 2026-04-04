@@ -55,6 +55,8 @@ ENABLE_SYNC=false
 LOCAL_KB_PATH=/path/to/your/local/knowledge-base
 ```
 
+4. Пакет **health_linking** (Path 2 / HealthSync): при запуске `python bot.py` **вне Docker** добавьте в `PYTHONPATH` каталог `packages/health_linking` из корня репозитория. В контейнере бота это задано в `Dockerfile` (`ENV PYTHONPATH=...`).
+
 ### Долгие запросы: UX и таймауты Cursor CLI
 
 Пока `cursor-agent` обрабатывает запрос, бот показывает статус с таймером, меткой сессии (`· #id`) и кнопкой «Отменить». После первого чанка стрима текст переключается на «Получаю ответ…» (если включён `STREAMING_ENABLED`).

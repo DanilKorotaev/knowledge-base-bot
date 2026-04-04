@@ -4,6 +4,8 @@
 
 **Сборка Docker** выполняется из **корня репозитория** `knowledge-base-bot` (`context: .`, `dockerfile: health-sync-api/Dockerfile`).
 
+**Path 1 vs Path 2:** Path 1 — этот сервис после загрузки JSON с iOS. Path 2 — бот при сохранении заметки `Тренировки/` (`health_linking_hook` в основном приложении), без дополнительного HTTP.
+
 ## Endpoint
 
 - `POST /api/health/sync-complete` — тело как в iOS: `{"date":"yyyy-MM-dd","files":["HealthData/..."]}`

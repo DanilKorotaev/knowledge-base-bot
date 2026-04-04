@@ -400,6 +400,14 @@ class QueryProcessingService:
                 old_content=change.get("old_content"),
                 new_content=change.get("new_content")
             )
+
+        # Path 2 (HealthSync): связать заметку тренировки с JSON, если файлы уже в KB
+        try:
+            from utils.health_linking_hook import maybe_link_health_for_kb_changes
+
+            maybe_link_health_for_kb_changes(app_config.LOCAL_KB_PATH, changes)
+        except Exception as e:
+            logger.warning("Health link Path 2 (handle_file_changes): %s", e, exc_info=True)
         
         # Синхронизировать изменения с NextCloud
         sync_success = await sync_service.sync_changes(changes)

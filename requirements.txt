@@ -22,6 +22,9 @@ mcp>=1.0.0
 # Utilities
 python-dotenv==1.0.0
 aiofiles==23.2.1
+# Health linking (packages/health_linking) — Path 2 в боте + health-sync-api
+python-frontmatter==1.1.0
+PyYAML==6.0.2
 
 # File watching (optional)
 watchdog==3.0.0
