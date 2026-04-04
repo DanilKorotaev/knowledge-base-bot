@@ -38,6 +38,14 @@
 - [ ] [Внедрение процессов тестирования](tasks/pending/task-testing-implementation.md)
 - [ ] [Оптимизация работы с базой знаний](tasks/pending/task-tech-kb-optimization.md)
 
+### Apple Health / HealthSync (сервер)
+
+Задачи для репозитория бота; клиент — iOS [HealthSync](https://github.com/DanilKorotaev/HealthSync).
+
+- [ ] [Path 2: связывание HealthData при сохранении заметки тренировки](tasks/pending/task-feature-bot-health-link-when-note-saved.md)
+- [ ] [Общий Python-модуль линковки (DRY с health-sync-api)](tasks/pending/task-tech-health-linking-shared-python-module.md)
+- [ ] [Контракт и эксплуатация Health Sync API](tasks/pending/task-tech-health-sync-api-contract.md)
+
 ### Интеграции и расширения
 
 - [ ] [Интеграция с Google Calendar](tasks/pending/task-feature-google-calendar-integration.md)
