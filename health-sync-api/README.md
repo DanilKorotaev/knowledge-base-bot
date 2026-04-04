@@ -6,11 +6,57 @@
 
 **Path 1 vs Path 2:** Path 1 — этот сервис после загрузки JSON с iOS. Path 2 — бот при сохранении заметки `Тренировки/` (`health_linking_hook` в основном приложении), без дополнительного HTTP.
 
-## Endpoint
+## Endpoints
 
-- `POST /api/health/sync-complete` — тело как в iOS: `{"date":"yyyy-MM-dd","files":["HealthData/..."]}`
-- Заголовок: `Authorization: Bearer <HEALTH_SYNC_API_TOKEN>`
-- `GET /health` — для Docker healthcheck
+| Метод | Путь | Авторизация |
+|-------|------|-------------|
+| `GET` | `/health` | Нет (healthcheck) |
+| `POST` | `/api/health/sync-complete` | `Authorization: Bearer <HEALTH_SYNC_API_TOKEN>` |
+
+Тело `sync-complete` совпадает с `SyncWebhookPayload` в iOS HealthSync:
+
+```json
+{"date":"yyyy-MM-dd","files":["HealthData/daily/....json","HealthData/workouts/....json"]}
+```
+
+### Коды ответов
+
+| Код | Когда |
+|-----|--------|
+| `200` | Синк обработан; в теле поля `linked`, `skipped`, `errors` |
+| `401` | Нет заголовка Bearer или неверная схема |
+| `403` | Неверный токен |
+| `422` | Невалидное JSON-тело (Pydantic) |
+| `503` | `HEALTH_SYNC_API_TOKEN` не задан на сервере |
+
+### Пример `curl`
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8090/api/health/sync-complete" \
+  -H "Authorization: Bearer $HEALTH_SYNC_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"date":"2026-04-05","files":["HealthData/workouts/2026-04-05_workout.json"]}'
+```
+
+### Nginx (прод)
+
+Прокси на тот же хост, где слушает uvicorn (порт по умолчанию `8090`):
+
+```nginx
+location /api/health/ {
+    proxy_pass http://127.0.0.1:8090/api/health/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+location = /health {
+    proxy_pass http://127.0.0.1:8090/health;
+}
+```
+
+`GET /health` можно оставить только для Docker/внутренней сети; наружу достаточно `POST /api/health/sync-complete` с Bearer.
 
 ## Переменные окружения
 
@@ -20,9 +66,9 @@
 | `HEALTH_SYNC_KB_PATH` | Корень базы знаний (в контейнере: `/var/knowledge-base-bot/kb`) |
 | `LOG_LEVEL` | По умолчанию `INFO` |
 
-## iOS
+## iOS (HealthSync)
 
-Сейчас `SyncWebhookClient` в HealthSync может слать только JSON без `Authorization`. Для продакшена добавьте передачу Bearer-токена (UserDefaults / Keychain) и заголовок в запросе — либо временно проксируйте через доверенную сеть.
+Клиент отправляет тот же JSON и заголовок `Authorization: Bearer …`, если в настройках задан токен (см. переменные окружения / поля конфигурации приложения). Без токена webhook можно не вызывать или вызывать только после настройки сервера.
 
 ## Локальный запуск
 
