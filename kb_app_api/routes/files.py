@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
+from kb_app_api.revert_helpers import revert_file_change_or_raise
 from kb_app_api.timefmt import to_iso_z
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -54,17 +55,20 @@ async def list_file_changes(
 
 
 class RevertBody(BaseModel):
-    file_id: str = Field(..., description="Идентификатор изменения (как в GET /changes)")
+    file_id: str = Field(..., description="Идентификатор записи изменения (как в GET /changes)")
 
 
-@router.post("/revert", status_code=501)
+@router.post("/revert")
 async def revert_file(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-    _: RevertBody,
+    body: RevertBody,
 ) -> dict[str, Any]:
-    _ = user
-    raise APIError(
-        "not_implemented",
-        "Откат файлов через API пока не реализован",
-        status_code=501,
-    )
+    raw = body.file_id.strip()
+    if not raw:
+        raise APIError("validation_error", "Пустой file_id", detail="file_id")
+    try:
+        change_id = int(raw)
+    except ValueError:
+        raise APIError("validation_error", "file_id должен быть числом", detail=body.file_id)
+
+    return await revert_file_change_or_raise(change_id, user["id"])

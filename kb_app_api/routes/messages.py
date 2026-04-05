@@ -3,11 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
+import re
+import uuid
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, Response
+from fastapi import APIRouter, Depends, File, Form, Header, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+
+from config import config
 
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
@@ -18,6 +24,18 @@ from services.query_processing_service import QueryProcessingService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["messages"])
+
+_DEFAULT_ATTACH_PROMPT = (
+    "Пользователь прикрепил файл. Проанализируй его в контексте базы знаний и ответь."
+)
+
+
+def _safe_filename(name: str | None) -> str:
+    base = Path(name or "upload").name
+    if not base or base in (".", ".."):
+        base = "upload.bin"
+    clean = re.sub(r"[^\w.\-]", "_", base)
+    return (clean[:200] or "upload.bin")
 
 
 class PostMessageBody(BaseModel):
@@ -127,14 +145,73 @@ async def post_message(
     return JSONResponse(content=payload, status_code=201)
 
 
-@router.post("/{session_id}/attachments", status_code=501)
+@router.post("/{session_id}/attachments")
 async def post_attachment(
     session_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-) -> dict[str, Any]:
-    _ = session_id, user
-    raise APIError(
-        "not_implemented",
-        "Загрузка вложений пока не реализована",
-        status_code=501,
-    )
+    file: Annotated[UploadFile, File(...)],
+    use_knowledge_base: Annotated[str, Form()] = "true",
+    message: Annotated[str | None, Form()] = None,
+) -> JSONResponse:
+    """
+    multipart: `file`, `use_knowledge_base`, опционально `message` — текст запроса вместо текста по умолчанию.
+    """
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+    tid = int(user["telegram_id"])
+    use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
+
+    data = await file.read()
+    if not data:
+        raise APIError("validation_error", "Пустой файл", detail="file")
+
+    safe = _safe_filename(file.filename)
+    kb_root = Path(config.LOCAL_KB_PATH)
+    kb_root.mkdir(parents=True, exist_ok=True)
+    upload_root = kb_root / ".kb_app_api_uploads" / str(sid)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    dest = upload_root / f"{uuid.uuid4().hex[:10]}_{safe}"
+    dest.write_bytes(data)
+
+    query_text = (message or "").strip() or _DEFAULT_ATTACH_PROMPT
+
+    try:
+        qps = QueryProcessingService()
+        await qps.process_query_for_api(
+            query_text,
+            sid,
+            tid,
+            use_knowledge_base=use_kb,
+            attached_files=[dest],
+        )
+    except RuntimeError as e:
+        dest.unlink(missing_ok=True)
+        raise APIError("processing_error", str(e), status_code=500) from e
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    all_msgs = await db.get_session_messages(sid)
+    last_user = None
+    for m in reversed(all_msgs):
+        if m.get("role") == "user":
+            last_user = m
+            break
+    if last_user:
+        mime, _ = mimetypes.guess_type(safe)
+        ftype = "photo" if mime and mime.startswith("image/") else "document"
+        try:
+            await db.add_attachment(
+                session_id=sid,
+                message_id=last_user["id"],
+                file_type=ftype,
+                file_id=f"kb_app_api:{uuid.uuid4().hex}",
+                file_path=str(dest),
+                file_name=safe,
+                file_size=len(data),
+            )
+        except Exception as e:
+            logger.warning("Не удалось сохранить метаданные вложения: %s", e)
+
+    payload = {"messages": [message_to_kb(m) for m in await db.get_session_messages(sid)]}
+    return JSONResponse(content=payload, status_code=201)
