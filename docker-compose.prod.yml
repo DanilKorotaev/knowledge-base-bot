@@ -43,6 +43,14 @@ services:
       - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:rw
       - ./logs:/app/logs
 
+  kb-app-api:
+    ports: !override
+      - "127.0.0.1:${KB_APP_API_PORT:-8091}:8091"
+    volumes:
+      - /var/lib/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:rw
+      - ./logs:/app/logs
+      - cursor_chats:/root/.cursor/chats
+
   postgres:
     # НЕ экспортируем порт наружу (доступен только через bot-network)
     ports: !override []

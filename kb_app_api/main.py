@@ -1,11 +1,16 @@
 """
 Точка входа KB App API (iOS).
 
-Запуск из корня репозитория knowledge-base-bot::
+Запуск локально из корня репозитория knowledge-base-bot::
 
     export KB_APP_API_TOKEN=secret
     export DB_TYPE=sqlite DB_FILE=/tmp/kb_test.db
     PYTHONPATH=. uvicorn kb_app_api.main:app --host 0.0.0.0 --port 8091
+
+Docker: ``docker compose up kb-app-api`` (см. ``kb-app-api/README.md``).
+
+Опционально ``POST /api/auth/token`` — переменные ``KB_APP_API_TOKEN_ENDPOINT_ENABLED``,
+``KB_APP_API_TOKEN_ISSUE_SECRET`` (см. ``kb-app-api/env.example``).
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
-from kb_app_api.routes import files, health, messages, sessions, voice
+from kb_app_api.routes import auth, files, health, messages, sessions, voice
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +67,7 @@ app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")

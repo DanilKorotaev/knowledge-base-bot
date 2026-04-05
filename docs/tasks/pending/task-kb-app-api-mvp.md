@@ -1,16 +1,14 @@
 # KB App API (MVP) — пакет `kb_app_api/`
 
-**Статус:** основные маршруты готовы; инфраструктура (Docker, опциональный `/api/auth/token`) — отдельно.
+**Статус:** функционально готово; секреты и прод-URL задаются при деплое (см. `kb-app-api/env.example`).
 
 ## Сделано
 
-- FastAPI: сессии, сообщения (+ SSE), голос, `GET /api/files/changes`, **`POST /api/files/revert`**, **`POST .../attachments`** (файл на диск → `process_query_for_api` + запись в `attachments`).
-- `QueryProcessingService.process_query_for_api`, откат: `kb_app_api/revert_helpers.py` (как в Telegram `revert_change_callback`).
-- Bearer, БД — как ранее.
+- Маршруты по контракту iOS; Docker (`kb-app-api/Dockerfile`, `docker-compose` + prod override).
+- Опциональный **`POST /api/auth/token`**: `KB_APP_API_TOKEN_ENDPOINT_ENABLED`, `KB_APP_API_TOKEN_ISSUE_SECRET`, выдача `KB_APP_API_TOKEN`.
 
-## Опционально позже
+## Деплой
 
-- Docker / compose для процесса `kb_app_api`.
-- `POST /api/auth/token`.
+- Переменные из `.env` / CI — без хранения значений в репозитории.
 
 Контракт: `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md`.

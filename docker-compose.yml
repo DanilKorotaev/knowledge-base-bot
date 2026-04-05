@@ -45,6 +45,26 @@ services:
     networks:
       - bot-network
 
+  # KB App API (iOS) — HTTP поверх того же кода бота
+  kb-app-api:
+    build:
+      context: .
+      dockerfile: kb-app-api/Dockerfile
+    container_name: knowledge-base-bot-kb-app-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${KB_APP_API_PORT:-8091}:8091"
+    volumes:
+      - ~/.local/share/knowledge-base-bot/kb:/var/knowledge-base-bot/kb:rw
+      - ./logs:/app/logs
+      - cursor_chats:/root/.cursor/chats
+    depends_on:
+      - postgres
+    networks:
+      - bot-network
+
   # Webhook HealthSync (iOS) — связывание JSON с заметками тренировок
   health-sync-api:
     build:
