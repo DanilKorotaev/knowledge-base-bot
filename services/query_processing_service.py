@@ -6,7 +6,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable, Awaitable
 from aiogram.types import Message, LinkPreviewOptions
 from aiogram.enums import ParseMode
 
@@ -363,6 +363,194 @@ class QueryProcessingService:
             await _stop_query_progress_timer(timer_stop, timer_task)
             unregister_cancel_request(request_id)
     
+    async def _apply_file_changes_storage(
+        self,
+        session_id: int,
+        changes: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """
+        Залогировать изменения в БД, Health hook, синхронизация с Nextcloud.
+        Возвращает HTML-текст для уведомления или None, если changes пуст.
+        """
+        if not changes:
+            return None
+
+        db = await self._get_db()
+        sync_service = self._get_sync_service()
+
+        for change in changes:
+            await db.log_file_change(
+                session_id=session_id,
+                file_path=change.get("path", ""),
+                change_type=change.get("type", str(ChangeType.MODIFIED)),
+                old_content=change.get("old_content"),
+                new_content=change.get("new_content"),
+            )
+
+        try:
+            from utils.health_linking_hook import maybe_link_health_for_kb_changes
+
+            maybe_link_health_for_kb_changes(app_config.LOCAL_KB_PATH, changes)
+        except Exception as e:
+            logger.warning("Health link Path 2 (handle_file_changes): %s", e, exc_info=True)
+
+        sync_success = await sync_service.sync_changes(changes)
+
+        file_urls: Optional[Dict[str, str]] = None
+        link_mode = getattr(app_config, "NEXTCLOUD_LINK_MODE", "disabled")
+
+        if link_mode != "disabled" and sync_success:
+            nc_service = self._get_nextcloud_service()
+            if nc_service.enabled:
+                file_urls = {}
+
+                async def get_link_for_change(change: Dict[str, Any]) -> tuple[str, Optional[str]]:
+                    path = change.get("path", "")
+                    try:
+                        url = await nc_service.get_file_link(path)
+                        return path, url
+                    except Exception as e:
+                        logger.debug("Не удалось получить ссылку для %s: %s", path, e)
+                        return path, None
+
+                results = await asyncio.gather(
+                    *[get_link_for_change(ch) for ch in changes],
+                    return_exceptions=True,
+                )
+
+                for result in results:
+                    if isinstance(result, tuple) and result[1]:
+                        file_urls[result[0]] = result[1]
+
+                if not file_urls:
+                    file_urls = None
+
+        return format_file_changes_info(
+            changes, sync_success, file_urls=file_urls, link_mode=link_mode
+        )
+
+    async def handle_file_changes_for_api(
+        self,
+        session_id: int,
+        changes: List[Dict[str, Any]],
+    ) -> None:
+        """То же хранилище, что и для Telegram, без отправки в чат."""
+        changes_info = await self._apply_file_changes_storage(session_id, changes)
+        if changes_info:
+            plain = re.sub(r"<[^>]+>", "", changes_info)
+            logger.info("KB App API: изменения файлов\n%s", plain[:4000])
+
+    async def process_query_for_api(
+        self,
+        query: str,
+        session_id: int,
+        telegram_user_id: int,
+        *,
+        use_knowledge_base: bool = True,
+        attached_files: Optional[List[Path]] = None,
+        save_user_message: bool = True,
+        on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """
+        Обработка запроса для KB App API без Telegram UI (тот же Cursor CLI и синк, что у бота).
+
+        При use_knowledge_base=False — без Cursor и без начального sync: короткий ответ в чате.
+        """
+        db = await self._get_db()
+        session_messages = await db.get_session_messages(session_id)
+
+        if not use_knowledge_base:
+            if save_user_message:
+                await db.add_message(session_id, str(MessageRole.USER), query)
+            reply = f"(Режим без базы знаний) {query}"
+            if len(reply) > 10000:
+                reply = reply[:10000] + "…"
+            await db.add_message(session_id, str(MessageRole.ASSISTANT), reply)
+            return reply, []
+
+        request_id, cancel_event = register_cancel_request(telegram_user_id)
+        timer_stop = asyncio.Event()
+        timer_task: Optional[asyncio.Task] = None
+
+        try:
+            sync_service = self._get_sync_service()
+            sync_start = time.time()
+            if sync_service.enabled:
+                try:
+                    async def notify_sync(msg: str, is_important: bool = False) -> None:
+                        logger.debug("KB App API sync: %s", msg)
+
+                    sync_service.set_notify_callback(notify_sync)
+
+                    if app_config.AUTO_SYNC:
+                        await sync_service.sync_from_nextcloud(show_notification=True)
+                except Exception as e:
+                    logger.warning("Ошибка при синхронизации (KB App API): %s", e)
+
+            if time.time() - sync_start > 1.0:
+                logger.info("KB App API: синхронизация заняла %.2fс", time.time() - sync_start)
+
+            cursor_start = time.time()
+            cursor_service = self._get_cursor_service()
+            session_data = await db.get_session(session_id)
+            cursor_chat_id = session_data.get("cursor_chat_id") if session_data else None
+
+            if not cursor_chat_id:
+                cursor_chat_id = await cursor_service.create_chat()
+                if cursor_chat_id:
+                    await db.update_session(session_id, cursor_chat_id=cursor_chat_id)
+                    logger.info("Создан cursor_chat_id=%s для сессии #%s (KB App API)", cursor_chat_id, session_id)
+                else:
+                    logger.warning("Не удалось создать чат Cursor CLI для сессии #%s (KB App API)", session_id)
+
+            streaming_enabled = app_config.STREAMING_ENABLED
+            on_chunk_cb = on_chunk if streaming_enabled and on_chunk else None
+
+            response, changes = await cursor_service.process_query(
+                query=query,
+                session_id=session_id,
+                session_messages=session_messages,
+                attached_files=attached_files,
+                cursor_chat_id=cursor_chat_id,
+                on_chunk=on_chunk_cb,
+                cancel_event=cancel_event,
+            )
+
+            if cursor_chat_id and response.startswith("❌") and "код: 1" in response:
+                logger.warning("--resume не сработал для chatId=%s (KB App API), fallback без resume", cursor_chat_id)
+                await db.update_session(session_id, cursor_chat_id="")
+                on_chunk_fb = on_chunk if streaming_enabled and on_chunk else None
+                response, changes = await cursor_service.process_query(
+                    query=query,
+                    session_id=session_id,
+                    session_messages=session_messages,
+                    attached_files=attached_files,
+                    cursor_chat_id=None,
+                    on_chunk=on_chunk_fb,
+                    cancel_event=cancel_event,
+                )
+
+            logger.info("KB App API: Cursor CLI за %.2fс", time.time() - cursor_start)
+
+            await _stop_query_progress_timer(timer_stop, timer_task)
+
+            if save_user_message:
+                await db.add_message(session_id, str(MessageRole.USER), query)
+            await db.add_message(session_id, str(MessageRole.ASSISTANT), response)
+
+            await self.handle_file_changes_for_api(session_id, changes)
+
+            return response, changes
+
+        except Exception as e:
+            await _stop_query_progress_timer(timer_stop, timer_task)
+            logger.error("Ошибка при обработке запроса (KB App API): %s", e, exc_info=True)
+            error_msg = _user_facing_query_error(e)
+            raise RuntimeError(error_msg) from e
+        finally:
+            await _stop_query_progress_timer(timer_stop, timer_task)
+            unregister_cancel_request(request_id)
+
     async def handle_file_changes(
         self,
         session_id: int,
@@ -378,79 +566,21 @@ class QueryProcessingService:
             message: Объект сообщения Telegram для отправки уведомлений
         """
         if not changes:
-            # Если изменений не было, показать клавиатуру активной сессии отдельным сообщением
             try:
                 await message.answer(
                     "💡 Используйте кнопки ниже для управления сессией.",
                     reply_markup=get_active_session_keyboard()
                 )
             except Exception:
-                pass  # Игнорируем ошибки
+                pass
             return
-        
-        db = await self._get_db()
-        sync_service = self._get_sync_service()
-        
-        # Залогировать изменения в БД
-        for change in changes:
-            await db.log_file_change(
-                session_id=session_id,
-                file_path=change.get("path", ""),
-                change_type=change.get("type", str(ChangeType.MODIFIED)),
-                old_content=change.get("old_content"),
-                new_content=change.get("new_content")
-            )
 
-        # Path 2 (HealthSync): связать заметку тренировки с JSON, если файлы уже в KB
-        try:
-            from utils.health_linking_hook import maybe_link_health_for_kb_changes
+        changes_info = await self._apply_file_changes_storage(session_id, changes)
+        if not changes_info:
+            return
 
-            maybe_link_health_for_kb_changes(app_config.LOCAL_KB_PATH, changes)
-        except Exception as e:
-            logger.warning("Health link Path 2 (handle_file_changes): %s", e, exc_info=True)
-        
-        # Синхронизировать изменения с NextCloud
-        sync_success = await sync_service.sync_changes(changes)
-        
-        # Получить ссылки на файлы в NextCloud (если включено)
-        file_urls: Optional[Dict[str, str]] = None
-        link_mode = getattr(app_config, 'NEXTCLOUD_LINK_MODE', 'disabled')
-        
-        if link_mode != "disabled" and sync_success:
-            nc_service = self._get_nextcloud_service()
-            if nc_service.enabled:
-                file_urls = {}
-                
-                async def get_link_for_change(change: Dict[str, Any]) -> tuple[str, Optional[str]]:
-                    path = change.get("path", "")
-                    try:
-                        url = await nc_service.get_file_link(path)
-                        return path, url
-                    except Exception as e:
-                        logger.debug(f"Не удалось получить ссылку для {path}: {e}")
-                        return path, None
-                
-                # Получить ссылки параллельно
-                results = await asyncio.gather(
-                    *[get_link_for_change(ch) for ch in changes],
-                    return_exceptions=True
-                )
-                
-                for result in results:
-                    if isinstance(result, tuple) and result[1]:
-                        file_urls[result[0]] = result[1]
-                
-                if not file_urls:
-                    file_urls = None  # Нет ссылок — не передаём
-        
-        # Форматировать информацию об изменениях
-        changes_info = format_file_changes_info(
-            changes, sync_success, file_urls=file_urls, link_mode=link_mode
-        )
-        
         session_keyboard = get_active_session_keyboard()
-        
-        # Отправить информацию об изменениях (HTML для ссылок и предотвращения авто-ссылок)
+
         try:
             await message.answer(
                 changes_info,
@@ -459,11 +589,10 @@ class QueryProcessingService:
                 reply_markup=session_keyboard
             )
         except Exception as e:
-            logger.warning(f"Не удалось отправить информацию об изменениях с HTML: {e}")
-            # Fallback: отправить без форматирования
+            logger.warning("Не удалось отправить информацию об изменениях с HTML: %s", e)
             try:
                 plain_text = re.sub(r'<[^>]+>', '', changes_info)
                 await message.answer(plain_text, reply_markup=session_keyboard)
             except Exception as e2:
-                logger.warning(f"Не удалось отправить информацию об изменениях: {e2}")
+                logger.warning("Не удалось отправить информацию об изменениях: %s", e2)
 

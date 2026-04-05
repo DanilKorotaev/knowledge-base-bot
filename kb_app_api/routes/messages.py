@@ -12,7 +12,8 @@ from pydantic import BaseModel, Field
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.serializers import message_to_kb
-from kb_app_api.session_access import assistant_stub_reply, parse_session_id, require_session_for_user
+from kb_app_api.session_access import parse_session_id, require_session_for_user
+from services.query_processing_service import QueryProcessingService
 
 logger = logging.getLogger(__name__)
 
@@ -58,31 +59,71 @@ async def post_message(
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
 
-    from utils.db_helpers import get_db
-
-    db = await get_db()
-
-    await db.add_message(sid, "user", body.content)
-    reply = assistant_stub_reply(body.content, body.use_knowledge_base)
-    await db.add_message(sid, "assistant", reply)
-
-    all_msgs = await db.get_session_messages(sid)
-    payload = {"messages": [message_to_kb(m) for m in all_msgs]}
-
     wants_sse = accept and "text/event-stream" in accept.lower()
+    tid = int(user["telegram_id"])
+
     if wants_sse:
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        err_holder: list[BaseException | None] = [None]
+
+        async def on_chunk(chunk: str) -> None:
+            await queue.put(chunk)
+
+        async def run_pipeline() -> None:
+            try:
+                qps = QueryProcessingService()
+                await qps.process_query_for_api(
+                    body.content,
+                    sid,
+                    tid,
+                    use_knowledge_base=body.use_knowledge_base,
+                    on_chunk=on_chunk,
+                )
+            except BaseException as e:
+                err_holder[0] = e
+            finally:
+                await queue.put(None)
 
         async def gen():
-            text = reply
-            step = 48
-            for i in range(0, len(text), step):
-                piece = text[i : i + step]
-                yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0)
-            yield f"data: {json.dumps({'done': True})}\n\n"
+            task = asyncio.create_task(run_pipeline())
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    yield f"data: {json.dumps({'delta': item}, ensure_ascii=False)}\n\n"
+                await task
+                ex = err_holder[0]
+                if ex:
+                    msg = str(ex)
+                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
+    try:
+        qps = QueryProcessingService()
+        await qps.process_query_for_api(
+            body.content,
+            sid,
+            tid,
+            use_knowledge_base=body.use_knowledge_base,
+        )
+    except RuntimeError as e:
+        raise APIError("processing_error", str(e), status_code=500) from e
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    all_msgs = await db.get_session_messages(sid)
+    payload = {"messages": [message_to_kb(m) for m in all_msgs]}
     return JSONResponse(content=payload, status_code=201)
 
 
