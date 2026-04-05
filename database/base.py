@@ -24,7 +24,8 @@ class DatabaseInterface(ABC):
         user_id: int,
         session_type: str,
         status: str = "active",
-        context_files: Optional[List[str]] = None
+        context_files: Optional[List[str]] = None,
+        display_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Создать новую сессию"""
         pass
@@ -55,7 +56,8 @@ class DatabaseInterface(ABC):
         session_id: int,
         status: Optional[str] = None,
         context_files: Optional[List[str]] = None,
-        cursor_chat_id: Optional[str] = None
+        cursor_chat_id: Optional[str] = None,
+        display_title: Optional[str] = None,
     ) -> None:
         """Обновить сессию"""
         pass

@@ -72,6 +72,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                     status VARCHAR(50) DEFAULT 'active',
                     context_files TEXT[],
                     cursor_chat_id VARCHAR(255),
+                    display_title VARCHAR(500),
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
@@ -86,6 +87,16 @@ class PostgreSQLDatabase(DatabaseInterface):
             if not session_column_check:
                 await conn.execute("""
                     ALTER TABLE sessions ADD COLUMN cursor_chat_id VARCHAR(255)
+                """)
+            
+            session_title_check = await conn.fetch("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name='sessions' AND column_name = 'display_title'
+            """)
+            if not session_title_check:
+                await conn.execute("""
+                    ALTER TABLE sessions ADD COLUMN display_title VARCHAR(500)
                 """)
             
             await conn.execute("""
@@ -168,15 +179,16 @@ class PostgreSQLDatabase(DatabaseInterface):
         user_id: int,
         session_type: str,
         status: str = "active",
-        context_files: Optional[List[str]] = None
+        context_files: Optional[List[str]] = None,
+        display_title: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Создать новую сессию"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO sessions (user_id, session_type, status, context_files)
-                VALUES ($1, $2, $3, $4)
-                RETURNING id, user_id, session_type, status, context_files, created_at, updated_at
-            """, user_id, session_type, status, context_files or [])
+                INSERT INTO sessions (user_id, session_type, status, context_files, display_title)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+            """, user_id, session_type, status, context_files or [], display_title)
             return dict(row)
     
     async def get_session(self, session_id: int) -> Optional[Dict[str, Any]]:
@@ -226,7 +238,8 @@ class PostgreSQLDatabase(DatabaseInterface):
         session_id: int,
         status: Optional[str] = None,
         context_files: Optional[List[str]] = None,
-        cursor_chat_id: Optional[str] = None
+        cursor_chat_id: Optional[str] = None,
+        display_title: Optional[str] = None,
     ) -> None:
         """Обновить сессию"""
         updates = []
@@ -247,6 +260,11 @@ class PostgreSQLDatabase(DatabaseInterface):
             updates.append(f"cursor_chat_id = ${param_num}")
             # Пустая строка означает сброс cursor_chat_id
             params.append(cursor_chat_id if cursor_chat_id else None)
+            param_num += 1
+        
+        if display_title is not None:
+            updates.append(f"display_title = ${param_num}")
+            params.append(display_title)
             param_num += 1
         
         updates.append(f"updated_at = NOW()")
@@ -272,6 +290,10 @@ class PostgreSQLDatabase(DatabaseInterface):
                 VALUES ($1, $2, $3)
                 RETURNING id, session_id, role, content, created_at
             """, session_id, role, content)
+            await conn.execute(
+                "UPDATE sessions SET updated_at = NOW() WHERE id = $1",
+                session_id,
+            )
             return dict(row)
     
     async def get_session_messages(

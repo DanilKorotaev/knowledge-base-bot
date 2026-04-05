@@ -81,6 +81,10 @@ class Config:
     # Обновление текста «Обрабатываю запрос...» с таймером (секунды)
     QUERY_PROGRESS_TIMER_INTERVAL: int = int(os.getenv("QUERY_PROGRESS_TIMER_INTERVAL", "15"))
     
+    # KB App API (iOS) — отдельный процесс `uvicorn kb_app_api.main:app`
+    KB_APP_API_TOKEN: Optional[str] = os.getenv("KB_APP_API_TOKEN")
+    KB_APP_API_TELEGRAM_ID: int = int(os.getenv("KB_APP_API_TELEGRAM_ID", "9000000009000001"))
+    
     # Mini App
     MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)
     MINIAPP_PORT: int = int(os.getenv("MINIAPP_PORT", "8080"))

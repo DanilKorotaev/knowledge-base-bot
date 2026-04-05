@@ -145,7 +145,8 @@ class SessionService:
         session_id: int,
         status: Optional[SessionStatus] = None,
         context_files: Optional[list] = None,
-        cursor_chat_id: Optional[str] = None
+        cursor_chat_id: Optional[str] = None,
+        display_title: Optional[str] = None,
     ) -> None:
         """
         Обновить сессию
@@ -155,9 +156,16 @@ class SessionService:
             status: Новый статус (опционально)
             context_files: Новые файлы контекста (опционально)
             cursor_chat_id: ID чата Cursor CLI (опционально)
+            display_title: Заголовок для клиентов API (опционально)
         """
         db = await self._get_db()
         
         status_str = str(status) if status else None
-        await db.update_session(session_id, status=status_str, context_files=context_files, cursor_chat_id=cursor_chat_id)
+        await db.update_session(
+            session_id,
+            status=status_str,
+            context_files=context_files,
+            cursor_chat_id=cursor_chat_id,
+            display_title=display_title,
+        )
 
