@@ -36,4 +36,12 @@ async def get_api_user(_: Annotated[None, Depends(require_bearer)]) -> dict[str,
 
     db = await get_db()
     user = await db.ensure_user(config.KB_APP_API_TELEGRAM_ID, "kb-app-api")
+    if config.ACCESS_MODE == "restricted" and not config.KB_APP_API_BYPASS_ACCESS_CHECK:
+        if not user.get("is_allowed"):
+            raise APIError(
+                "forbidden",
+                "В режиме restricted пользователь API не разрешён (is_allowed=false). "
+                "Разрешите доступ через бота или задайте KB_APP_API_BYPASS_ACCESS_CHECK=true только для отладки.",
+                status_code=403,
+            )
     return user

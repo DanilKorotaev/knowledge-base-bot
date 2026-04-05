@@ -89,6 +89,10 @@ class Config:
         "KB_APP_API_TOKEN_ENDPOINT_ENABLED", "false"
     ).lower() in ("true", "1", "yes")
     KB_APP_API_TOKEN_ISSUE_SECRET: Optional[str] = os.getenv("KB_APP_API_TOKEN_ISSUE_SECRET")
+    # Только для отладки: не проверять is_allowed у KB_APP_API_TELEGRAM_ID при ACCESS_MODE=restricted
+    KB_APP_API_BYPASS_ACCESS_CHECK: bool = os.getenv(
+        "KB_APP_API_BYPASS_ACCESS_CHECK", "false"
+    ).lower() in ("true", "1", "yes")
     
     # Mini App
     MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)
