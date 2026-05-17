@@ -23,10 +23,10 @@ router = APIRouter(prefix="/query", tags=["voice"])
 @router.post("/voice")
 async def voice_query(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-    audio: Annotated[UploadFile | None, File(None)] = None,
-    session_id: Annotated[str, Form()] = "",
-    use_knowledge_base: Annotated[str, Form()] = "true",
-    transcription_hint: Annotated[str | None, Form()] = None,
+    audio: UploadFile | None = File(default=None),
+    session_id: str = Form(default=""),
+    use_knowledge_base: str = Form(default="true"),
+    transcription_hint: str | None = Form(default=None),
 ) -> dict[str, Any]:
     """
     Multipart: поле `audio` (как в Telegram — Whisper), либо текст из `transcription_hint`.

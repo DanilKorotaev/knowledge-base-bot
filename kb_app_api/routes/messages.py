@@ -149,9 +149,9 @@ async def post_message(
 async def post_attachment(
     session_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-    file: Annotated[UploadFile, File(...)],
-    use_knowledge_base: Annotated[str, Form()] = "true",
-    message: Annotated[str | None, Form()] = None,
+    file: UploadFile = File(...),
+    use_knowledge_base: str = Form(default="true"),
+    message: str | None = Form(default=None),
 ) -> JSONResponse:
     """
     multipart: `file`, `use_knowledge_base`, опционально `message` — текст запроса вместо текста по умолчанию.
