@@ -84,6 +84,10 @@ class Config:
     # KB App API (iOS) — отдельный процесс `uvicorn kb_app_api.main:app`
     KB_APP_API_TOKEN: Optional[str] = os.getenv("KB_APP_API_TOKEN")
     KB_APP_API_TELEGRAM_ID: int = int(os.getenv("KB_APP_API_TELEGRAM_ID", "9000000009000001"))
+    # iOS E2E / интеграционные тесты: запросы с заголовком X-KB-App-E2E: 1
+    KB_APP_API_TEST_TELEGRAM_ID: int = int(
+        os.getenv("KB_APP_API_TEST_TELEGRAM_ID", "9000000009000001")
+    )
     # POST /api/auth/token — выдача того же Bearer после проверки секрета (см. kb_app_api/routes/auth.py)
     KB_APP_API_TOKEN_ENDPOINT_ENABLED: bool = os.getenv(
         "KB_APP_API_TOKEN_ENDPOINT_ENABLED", "false"

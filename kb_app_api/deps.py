@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config import config
@@ -31,11 +31,19 @@ async def require_bearer(
         raise APIError("forbidden", "Неверный токен", status_code=403)
 
 
-async def get_api_user(_: Annotated[None, Depends(require_bearer)]) -> dict[str, Any]:
+async def get_api_user(
+    request: Request,
+    _: Annotated[None, Depends(require_bearer)],
+) -> dict[str, Any]:
     from utils.db_helpers import get_db
 
+    telegram_id = config.KB_APP_API_TELEGRAM_ID
+    if request.headers.get("X-KB-App-E2E") == "1":
+        telegram_id = config.KB_APP_API_TEST_TELEGRAM_ID
+
     db = await get_db()
-    user = await db.ensure_user(config.KB_APP_API_TELEGRAM_ID, "kb-app-api")
+    username = "kb-app-api" if telegram_id == config.KB_APP_API_TELEGRAM_ID else "kb-app-api-e2e"
+    user = await db.ensure_user(telegram_id, username)
     if config.ACCESS_MODE == "restricted" and not config.KB_APP_API_BYPASS_ACCESS_CHECK:
         if not user.get("is_allowed"):
             raise APIError(
