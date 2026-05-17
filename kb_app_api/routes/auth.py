@@ -5,9 +5,9 @@
 """
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from config import config
@@ -24,7 +24,7 @@ class TokenIssueBody(BaseModel):
 
 @router.post("/token")
 async def issue_token(
-    body: Annotated[TokenIssueBody | None, Body(default=None)] = None,
+    body: TokenIssueBody | None = None,
 ) -> dict[str, Any]:
     """
     Включите `KB_APP_API_TOKEN_ENDPOINT_ENABLED=true` и задайте `KB_APP_API_TOKEN` + `KB_APP_API_TOKEN_ISSUE_SECRET`.
