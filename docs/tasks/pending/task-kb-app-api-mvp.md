@@ -2,6 +2,8 @@
 
 **Статус:** функционально готово; секреты и прод-URL задаются при деплое (см. `kb-app-api/env.example`).
 
+**Чеклист деплоя и E2E:** Nextcloud `Документация/Задачи/KB App API — бэкенд для iOS/Чеклист — деплой и интеграция.md`.
+
 ## Сделано
 
 - Маршруты по контракту iOS; Docker (`kb-app-api/Dockerfile`, `docker-compose` + prod override).
