@@ -29,7 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
-from kb_app_api.routes import auth, files, health, messages, sessions, voice
+from kb_app_api.routes import attachments, auth, files, health, messages, sessions, voice
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,6 +70,7 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
+app.include_router(attachments.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 
