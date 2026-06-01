@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, Depends
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from config import config
 from kb_app_api.deps import get_api_user
@@ -41,12 +41,12 @@ def _local_attachment_path(att: dict[str, Any]) -> Path | None:
     return path
 
 
-@router.get("/{session_id}/attachments/{attachment_id}/file")
+@router.get("/{session_id}/attachments/{attachment_id}/file", response_model=None)
 async def get_attachment_file(
     session_id: str,
     attachment_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-) -> FileResponse | StreamingResponse:
+) -> Response:
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
 
