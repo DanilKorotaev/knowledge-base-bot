@@ -91,6 +91,56 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertIn("session", body)
         self.assertIn("id", body["session"])
 
+    def test_messages_include_content_format(self) -> None:
+        create = self.client.post(
+            "/api/sessions",
+            headers={"Authorization": "Bearer smoke-test-bearer"},
+            json={"title": "Rich"},
+        )
+        sid = create.json()["session"]["id"]
+
+        from utils.db_helpers import get_db
+
+        import asyncio
+
+        async def seed() -> None:
+            db = await get_db()
+            user_msg = await db.add_message(int(sid), "user", "hello")
+            await db.add_message(int(sid), "assistant", "**bold** reply")
+            img_path = Path(_kb_dir or "") / "test.jpg"
+            img_path.write_bytes(b"fake-image")
+            await db.add_attachment(
+                session_id=int(sid),
+                message_id=int(user_msg["id"]),
+                file_type="photo",
+                file_id="local:test",
+                file_path=str(img_path),
+                file_name="test.jpg",
+                file_size=10,
+            )
+
+        asyncio.run(seed())
+
+        r = self.client.get(
+            f"/api/sessions/{sid}/messages",
+            headers={"Authorization": "Bearer smoke-test-bearer"},
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertIn("messages", data)
+        msgs = data["messages"]
+        self.assertGreaterEqual(len(msgs), 2)
+        assistant = next(m for m in msgs if m["role"] == "assistant")
+        self.assertEqual(assistant.get("content_format"), "markdown")
+        user = next(m for m in msgs if m["role"] == "user")
+        self.assertEqual(user.get("content_format"), "plain")
+        self.assertIn("attachments", user)
+        self.assertEqual(user["attachments"][0]["file_type"], "photo")
+
+    def test_attachment_file_requires_auth(self) -> None:
+        r = self.client.get("/api/sessions/1/attachments/1/file")
+        self.assertEqual(r.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

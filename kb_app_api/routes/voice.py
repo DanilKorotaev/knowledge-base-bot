@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
-from kb_app_api.serializers import message_to_kb
+from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from services.openai_service import OpenAIService
 from services.query_processing_service import QueryProcessingService
@@ -109,7 +109,8 @@ async def voice_query(
 
     db = await get_db()
     all_msgs = await db.get_session_messages(sid)
+    enriched = await enrich_session_messages(sid, all_msgs)
     return {
-        "messages": [message_to_kb(m) for m in all_msgs],
+        "messages": enriched,
         "transcription": transcription_out,
     }

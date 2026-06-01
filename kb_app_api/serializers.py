@@ -1,17 +1,110 @@
 from __future__ import annotations
 
+import mimetypes
+import re
 from typing import Any
 
 from kb_app_api.timefmt import to_iso_z
 
+_HTML_TAG_RE = re.compile(r"<\s*(/?)\s*(b|strong|i|em|code|pre|ul|ol|li|a|p|br|blockquote)\b", re.I)
 
-def message_to_kb(m: dict[str, Any]) -> dict[str, Any]:
-    return {
+_ATTACHMENT_MIME: dict[str, str] = {
+    "photo": "image/jpeg",
+    "voice": "audio/ogg",
+    "audio": "audio/mpeg",
+    "video": "video/mp4",
+    "document": "application/octet-stream",
+}
+
+
+def infer_content_format(role: str, content: str) -> str:
+    """markdown for assistant (Cursor default), plain for user/system; html if content looks like HTML."""
+    if role == "assistant" and content and _HTML_TAG_RE.search(content):
+        return "html"
+    if role == "assistant":
+        return "markdown"
+    return "plain"
+
+
+def _guess_mime(att: dict[str, Any]) -> str | None:
+    name = att.get("file_name") or ""
+    guessed, _ = mimetypes.guess_type(name)
+    if guessed:
+        return guessed
+    ftype = att.get("file_type") or ""
+    return _ATTACHMENT_MIME.get(str(ftype))
+
+
+def attachment_to_kb(
+    session_id: int,
+    att: dict[str, Any],
+    transcription_by_att: dict[int, str],
+) -> dict[str, Any]:
+    att_id = int(att["id"])
+    payload: dict[str, Any] = {
+        "id": str(att_id),
+        "file_type": att.get("file_type") or "document",
+        "file_name": att.get("file_name"),
+        "file_size": att.get("file_size"),
+        "download_url": f"/api/sessions/{session_id}/attachments/{att_id}/file",
+    }
+    mime = _guess_mime(att)
+    if mime:
+        payload["mime_type"] = mime
+    if att.get("file_type") == "voice":
+        tr = transcription_by_att.get(att_id)
+        if tr:
+            payload["transcription"] = tr
+    return payload
+
+
+def message_to_kb(
+    session_id: int,
+    m: dict[str, Any],
+    attachments: list[dict[str, Any]] | None = None,
+    transcription_by_att: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    transcription_by_att = transcription_by_att or {}
+    role = str(m.get("role") or "user")
+    content = m.get("content") or ""
+    payload: dict[str, Any] = {
         "id": str(m["id"]),
-        "role": m["role"],
-        "content": m["content"],
+        "role": role,
+        "content": content,
+        "content_format": infer_content_format(role, content),
         "created_at": to_iso_z(m["created_at"]),
     }
+    if attachments:
+        kb_atts = [attachment_to_kb(session_id, a, transcription_by_att) for a in attachments]
+        payload["attachments"] = kb_atts
+        voice_tr = next(
+            (a.get("transcription") for a in kb_atts if a.get("file_type") == "voice" and a.get("transcription")),
+            None,
+        )
+        if voice_tr:
+            payload["transcription"] = voice_tr
+    return payload
+
+
+def messages_to_kb(
+    session_id: int,
+    messages: list[dict[str, Any]],
+    attachments_by_msg: dict[int, list[dict[str, Any]]],
+    transcription_by_att: dict[int, str],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        msg_id = int(m["id"])
+        atts = attachments_by_msg.get(msg_id, [])
+        out.append(
+            message_to_kb(
+                session_id,
+                m,
+                attachments=atts if atts else None,
+                transcription_by_att=transcription_by_att,
+            )
+        )
+    return out
 
 
 def session_to_kb(session: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:

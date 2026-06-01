@@ -17,7 +17,7 @@ from config import config
 
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
-from kb_app_api.serializers import message_to_kb
+from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from services.query_processing_service import QueryProcessingService
 
@@ -64,7 +64,7 @@ async def get_messages(
     all_msgs = await db.get_session_messages(sid)
     start = (page - 1) * per_page
     chunk = all_msgs[start : start + per_page]
-    return {"messages": [message_to_kb(m) for m in chunk], "total": len(all_msgs)}
+    return {"messages": await enrich_session_messages(sid, chunk), "total": len(all_msgs)}
 
 
 @router.post("/{session_id}/messages")
@@ -141,7 +141,7 @@ async def post_message(
 
     db = await get_db()
     all_msgs = await db.get_session_messages(sid)
-    payload = {"messages": [message_to_kb(m) for m in all_msgs]}
+    payload = {"messages": await enrich_session_messages(sid, all_msgs)}
     return JSONResponse(content=payload, status_code=201)
 
 
@@ -213,5 +213,5 @@ async def post_attachment(
         except Exception as e:
             logger.warning("Не удалось сохранить метаданные вложения: %s", e)
 
-    payload = {"messages": [message_to_kb(m) for m in await db.get_session_messages(sid)]}
+    payload = {"messages": await enrich_session_messages(sid, await db.get_session_messages(sid))}
     return JSONResponse(content=payload, status_code=201)
