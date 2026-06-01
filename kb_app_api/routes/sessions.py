@@ -8,13 +8,18 @@ from pydantic import BaseModel, Field
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.serializers import session_to_kb
-from utils.constants import SessionType, SessionStatus
+from kb_app_api.session_access import parse_session_id, require_session_for_user
+from utils.constants import SessionStatus, SessionType
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 class CreateSessionBody(BaseModel):
     title: str = Field(default="Новый чат", max_length=500)
+
+
+class PatchSessionBody(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
 
 
 @router.get("")
@@ -104,3 +109,42 @@ async def create_session(
     )
     messages = await db.get_session_messages(session["id"])
     return {"session": session_to_kb(session, messages)}
+
+
+@router.patch("/{session_id}")
+async def patch_session(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    body: PatchSessionBody,
+) -> dict[str, Any]:
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+
+    title = body.title.strip()
+    if not title:
+        raise APIError("validation_error", "title не может быть пустым", detail="title")
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    await db.update_session(sid, display_title=title)
+    session = await db.get_session(sid)
+    if not session:
+        raise APIError("not_found", "Сессия не найдена", status_code=404)
+    messages = await db.get_session_messages(sid)
+    return {"session": session_to_kb(session, messages)}
+
+
+@router.delete("/{session_id}")
+async def delete_session(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    await db.update_session(sid, status=str(SessionStatus.DELETED))
+    return {"success": True}

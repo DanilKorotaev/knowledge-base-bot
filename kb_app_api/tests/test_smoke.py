@@ -141,6 +141,36 @@ class TestKbAppApiSmoke(unittest.TestCase):
         r = self.client.get("/api/sessions/1/attachments/1/file")
         self.assertEqual(r.status_code, 401)
 
+    def test_delete_and_patch_session(self) -> None:
+        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        create = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "To mutate"},
+        )
+        self.assertEqual(create.status_code, 201)
+        sid = create.json()["session"]["id"]
+
+        patch = self.client.patch(
+            f"/api/sessions/{sid}",
+            headers=headers,
+            json={"title": "Renamed"},
+        )
+        self.assertEqual(patch.status_code, 200)
+        self.assertEqual(patch.json()["session"]["title"], "Renamed")
+
+        listed = self.client.get("/api/sessions", headers=headers)
+        ids = [s["id"] for s in listed.json()["sessions"]]
+        self.assertIn(sid, ids)
+
+        delete = self.client.delete(f"/api/sessions/{sid}", headers=headers)
+        self.assertEqual(delete.status_code, 200)
+        self.assertTrue(delete.json().get("success"))
+
+        listed_after = self.client.get("/api/sessions", headers=headers)
+        ids_after = [s["id"] for s in listed_after.json()["sessions"]]
+        self.assertNotIn(sid, ids_after)
+
 
 if __name__ == "__main__":
     unittest.main()
