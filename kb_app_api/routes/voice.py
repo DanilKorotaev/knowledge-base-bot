@@ -20,6 +20,65 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/query", tags=["voice"])
 
 
+async def _transcribe_audio_bytes(data: bytes, filename: str | None) -> str:
+    """Whisper + polish; raises APIError on empty or failure."""
+    if len(data) == 0:
+        raise APIError(
+            "validation_error",
+            "Нужен непустой файл audio",
+            detail="audio",
+        )
+    suf = Path(filename or "audio.m4a").suffix
+    if not suf or len(suf) > 8:
+        suf = ".m4a"
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suf, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        openai = OpenAIService()
+        ts = TranscriptionService(openai)
+        result = await ts.transcribe(tmp_path)
+        raw = (result.get("text") or "").strip()
+        language = result.get("language")
+        if not raw:
+            raise APIError(
+                "transcription_empty",
+                "Не удалось распознать речь",
+                status_code=422,
+            )
+        return await TranscriptionService.polish_transcription_simple(raw, language)
+    except APIError:
+        raise
+    except Exception as e:
+        logger.exception("Whisper / полировка (KB App API): %s", e)
+        raise APIError(
+            "transcription_failed",
+            "Ошибка распознавания речи",
+            status_code=502,
+            detail=str(e),
+        ) from e
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+async def _transcribe_upload(audio: UploadFile) -> str:
+    data = await audio.read()
+    return await _transcribe_audio_bytes(data, audio.filename)
+
+
+@router.post("/voice/transcribe")
+async def transcribe_voice(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    audio: UploadFile = File(...),
+) -> dict[str, Any]:
+    """Только Whisper + полировка; без записи в сессию и без Cursor."""
+    _ = user
+    transcription_out = await _transcribe_upload(audio)
+    return {"transcription": transcription_out}
+
+
 @router.post("/voice")
 async def voice_query(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
@@ -50,40 +109,10 @@ async def voice_query(
         data = b""
 
     if len(data) > 0:
-        suf = Path(audio.filename or "audio.m4a").suffix if audio else ".m4a"
-        if not suf or len(suf) > 8:
-            suf = ".m4a"
-        tmp_path: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=suf, delete=False) as tmp:
-                tmp.write(data)
-                tmp_path = tmp.name
-            openai = OpenAIService()
-            ts = TranscriptionService(openai)
-            result = await ts.transcribe(tmp_path)
-            raw = (result.get("text") or "").strip()
-            language = result.get("language")
-            if not raw:
-                raise APIError(
-                    "transcription_empty",
-                    "Не удалось распознать речь",
-                    status_code=422,
-                )
-            text_for_pipeline = await TranscriptionService.polish_transcription_simple(raw, language)
-            transcription_out = text_for_pipeline
-        except APIError:
-            raise
-        except Exception as e:
-            logger.exception("Whisper / полировка (KB App API voice): %s", e)
-            raise APIError(
-                "transcription_failed",
-                "Ошибка распознавания речи",
-                status_code=502,
-                detail=str(e),
-            ) from e
-        finally:
-            if tmp_path:
-                Path(tmp_path).unlink(missing_ok=True)
+        if audio is None:
+            raise APIError("validation_error", "Нужен файл audio", detail="audio")
+        text_for_pipeline = await _transcribe_audio_bytes(data, audio.filename)
+        transcription_out = text_for_pipeline
     elif transcription_hint and transcription_hint.strip():
         text_for_pipeline = transcription_hint.strip()
         transcription_out = text_for_pipeline

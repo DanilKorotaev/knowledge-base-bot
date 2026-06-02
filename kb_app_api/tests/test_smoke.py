@@ -141,6 +141,41 @@ class TestKbAppApiSmoke(unittest.TestCase):
         r = self.client.get("/api/sessions/1/attachments/1/file")
         self.assertEqual(r.status_code, 401)
 
+    def test_voice_transcribe_requires_bearer(self) -> None:
+        r = self.client.post(
+            "/api/query/voice/transcribe",
+            files={"audio": ("note.m4a", b"\x00\x01", "audio/mp4")},
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_voice_transcribe_rejects_empty_audio(self) -> None:
+        r = self.client.post(
+            "/api/query/voice/transcribe",
+            headers={"Authorization": "Bearer smoke-test-bearer"},
+            files={"audio": ("note.m4a", b"", "audio/mp4")},
+        )
+        self.assertEqual(r.status_code, 422)
+
+    def test_voice_message_requires_bearer(self) -> None:
+        r = self.client.post(
+            "/api/sessions/1/messages/voice",
+            files={"audio": ("note.m4a", b"\x00", "audio/mp4")},
+            data={"content": "hello"},
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_voice_message_rejects_empty_content(self) -> None:
+        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        create = self.client.post("/api/sessions", headers=headers, json={"title": "Voice msg"})
+        sid = create.json()["session"]["id"]
+        r = self.client.post(
+            f"/api/sessions/{sid}/messages/voice",
+            headers=headers,
+            files={"audio": ("note.m4a", b"\x00\x01", "audio/mp4")},
+            data={"content": "   "},
+        )
+        self.assertEqual(r.status_code, 422)
+
     def test_delete_and_patch_session(self) -> None:
         headers = {"Authorization": "Bearer smoke-test-bearer"}
         create = self.client.post(

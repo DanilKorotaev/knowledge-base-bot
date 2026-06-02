@@ -19,6 +19,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.voice_attachments import attach_voice_to_last_user_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
 
 logger = logging.getLogger(__name__)
@@ -214,4 +215,116 @@ async def post_attachment(
             logger.warning("Не удалось сохранить метаданные вложения: %s", e)
 
     payload = {"messages": await enrich_session_messages(sid, await db.get_session_messages(sid))}
+    return JSONResponse(content=payload, status_code=201)
+
+
+@router.post("/{session_id}/messages/voice")
+async def post_voice_message(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    audio: UploadFile = File(...),
+    content: str = Form(...),
+    use_knowledge_base: str = Form(default="true"),
+    accept: Annotated[str | None, Header()] = None,
+) -> Response:
+    """
+    Отредактированная транскрипция (`content`) + файл `audio` → пайплайн как у текста,
+    затем voice attachment и transcription в БД (как в Telegram-боте).
+    """
+    text = (content or "").strip()
+    if not text:
+        raise APIError("validation_error", "Нужно непустое поле content", detail="content")
+
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+
+    data = await audio.read()
+    if not data:
+        raise APIError("validation_error", "Пустой файл audio", detail="audio")
+
+    safe = _safe_filename(audio.filename)
+    if not safe.lower().endswith((".m4a", ".mp4", ".ogg", ".wav", ".webm", ".mp3")):
+        base = safe.rsplit(".", 1)[0] if "." in safe else safe
+        safe = f"{base}.m4a"
+
+    dest = voice_upload_path(sid, safe)
+    dest.write_bytes(data)
+    file_size = len(data)
+
+    use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
+    tid = int(user["telegram_id"])
+    wants_sse = accept and "text/event-stream" in accept.lower()
+
+    async def persist_voice() -> None:
+        await attach_voice_to_last_user_message(sid, dest, safe, file_size, text)
+
+    if wants_sse:
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        err_holder: list[BaseException | None] = [None]
+
+        async def on_chunk(chunk: str) -> None:
+            await queue.put(chunk)
+
+        async def run_pipeline() -> None:
+            try:
+                qps = QueryProcessingService()
+                await qps.process_query_for_api(
+                    text,
+                    sid,
+                    tid,
+                    use_knowledge_base=use_kb,
+                    on_chunk=on_chunk,
+                )
+                await persist_voice()
+            except BaseException as e:
+                err_holder[0] = e
+                dest.unlink(missing_ok=True)
+            finally:
+                await queue.put(None)
+
+        async def gen():
+            task = asyncio.create_task(run_pipeline())
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    yield f"data: {json.dumps({'delta': item}, ensure_ascii=False)}\n\n"
+                await task
+                ex = err_holder[0]
+                if ex:
+                    msg = str(ex)
+                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    try:
+        qps = QueryProcessingService()
+        await qps.process_query_for_api(
+            text,
+            sid,
+            tid,
+            use_knowledge_base=use_kb,
+        )
+        await persist_voice()
+    except RuntimeError as e:
+        dest.unlink(missing_ok=True)
+        raise APIError("processing_error", str(e), status_code=500) from e
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    all_msgs = await db.get_session_messages(sid)
+    payload = {"messages": await enrich_session_messages(sid, all_msgs)}
     return JSONResponse(content=payload, status_code=201)
