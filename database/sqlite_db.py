@@ -391,6 +391,62 @@ class SQLiteDatabase(DatabaseInterface):
                 }
                 for row in rows
             ]
+
+    def _message_row_to_dict(self, row: tuple) -> Dict[str, Any]:
+        return {
+            "id": row[0],
+            "session_id": row[1],
+            "role": row[2],
+            "content": row[3],
+            "created_at": row[4],
+        }
+
+    async def get_session_messages_window(
+        self,
+        session_id: int,
+        *,
+        limit: int,
+        before_id: Optional[int] = None,
+    ) -> tuple[List[Dict[str, Any]], int, bool]:
+        """Последние N сообщений или N сообщений старше before_id (порядок ASC)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+                (session_id,),
+            )
+            total = int((await cursor.fetchone())[0])
+
+            if before_id is not None:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE session_id = ? AND id < ?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (session_id, before_id, limit),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT * FROM messages
+                    WHERE session_id = ?
+                    ORDER BY id DESC LIMIT ?
+                    """,
+                    (session_id, limit),
+                )
+            rows = list(reversed(await cursor.fetchall()))
+            messages = [self._message_row_to_dict(row) for row in rows]
+
+            has_more = False
+            if messages:
+                oldest_id = messages[0]["id"]
+                cursor = await db.execute(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = ? AND id < ?",
+                    (session_id, oldest_id),
+                )
+                has_more = int((await cursor.fetchone())[0]) > 0
+
+            return messages, total, has_more
     
     async def add_attachment(
         self,

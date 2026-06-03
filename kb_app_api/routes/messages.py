@@ -48,24 +48,38 @@ class PostMessageBody(BaseModel):
 async def get_messages(
     session_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
-    page: int = 1,
-    per_page: int = 100,
+    limit: int = 20,
+    before: str | None = None,
 ) -> dict[str, Any]:
-    if page < 1:
-        raise APIError("validation_error", "page должен быть >= 1", detail="page")
-    if per_page < 1 or per_page > 200:
-        raise APIError("validation_error", "per_page должен быть 1…200", detail="per_page")
+    """
+    Пагинация «снизу вверх» для iOS-чата.
+    Без `before` — последние `limit` сообщений (хронологический порядок).
+    С `before={message_id}` — ещё `limit` сообщений старше указанного id.
+    """
+    if limit < 1 or limit > 100:
+        raise APIError("validation_error", "limit должен быть 1…100", detail="limit")
 
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
 
+    before_id: int | None = None
+    if before is not None and before.strip():
+        try:
+            before_id = int(before.strip())
+        except ValueError as e:
+            raise APIError("validation_error", "before должен быть id сообщения", detail="before") from e
+
     from utils.db_helpers import get_db
 
     db = await get_db()
-    all_msgs = await db.get_session_messages(sid)
-    start = (page - 1) * per_page
-    chunk = all_msgs[start : start + per_page]
-    return {"messages": await enrich_session_messages(sid, chunk), "total": len(all_msgs)}
+    chunk, total, has_more_older = await db.get_session_messages_window(
+        sid, limit=limit, before_id=before_id
+    )
+    return {
+        "messages": await enrich_session_messages(sid, chunk),
+        "total": total,
+        "has_more_older": has_more_older,
+    }
 
 
 @router.post("/{session_id}/messages")

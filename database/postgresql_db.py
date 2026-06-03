@@ -308,6 +308,55 @@ class PostgreSQLDatabase(DatabaseInterface):
                 query += f" LIMIT {limit}"
             rows = await conn.fetch(query, session_id)
             return [dict(row) for row in rows]
+
+    async def get_session_messages_window(
+        self,
+        session_id: int,
+        *,
+        limit: int,
+        before_id: Optional[int] = None,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval(
+                "SELECT COUNT(*) FROM messages WHERE session_id = $1",
+                session_id,
+            )
+            total = int(total or 0)
+
+            if before_id is not None:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM messages
+                    WHERE session_id = $1 AND id < $2
+                    ORDER BY id DESC LIMIT $3
+                    """,
+                    session_id,
+                    before_id,
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT * FROM messages
+                    WHERE session_id = $1
+                    ORDER BY id DESC LIMIT $2
+                    """,
+                    session_id,
+                    limit,
+                )
+            messages = [dict(row) for row in reversed(rows)]
+
+            has_more = False
+            if messages:
+                oldest_id = messages[0]["id"]
+                older_count = await conn.fetchval(
+                    "SELECT COUNT(*) FROM messages WHERE session_id = $1 AND id < $2",
+                    session_id,
+                    oldest_id,
+                )
+                has_more = int(older_count or 0) > 0
+
+            return messages, total, has_more
     
     async def add_attachment(
         self,

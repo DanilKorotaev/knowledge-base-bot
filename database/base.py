@@ -80,6 +80,19 @@ class DatabaseInterface(ABC):
     ) -> List[Dict[str, Any]]:
         """Получить историю сообщений сессии"""
         pass
+
+    async def get_session_messages_window(
+        self,
+        session_id: int,
+        *,
+        limit: int,
+        before_id: Optional[int] = None,
+    ) -> tuple[List[Dict[str, Any]], int, bool]:
+        """
+        Окно сообщений в хронологическом порядке (ASC).
+        Без before_id — последние `limit` сообщений; с before_id — `limit` сообщений старше id.
+        """
+        raise NotImplementedError
     
     @abstractmethod
     async def add_attachment(
