@@ -14,9 +14,14 @@ jobs:
   deploy:
     runs-on: [self-hosted, mac-mini]
     timeout-minutes: 30
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_NOTIFY_PROXY: socks5://127.0.0.1:1080
 
     steps:
       - name: Pull and deploy runtime
+        id: deploy
         env:
           KB_RUNTIME_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
         run: |
@@ -25,7 +30,7 @@ jobs:
           cd "${RUNTIME}"
 
           if [[ ! -d .git ]]; then
-            echo "ERROR: ${RUNTIME} is not a git repo. See vault note «Mac mini — dev, runtime и GitHub Actions»." >&2
+            echo "ERROR: ${RUNTIME} is not a git repo." >&2
             exit 1
           fi
 
@@ -36,7 +41,13 @@ jobs:
           if [[ -f scripts/deploy-mac-mini.sh ]]; then
             bash scripts/deploy-mac-mini.sh
           else
-            echo "WARN: scripts/deploy-mac-mini.sh missing — only git reset done" >&2
+            echo "ERROR: scripts/deploy-mac-mini.sh missing" >&2
+            exit 1
           fi
 
           echo "After: $(git rev-parse --short HEAD)"
+
+      - name: Notify Telegram (deploy)
+        if: always()
+        working-directory: /Users/danilkorotaev/Projects/knowledge-base-bot
+        run: python3 scripts/ci/telegram_notify.py deploy --outcome ${{ steps.deploy.outcome }}

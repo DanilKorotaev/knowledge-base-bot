@@ -25,7 +25,13 @@ if [[ -d "${VAULT_MAC_MINI}" ]]; then
       echo "Restored ${f} from vault"
     fi
   done
+  if [[ -f "${VAULT_MAC_MINI}/com.coredan.kb-app-api-host.plist" ]]; then
+    cp "${VAULT_MAC_MINI}/com.coredan.kb-app-api-host.plist" \
+      "${HOME}/Library/LaunchAgents/com.coredan.kb-app-api-host.plist"
+  fi
 fi
+
+chmod +x scripts/start-kb-app-api-host.sh 2>/dev/null || true
 
 COMPOSE_FILES=(
   -f docker-compose.yml
@@ -34,9 +40,9 @@ COMPOSE_FILES=(
   -f docker-compose.mac-mini-ports-tailscale.yml
   -f docker-compose.mac-mini-postgres-local.yml
 )
-SERVICES=(postgres kb-app-api miniapp health-sync-api)
+# kb-app-api — на хосте; bot — на хосте
+SERVICES=(postgres miniapp health-sync-api)
 
-# venv бота на хосте
 if [[ ! -d .venv ]]; then
   python3.11 -m venv .venv
 fi
@@ -48,18 +54,27 @@ for i in $(seq 1 30); do
 done
 docker info >/dev/null 2>&1 || { echo "Docker not ready" >&2; exit 1; }
 
-# Обычный deploy: только перезапуск контейнеров (образы уже на mini).
-# Полная пересборка: DEPLOY_BUILD=1 bash scripts/deploy-mac-mini.sh
+# Освободить :8091 для uvicorn на хосте
+docker compose "${COMPOSE_FILES[@]}" stop kb-app-api 2>/dev/null || true
+
 UP_FLAGS=(-d)
 if [[ "${DEPLOY_BUILD:-0}" == "1" ]]; then
   UP_FLAGS=(-d --build)
 fi
 docker compose "${COMPOSE_FILES[@]}" up "${UP_FLAGS[@]}" "${SERVICES[@]}"
 
-# Перезапуск Telegram-бота на хосте (не в Docker)
 UID_NUM="$(id -u)"
-launchctl kickstart -k "gui/${UID_NUM}/com.coredan.kb-bot-host" 2>/dev/null \
-  || launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/com.coredan.kb-bot-host.plist" 2>/dev/null \
-  || true
+for label in com.coredan.kb-bot-host com.coredan.kb-app-api-host; do
+  launchctl kickstart -k "gui/${UID_NUM}/${label}" 2>/dev/null \
+    || launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/${label}.plist" 2>/dev/null \
+    || true
+done
+
+# Быстрая проверка API на хосте
+API_PORT="$(grep -E '^KB_APP_API_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
+API_PORT="${API_PORT:-8091}"
+sleep 2
+curl -sf "http://127.0.0.1:${API_PORT}/health" >/dev/null \
+  || { echo "WARN: kb-app-api health check failed" >&2; exit 1; }
 
 echo "Deploy OK: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
