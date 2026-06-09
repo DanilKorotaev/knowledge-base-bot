@@ -48,7 +48,13 @@ for i in $(seq 1 30); do
 done
 docker info >/dev/null 2>&1 || { echo "Docker not ready" >&2; exit 1; }
 
-docker compose "${COMPOSE_FILES[@]}" up -d --build "${SERVICES[@]}"
+# Обычный deploy: только перезапуск контейнеров (образы уже на mini).
+# Полная пересборка: DEPLOY_BUILD=1 bash scripts/deploy-mac-mini.sh
+UP_FLAGS=(-d)
+if [[ "${DEPLOY_BUILD:-0}" == "1" ]]; then
+  UP_FLAGS=(-d --build)
+fi
+docker compose "${COMPOSE_FILES[@]}" up "${UP_FLAGS[@]}" "${SERVICES[@]}"
 
 # Перезапуск Telegram-бота на хосте (не в Docker)
 UID_NUM="$(id -u)"
