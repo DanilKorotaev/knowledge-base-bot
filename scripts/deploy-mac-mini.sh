@@ -70,11 +70,20 @@ for label in com.coredan.kb-bot-host com.coredan.kb-app-api-host; do
     || true
 done
 
-# Быстрая проверка API на хосте
+# API на хосте: после kickstart uvicorn + DB init могут занять >2 с
 API_PORT="$(grep -E '^KB_APP_API_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
 API_PORT="${API_PORT:-8091}"
-sleep 2
-curl -sf "http://127.0.0.1:${API_PORT}/health" >/dev/null \
-  || { echo "WARN: kb-app-api health check failed" >&2; exit 1; }
+API_HEALTH="http://127.0.0.1:${API_PORT}/health"
+for i in $(seq 1 30); do
+  if curl -sf "${API_HEALTH}" >/dev/null; then
+    break
+  fi
+  if [[ "${i}" -eq 30 ]]; then
+    echo "WARN: kb-app-api health check failed after 60s (${API_HEALTH})" >&2
+    tail -20 "${HOME}/Library/Logs/kb-app-api-host.log" 2>/dev/null >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
 
 echo "Deploy OK: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
