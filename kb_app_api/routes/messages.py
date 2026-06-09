@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import mimetypes
+import os
 import re
 import uuid
 from pathlib import Path
@@ -25,6 +26,44 @@ from services.query_processing_service import QueryProcessingService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["messages"])
+
+# Disable nginx/proxy buffering for SSE (see kbapp nginx `proxy_buffering off`).
+SSE_STREAM_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+# When Cursor CLI dumps stdout in one block, split for visible typing in clients.
+_SSE_PIECE_MAX = int(os.getenv("STREAM_SSE_PIECE_CHARS", "48"))
+_SSE_PIECE_DELAY_SEC = float(os.getenv("STREAM_SSE_PIECE_DELAY_MS", "18")) / 1000.0
+
+
+def _iter_sse_delta_pieces(text: str, *, max_piece: int = _SSE_PIECE_MAX) -> list[str]:
+    if not text:
+        return []
+    if len(text) <= max_piece:
+        return [text]
+    pieces: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if len(line) <= max_piece:
+            pieces.append(line)
+            continue
+        start = 0
+        while start < len(line):
+            pieces.append(line[start : start + max_piece])
+            start += max_piece
+    return pieces or [text]
+
+
+async def _yield_sse_deltas(item: str):
+    pieces = _iter_sse_delta_pieces(item)
+    for index, piece in enumerate(pieces):
+        yield f"data: {json.dumps({'delta': piece}, ensure_ascii=False)}\n\n"
+        if len(pieces) > 1 and index + 1 < len(pieces) and _SSE_PIECE_DELAY_SEC > 0:
+            await asyncio.sleep(_SSE_PIECE_DELAY_SEC)
+        else:
+            await asyncio.sleep(0)
 
 _DEFAULT_ATTACH_PROMPT = (
     "Пользователь прикрепил файл. Проанализируй его в контексте базы знаний и ответь."
@@ -127,7 +166,8 @@ async def post_message(
                     item = await queue.get()
                     if item is None:
                         break
-                    yield f"data: {json.dumps({'delta': item}, ensure_ascii=False)}\n\n"
+                    async for event in _yield_sse_deltas(item):
+                        yield event
                 await task
                 ex = err_holder[0]
                 if ex:
@@ -142,7 +182,7 @@ async def post_message(
                     except asyncio.CancelledError:
                         pass
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     try:
         qps = QueryProcessingService()
@@ -309,7 +349,8 @@ async def post_voice_message(
                     item = await queue.get()
                     if item is None:
                         break
-                    yield f"data: {json.dumps({'delta': item}, ensure_ascii=False)}\n\n"
+                    async for event in _yield_sse_deltas(item):
+                        yield event
                 await task
                 ex = err_holder[0]
                 if ex:
@@ -324,7 +365,7 @@ async def post_voice_message(
                     except asyncio.CancelledError:
                         pass
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
 
     try:
         qps = QueryProcessingService()

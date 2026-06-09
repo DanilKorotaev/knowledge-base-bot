@@ -4,8 +4,10 @@
 import asyncio
 import logging
 import os
+import pty
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable, Awaitable
@@ -82,6 +84,24 @@ class CursorCLIService:
             return ["stdbuf", "-oL", *cmd]
         logger.debug("stdbuf не найден в PATH — запуск cursor-agent без line-buffering")
         return cmd
+
+    def _use_pty_for_stdout(self) -> bool:
+        """macOS: pipe stdout is block-buffered; PTY gives line-ish streaming for on_chunk."""
+        if sys.platform != "darwin":
+            return False
+        return os.getenv("CURSOR_CLI_USE_PTY", "true").lower() in ("true", "1", "yes")
+
+    async def _read_process_stdout_chunk(
+        self,
+        process: asyncio.subprocess.Process,
+        master_fd: int | None,
+        size: int = 4096,
+    ) -> bytes:
+        if master_fd is not None:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, os.read, master_fd, size)
+        assert process.stdout is not None
+        return await process.stdout.read(size)
     
     def _ensure_cursorignore(self) -> None:
         """
@@ -559,6 +579,7 @@ class CursorCLIService:
         # Таймаут из конфига (по умолчанию 10 минут)
         timeout = int(os.getenv("CURSOR_CLI_TIMEOUT", "600"))
         
+        master_fd: int | None = None
         try:
             # Выполнить команду в директории базы знаний
             logger.info(f"Выполнение команды: {' '.join(cmd)}")
@@ -568,14 +589,23 @@ class CursorCLIService:
             
             cmd = self._cmd_with_optional_stdbuf(cmd)
 
+            slave_fd: int | None = None
+            stdout_target: int | asyncio.subprocess.PIPE = asyncio.subprocess.PIPE
+            if self._use_pty_for_stdout():
+                master_fd, slave_fd = pty.openpty()
+                stdout_target = slave_fd
+                logger.debug("Cursor CLI: stdout через PTY (macOS line streaming)")
+
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.kb_path),
                 env=env,
                 stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stdout=stdout_target,
+                stderr=asyncio.subprocess.PIPE,
             )
+            if slave_fd is not None:
+                os.close(slave_fd)
             
             logger.info(f"Процесс Cursor CLI запущен (PID: {process.pid})")
             
@@ -620,7 +650,7 @@ class CursorCLIService:
                         read_timeout = idle_timeout if first_chunk_time else timeout
                         try:
                             chunk = await asyncio.wait_for(
-                                process.stdout.read(4096),
+                                self._read_process_stdout_chunk(process, master_fd, 4096),
                                 timeout=read_timeout
                             )
                         except asyncio.TimeoutError:
@@ -739,14 +769,30 @@ class CursorCLIService:
                 
                 # Дочитать оставшиеся данные из stdout (сброшенные при завершении)
                 try:
-                    remaining = await asyncio.wait_for(process.stdout.read(), timeout=5.0)
-                    if remaining:
-                        decoded = remaining.decode('utf-8', errors='ignore')
-                        stdout_chunks.append(decoded)
-                        logger.info(
-                            f"Cursor CLI: дочитано ещё {len(remaining)} байт из stdout "
-                            f"после завершения процесса"
-                        )
+                    if master_fd is not None:
+                        while True:
+                            remaining = await asyncio.wait_for(
+                                self._read_process_stdout_chunk(process, master_fd, 4096),
+                                timeout=5.0,
+                            )
+                            if not remaining:
+                                break
+                            decoded = remaining.decode("utf-8", errors="ignore")
+                            stdout_chunks.append(decoded)
+                            if on_chunk and decoded.strip():
+                                try:
+                                    await on_chunk(decoded)
+                                except Exception as e:
+                                    logger.debug(f"Ошибка в on_chunk callback: {e}")
+                    elif process.stdout is not None:
+                        remaining = await asyncio.wait_for(process.stdout.read(), timeout=5.0)
+                        if remaining:
+                            decoded = remaining.decode('utf-8', errors='ignore')
+                            stdout_chunks.append(decoded)
+                            logger.info(
+                                f"Cursor CLI: дочитано ещё {len(remaining)} байт из stdout "
+                                f"после завершения процесса"
+                            )
                 except (asyncio.TimeoutError, Exception) as e:
                     logger.debug(f"Cursor CLI: не удалось дочитать stdout: {e}")
             
@@ -819,6 +865,12 @@ class CursorCLIService:
                 "❌ Не удалось выполнить запрос. Попробуйте позже или обратитесь к администратору.",
                 [],
             )
+        finally:
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except OSError:
+                    pass
     
     async def _save_file_states(self) -> Dict[str, Dict[str, Any]]:
         """
