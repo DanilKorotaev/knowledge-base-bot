@@ -70,6 +70,70 @@ def ci_context_lines() -> list[str]:
     return lines
 
 
+def _telegram_form_data(chat_id: str, text: str) -> dict[str, str]:
+    return {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": "true",
+    }
+
+
+def _socks_proxy_for_curl(proxy: str) -> str:
+    # urllib.ProxyHandler не умеет SOCKS; curl — через socks5h (DNS через ss-local).
+    if proxy.startswith("socks5://"):
+        return "socks5h://" + proxy[len("socks5://") :]
+    if proxy.startswith("socks://"):
+        return "socks5h://" + proxy[len("socks://") :]
+    return proxy
+
+
+def _send_via_curl(url: str, data: dict[str, str], proxy: str) -> dict:
+    args = ["curl", "-sfS", "--max-time", "45", "-X", "POST", url]
+    if proxy:
+        args.extend(["--proxy", _socks_proxy_for_curl(proxy)])
+    for key, value in data.items():
+        args.extend(["--data-urlencode", f"{key}={value}"])
+
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=60)
+    except (subprocess.SubprocessError, OSError) as exc:
+        print(f"curl failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if proc.returncode != 0:
+        print(f"curl exit {proc.returncode}: {proc.stderr or proc.stdout}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        print(f"Telegram API: invalid JSON: {proc.stdout!r}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _send_via_urllib(url: str, data: dict[str, str], proxy: str | None) -> dict:
+    payload = urllib.parse.urlencode(data).encode("utf-8")
+    request = urllib.request.Request(url, data=payload, method="POST")
+
+    if proxy:
+        handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
+        opener = urllib.request.build_opener(*handlers)
+    else:
+        opener = urllib.request.build_opener()
+
+    try:
+        with opener.open(request, timeout=45) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        print(f"Telegram API HTTP {exc.code}: {err_body}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as exc:
+        print(f"Telegram API network error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
 def send_telegram(text: str) -> None:
     if os.environ.get("TELEGRAM_NOTIFY_DISABLED", "").strip().lower() in ("1", "true", "yes"):
         print("TELEGRAM_NOTIFY_DISABLED: skip")
@@ -82,30 +146,13 @@ def send_telegram(text: str) -> None:
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = urllib.parse.urlencode(
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": "true",
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(url, data=payload, method="POST")
-
+    data = _telegram_form_data(chat_id, text)
     proxy = os.environ.get("TELEGRAM_NOTIFY_PROXY", "").strip()
-    if proxy:
-        handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})]
-        opener = urllib.request.build_opener(*handlers)
-    else:
-        opener = urllib.request.build_opener()
 
-    try:
-        with opener.open(request, timeout=45) as response:
-            body = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace")
-        print(f"Telegram API HTTP {exc.code}: {err_body}", file=sys.stderr)
-        sys.exit(1)
+    if proxy.startswith(("socks5://", "socks://")):
+        body = _send_via_curl(url, data, proxy)
+    else:
+        body = _send_via_urllib(url, data, proxy or None)
 
     if not body.get("ok"):
         print(f"Telegram API error: {body}", file=sys.stderr)
