@@ -23,6 +23,10 @@
 - [ ] [Отслеживание изменений файлов](tasks/pending/task-feature-change-tracking.md)
 - [ ] [Синхронизация с NextCloud](tasks/pending/task-feature-sync-service.md)
 
+### KB App API (iOS)
+
+- [ ] [Compose message: text + multiple files + voice](tasks/pending/task-api-chat-composer-multipart.md) — `POST …/messages/compose` для Telegram-style композера iOS
+
 ### Улучшения UX
 
 - [x] [Исправить отображение путей к файлам в Telegram](tasks/completed/task-ux-fix-file-paths-in-telegram.md) ✅

@@ -20,7 +20,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
-from kb_app_api.voice_attachments import attach_voice_to_last_user_message, voice_upload_path
+from kb_app_api.voice_attachments import attach_voice_to_message, attach_voice_to_last_user_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
 
 logger = logging.getLogger(__name__)
@@ -76,6 +76,209 @@ def _safe_filename(name: str | None) -> str:
         base = "upload.bin"
     clean = re.sub(r"[^\w.\-]", "_", base)
     return (clean[:200] or "upload.bin")
+
+
+def _parse_use_kb(value: str) -> bool:
+    return str(value).lower() in ("1", "true", "yes", "on")
+
+
+def _session_upload_root(session_id: int) -> Path:
+    kb_root = Path(config.LOCAL_KB_PATH)
+    kb_root.mkdir(parents=True, exist_ok=True)
+    upload_root = kb_root / ".kb_app_api_uploads" / str(session_id)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    return upload_root
+
+
+async def _attach_file_to_message(
+    session_id: int,
+    message_id: int,
+    dest: Path,
+    safe_filename: str,
+    file_size: int,
+) -> None:
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    mime, _ = mimetypes.guess_type(safe_filename)
+    ftype = "photo" if mime and mime.startswith("image/") else "document"
+    try:
+        await db.add_attachment(
+            session_id=session_id,
+            message_id=message_id,
+            file_type=ftype,
+            file_id=f"kb_app_api:{uuid.uuid4().hex}",
+            file_path=str(dest),
+            file_name=safe_filename,
+            file_size=file_size,
+        )
+    except Exception as e:
+        logger.warning("Не удалось сохранить метаданные вложения: %s", e)
+
+
+def _parse_audio_transcriptions(raw: str | None, audio_count: int) -> list[str]:
+    if audio_count == 0:
+        return []
+    if not raw or not raw.strip():
+        return [""] * audio_count
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise APIError(
+            "validation_error",
+            "audio_transcriptions должен быть JSON-массивом строк",
+            detail="audio_transcriptions",
+        ) from e
+    if not isinstance(parsed, list):
+        raise APIError(
+            "validation_error",
+            "audio_transcriptions должен быть JSON-массивом строк",
+            detail="audio_transcriptions",
+        )
+    result = [str(item) if item is not None else "" for item in parsed]
+    if len(result) != audio_count:
+        raise APIError(
+            "validation_error",
+            f"Число транскрипций ({len(result)}) не совпадает с числом audio ({audio_count})",
+            detail="audio_transcriptions",
+        )
+    return result
+
+
+def _compose_query_text(content: str, file_count: int, transcriptions: list[str]) -> str:
+    trimmed = (content or "").strip()
+    if trimmed:
+        return trimmed
+    if file_count > 0:
+        return _DEFAULT_ATTACH_PROMPT
+    voice_text = " ".join(part.strip() for part in transcriptions if part.strip())
+    if voice_text:
+        return voice_text
+    return _DEFAULT_ATTACH_PROMPT
+
+
+async def _persist_compose_uploads(
+    session_id: int,
+    message_id: int,
+    file_uploads: list[UploadFile],
+    audio_uploads: list[UploadFile],
+    transcriptions: list[str],
+) -> tuple[list[Path], list[Path]]:
+    """Save multipart files/audio and link them to the user message. Returns (file_paths, audio_paths)."""
+    upload_root = _session_upload_root(session_id)
+    file_paths: list[Path] = []
+    audio_paths: list[Path] = []
+
+    for upload in file_uploads:
+        data = await upload.read()
+        if not data:
+            raise APIError("validation_error", "Пустой файл", detail="files")
+        safe = _safe_filename(upload.filename)
+        dest = upload_root / f"{uuid.uuid4().hex[:10]}_{safe}"
+        dest.write_bytes(data)
+        file_paths.append(dest)
+        await _attach_file_to_message(session_id, message_id, dest, safe, len(data))
+
+    for index, upload in enumerate(audio_uploads):
+        data = await upload.read()
+        if not data:
+            raise APIError("validation_error", "Пустой файл audio", detail="audio")
+        safe = _safe_filename(upload.filename)
+        if not safe.lower().endswith((".m4a", ".mp4", ".ogg", ".wav", ".webm", ".mp3")):
+            base = safe.rsplit(".", 1)[0] if "." in safe else safe
+            safe = f"{base}.m4a"
+        dest = voice_upload_path(session_id, safe)
+        dest.write_bytes(data)
+        audio_paths.append(dest)
+        transcription = transcriptions[index] if index < len(transcriptions) else ""
+        await attach_voice_to_message(session_id, message_id, dest, safe, len(data), transcription)
+
+    return file_paths, audio_paths
+
+
+def _cleanup_paths(paths: list[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
+async def _run_compose_pipeline(
+    *,
+    sid: int,
+    tid: int,
+    query_text: str,
+    use_kb: bool,
+    attached_files: list[Path],
+    wants_sse: bool,
+) -> Response:
+    if wants_sse:
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        err_holder: list[BaseException | None] = [None]
+
+        async def on_chunk(chunk: str) -> None:
+            await queue.put(chunk)
+
+        async def run_pipeline() -> None:
+            try:
+                qps = QueryProcessingService()
+                await qps.process_query_for_api(
+                    query_text,
+                    sid,
+                    tid,
+                    use_knowledge_base=use_kb,
+                    attached_files=attached_files or None,
+                    save_user_message=False,
+                    on_chunk=on_chunk,
+                )
+            except BaseException as e:
+                err_holder[0] = e
+            finally:
+                await queue.put(None)
+
+        async def gen():
+            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
+            task = asyncio.create_task(run_pipeline())
+            try:
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        break
+                    async for event in _yield_sse_deltas(item):
+                        yield event
+                await task
+                ex = err_holder[0]
+                if ex:
+                    msg = str(ex)
+                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+
+    try:
+        qps = QueryProcessingService()
+        await qps.process_query_for_api(
+            query_text,
+            sid,
+            tid,
+            use_knowledge_base=use_kb,
+            attached_files=attached_files or None,
+            save_user_message=False,
+        )
+    except RuntimeError as e:
+        raise APIError("processing_error", str(e), status_code=500) from e
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    all_msgs = await db.get_session_messages(sid)
+    payload = {"messages": await enrich_session_messages(sid, all_msgs)}
+    return JSONResponse(content=payload, status_code=201)
 
 
 class PostMessageBody(BaseModel):
@@ -389,3 +592,75 @@ async def post_voice_message(
     all_msgs = await db.get_session_messages(sid)
     payload = {"messages": await enrich_session_messages(sid, all_msgs)}
     return JSONResponse(content=payload, status_code=201)
+
+
+@router.post("/{session_id}/messages/compose")
+async def post_compose_message(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    content: str = Form(default=""),
+    use_knowledge_base: str = Form(default="true"),
+    audio_transcriptions: str | None = Form(default=None),
+    files: list[UploadFile] = File(default=[]),
+    audio: list[UploadFile] = File(default=[]),
+    accept: Annotated[str | None, Header()] = None,
+) -> Response:
+    """
+    Одно user-сообщение: опциональный текст, несколько files[] и audio[] + audio_transcriptions (JSON-массив).
+    SSE — как у POST …/messages при Accept: text/event-stream.
+    """
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+    tid = int(user["telegram_id"])
+    use_kb = _parse_use_kb(use_knowledge_base)
+    wants_sse = accept and "text/event-stream" in accept.lower()
+
+    file_uploads = [item for item in files if item.filename]
+    audio_uploads = [item for item in audio if item.filename]
+    if not (content or "").strip() and not file_uploads and not audio_uploads:
+        raise APIError(
+            "validation_error",
+            "Нужен content, files или audio",
+            detail="content",
+        )
+
+    transcriptions = _parse_audio_transcriptions(audio_transcriptions, len(audio_uploads))
+    query_text = _compose_query_text(content, len(file_uploads), transcriptions)
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    user_msg = await db.add_message(sid, "user", query_text)
+    message_id = int(user_msg["id"])
+
+    saved_paths: list[Path] = []
+    try:
+        file_paths, audio_paths = await _persist_compose_uploads(
+            sid,
+            message_id,
+            file_uploads,
+            audio_uploads,
+            transcriptions,
+        )
+        saved_paths = file_paths + audio_paths
+    except APIError:
+        _cleanup_paths(saved_paths)
+        raise
+    except Exception:
+        _cleanup_paths(saved_paths)
+        raise
+
+    try:
+        return await _run_compose_pipeline(
+            sid=sid,
+            tid=tid,
+            query_text=query_text,
+            use_kb=use_kb,
+            attached_files=file_paths,
+            wants_sse=bool(wants_sse),
+        )
+    except APIError:
+        raise
+    except Exception:
+        _cleanup_paths(saved_paths)
+        raise

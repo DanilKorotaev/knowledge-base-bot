@@ -17,6 +17,38 @@ def voice_upload_path(session_id: int, safe_filename: str) -> Path:
     return upload_root / f"{uuid.uuid4().hex[:10]}_{safe_filename}"
 
 
+async def attach_voice_to_message(
+    session_id: int,
+    message_id: int,
+    dest: Path,
+    safe_filename: str,
+    file_size: int,
+    transcription: str,
+) -> None:
+    """Link saved audio file + transcription to an explicit user message."""
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    try:
+        attachment = await db.add_attachment(
+            session_id=session_id,
+            message_id=message_id,
+            file_type="voice",
+            file_id=f"kb_app_api:{uuid.uuid4().hex}",
+            file_path=str(dest),
+            file_name=safe_filename,
+            file_size=file_size,
+        )
+        if transcription.strip():
+            await db.add_transcription(
+                attachment_id=int(attachment["id"]),
+                text=transcription.strip(),
+                language=None,
+            )
+    except Exception as e:
+        logger.warning("Не удалось сохранить голосовое вложение: %s", e)
+
+
 async def attach_voice_to_last_user_message(
     session_id: int,
     dest: Path,
@@ -38,20 +70,11 @@ async def attach_voice_to_last_user_message(
         logger.warning("KB App API: нет user-сообщения для voice attachment (session %s)", session_id)
         return
 
-    try:
-        attachment = await db.add_attachment(
-            session_id=session_id,
-            message_id=last_user["id"],
-            file_type="voice",
-            file_id=f"kb_app_api:{uuid.uuid4().hex}",
-            file_path=str(dest),
-            file_name=safe_filename,
-            file_size=file_size,
-        )
-        await db.add_transcription(
-            attachment_id=int(attachment["id"]),
-            text=transcription,
-            language=None,
-        )
-    except Exception as e:
-        logger.warning("Не удалось сохранить голосовое вложение: %s", e)
+    await attach_voice_to_message(
+        session_id,
+        int(last_user["id"]),
+        dest,
+        safe_filename,
+        file_size,
+        transcription,
+    )
