@@ -25,7 +25,7 @@
 
 ### KB App API (iOS)
 
-- [ ] [Compose message: text + multiple files + voice](tasks/pending/task-api-chat-composer-multipart.md) — `POST …/messages/compose` для Telegram-style композера iOS
+- [x] [Compose message: text + multiple files + voice](tasks/completed/task-api-chat-composer-multipart.md) — completed 2026-06-09
 
 ### Улучшения UX
 
