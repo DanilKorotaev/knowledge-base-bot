@@ -1,0 +1,42 @@
+name: Deploy to Mac mini (runtime)
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mac-mini
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, mac-mini]
+    timeout-minutes: 30
+
+    steps:
+      - name: Pull and deploy runtime
+        env:
+          KB_RUNTIME_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
+        run: |
+          set -euo pipefail
+          RUNTIME="${KB_RUNTIME_DIR}"
+          cd "${RUNTIME}"
+
+          if [[ ! -d .git ]]; then
+            echo "ERROR: ${RUNTIME} is not a git repo. See vault note «Mac mini — dev, runtime и GitHub Actions»." >&2
+            exit 1
+          fi
+
+          echo "Before: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
+          git fetch origin develop
+          git reset --hard origin/develop
+
+          if [[ -f scripts/deploy-mac-mini.sh ]]; then
+            bash scripts/deploy-mac-mini.sh
+          else
+            echo "WARN: scripts/deploy-mac-mini.sh missing — only git reset done" >&2
+          fi
+
+          echo "After: $(git rev-parse --short HEAD)"
