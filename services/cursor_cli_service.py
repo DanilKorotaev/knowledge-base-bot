@@ -2,9 +2,10 @@
 Сервис для работы с Cursor CLI
 """
 import asyncio
-import subprocess
 import logging
 import os
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable, Awaitable
@@ -70,6 +71,17 @@ class CursorCLIService:
                 env["HTTPS_PROXY"] = proxy
                 env["HTTP_PROXY"] = proxy
         return env
+
+    def _cmd_with_optional_stdbuf(self, cmd: list[str]) -> list[str]:
+        """stdbuf есть в Linux (Docker); на macOS без GNU coreutils — запуск без обёртки."""
+        use_stdbuf = os.getenv("CURSOR_CLI_USE_STDBUF", "true").lower() in ("true", "1", "yes")
+        if not use_stdbuf:
+            return cmd
+        if shutil.which("stdbuf"):
+            logger.debug("Используется stdbuf -oL для принудительного сброса буфера stdout")
+            return ["stdbuf", "-oL", *cmd]
+        logger.debug("stdbuf не найден в PATH — запуск cursor-agent без line-buffering")
+        return cmd
     
     def _ensure_cursorignore(self) -> None:
         """
@@ -261,11 +273,8 @@ class CursorCLIService:
         
         cmd.append(prompt)
         
-        # stdbuf для принудительного сброса буфера stdout (как в process_query)
-        use_stdbuf = os.getenv("CURSOR_CLI_USE_STDBUF", "true").lower() in ("true", "1", "yes")
-        if use_stdbuf:
-            cmd = ["stdbuf", "-oL"] + cmd
-        
+        cmd = self._cmd_with_optional_stdbuf(cmd)
+
         # Подготовить окружение с API ключом и прокси
         env = self._prepare_env()
         
@@ -557,14 +566,8 @@ class CursorCLIService:
             logger.info(f"Таймаут: {timeout} секунд")
             logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")
             
-            # Попробовать stdbuf для принудительного сброса буфера stdout
-            # stdbuf -oL = line-buffered output (каждая строка сбрасывается сразу)
-            # Это помогает получить полный ответ без ожидания завершения процесса
-            use_stdbuf = os.getenv("CURSOR_CLI_USE_STDBUF", "true").lower() in ("true", "1", "yes")
-            if use_stdbuf:
-                cmd = ["stdbuf", "-oL"] + cmd
-                logger.debug("Используется stdbuf -oL для принудительного сброса буфера stdout")
-            
+            cmd = self._cmd_with_optional_stdbuf(cmd)
+
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.kb_path),

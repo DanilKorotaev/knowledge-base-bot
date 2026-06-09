@@ -473,6 +473,11 @@ class QueryProcessingService:
         timer_task: Optional[asyncio.Task] = None
 
         try:
+            # SSE: persist user text before sync/Cursor so GET messages shows it if the stream drops.
+            if save_user_message and on_chunk is not None:
+                await db.add_message(session_id, str(MessageRole.USER), query)
+                save_user_message = False
+
             sync_service = self._get_sync_service()
             sync_start = time.time()
             if sync_service.enabled:

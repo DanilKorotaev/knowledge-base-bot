@@ -118,6 +118,9 @@ async def post_message(
                 await queue.put(None)
 
         async def gen():
+            # Flush HTTP headers immediately so iOS/nginx don't treat the request as hung
+            # while Nextcloud sync + Cursor CLI start (can take minutes before first delta).
+            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
             task = asyncio.create_task(run_pipeline())
             try:
                 while True:
@@ -297,6 +300,9 @@ async def post_voice_message(
                 await queue.put(None)
 
         async def gen():
+            # Flush HTTP headers immediately so iOS/nginx don't treat the request as hung
+            # while Nextcloud sync + Cursor CLI start (can take minutes before first delta).
+            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
             task = asyncio.create_task(run_pipeline())
             try:
                 while True:
