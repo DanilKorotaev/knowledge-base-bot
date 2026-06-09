@@ -19,6 +19,7 @@ from utils.message_helpers import send_formatted_message, format_file_changes_in
 from utils.constants import MessageRole, ChangeType
 from handlers.keyboards import get_active_session_keyboard, get_query_cancel_keyboard
 from utils.query_cancel_registry import register_cancel_request, unregister_cancel_request
+from utils.terminal_sanitize import strip_terminal_escape_sequences
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +330,7 @@ class QueryProcessingService:
                 await db.add_message(session_id, str(MessageRole.USER), query)
             
             # Сохранить ответ ассистента в сессию
-            await db.add_message(session_id, str(MessageRole.ASSISTANT), response)
+            await db.add_message(session_id, str(MessageRole.ASSISTANT), strip_terminal_escape_sequences(response))
             
             # Обработать изменения файлов
             await self.handle_file_changes(session_id, changes, message)
@@ -541,7 +542,11 @@ class QueryProcessingService:
 
             if save_user_message:
                 await db.add_message(session_id, str(MessageRole.USER), query)
-            await db.add_message(session_id, str(MessageRole.ASSISTANT), response)
+            await db.add_message(
+                session_id,
+                str(MessageRole.ASSISTANT),
+                strip_terminal_escape_sequences(response),
+            )
 
             await self.handle_file_changes_for_api(session_id, changes)
 

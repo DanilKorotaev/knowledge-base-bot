@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from config import config
+from utils.terminal_sanitize import strip_terminal_escape_sequences
 
 logger = logging.getLogger(__name__)
 
@@ -841,7 +842,7 @@ class CursorCLIService:
                 return CURSOR_USER_PROCESS_FAILED, []
             
             # Получить ответ
-            response = stdout_text.strip()
+            response = strip_terminal_escape_sequences(stdout_text.strip())
             
             # Если ответ пустой, использовать stderr как fallback
             if not response:
