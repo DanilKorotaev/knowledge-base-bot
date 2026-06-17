@@ -9,6 +9,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.revert_helpers import revert_file_change_or_raise
 from kb_app_api.timefmt import to_iso_z
+from services.nextcloud_service import NextCloudService
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -72,3 +73,56 @@ async def revert_file(
         raise APIError("validation_error", "file_id должен быть числом", detail=body.file_id)
 
     return await revert_file_change_or_raise(change_id, user["id"])
+
+
+class ShareLinkBody(BaseModel):
+    file_id: str = Field(..., description="Идентификатор записи изменения (как в GET /changes)")
+
+
+@router.post("/share-link")
+async def create_file_share_link(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    body: ShareLinkBody,
+) -> dict[str, Any]:
+    raw = body.file_id.strip()
+    if not raw:
+        raise APIError("validation_error", "Пустой file_id", detail="file_id")
+    try:
+        change_id = int(raw)
+    except ValueError:
+        raise APIError("validation_error", "file_id должен быть числом", detail=body.file_id)
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    change = await db.get_file_change(change_id)
+    if not change:
+        raise APIError("not_found", "Изменение не найдено", status_code=404)
+
+    session = await db.get_session(change["session_id"])
+    if not session or session["user_id"] != user["id"]:
+        raise APIError("forbidden", "Нет доступа к этому изменению", status_code=403)
+
+    remote_path = change["file_path"]
+    nextcloud = NextCloudService()
+    if not nextcloud.enabled:
+        raise APIError(
+            "nextcloud_unavailable",
+            "Nextcloud не настроен, ссылка на файл недоступна",
+            status_code=503,
+        )
+
+    url = await nextcloud.get_file_link(remote_path)
+    if not url:
+        raise APIError(
+            "share_unavailable",
+            "Не удалось создать публичную ссылку на текущую версию файла",
+            status_code=409,
+            detail=f"link_mode={nextcloud.link_mode}",
+        )
+
+    return {
+        "url": url,
+        "path": remote_path,
+        "change_id": str(change_id),
+    }
