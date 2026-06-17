@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, Response, UploadFile
@@ -64,6 +65,43 @@ async def _yield_sse_deltas(item: str):
             await asyncio.sleep(_SSE_PIECE_DELAY_SEC)
         else:
             await asyncio.sleep(0)
+
+
+async def _stream_assistant_sse(
+    *,
+    session_id: int,
+    queue: asyncio.Queue[str | None],
+    err_holder: list[BaseException | None],
+    run_pipeline: Callable[[], Awaitable[None]],
+) -> AsyncIterator[str]:
+    """
+    Stream assistant deltas to the client.
+
+    If the HTTP/SSE client disconnects (app backgrounded, chat closed), the pipeline
+    task keeps running so Cursor can finish and the reply is persisted for later GET.
+    """
+    yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
+    task = asyncio.create_task(run_pipeline())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            async for event in _yield_sse_deltas(item):
+                yield event
+        await task
+        ex = err_holder[0]
+        if ex:
+            msg = str(ex)
+            yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+    except asyncio.CancelledError:
+        if not task.done():
+            logger.info(
+                "SSE client disconnected (session_id=%s); query pipeline continues in background",
+                session_id,
+            )
+        raise
 
 _DEFAULT_ATTACH_PROMPT = (
     "Пользователь прикрепил файл. Проанализируй его в контексте базы знаний и ответь."
@@ -234,31 +272,16 @@ async def _run_compose_pipeline(
             finally:
                 await queue.put(None)
 
-        async def gen():
-            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
-            task = asyncio.create_task(run_pipeline())
-            try:
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        break
-                    async for event in _yield_sse_deltas(item):
-                        yield event
-                await task
-                ex = err_holder[0]
-                if ex:
-                    msg = str(ex)
-                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'done': True})}\n\n"
-            finally:
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+        return StreamingResponse(
+            _stream_assistant_sse(
+                session_id=sid,
+                queue=queue,
+                err_holder=err_holder,
+                run_pipeline=run_pipeline,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_STREAM_HEADERS,
+        )
 
     try:
         qps = QueryProcessingService()
@@ -359,33 +382,16 @@ async def post_message(
             finally:
                 await queue.put(None)
 
-        async def gen():
-            # Flush HTTP headers immediately so iOS/nginx don't treat the request as hung
-            # while Nextcloud sync + Cursor CLI start (can take minutes before first delta).
-            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
-            task = asyncio.create_task(run_pipeline())
-            try:
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        break
-                    async for event in _yield_sse_deltas(item):
-                        yield event
-                await task
-                ex = err_holder[0]
-                if ex:
-                    msg = str(ex)
-                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'done': True})}\n\n"
-            finally:
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+        return StreamingResponse(
+            _stream_assistant_sse(
+                session_id=sid,
+                queue=queue,
+                err_holder=err_holder,
+                run_pipeline=run_pipeline,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_STREAM_HEADERS,
+        )
 
     try:
         qps = QueryProcessingService()
@@ -542,33 +548,16 @@ async def post_voice_message(
             finally:
                 await queue.put(None)
 
-        async def gen():
-            # Flush HTTP headers immediately so iOS/nginx don't treat the request as hung
-            # while Nextcloud sync + Cursor CLI start (can take minutes before first delta).
-            yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
-            task = asyncio.create_task(run_pipeline())
-            try:
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        break
-                    async for event in _yield_sse_deltas(item):
-                        yield event
-                await task
-                ex = err_holder[0]
-                if ex:
-                    msg = str(ex)
-                    yield f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'done': True})}\n\n"
-            finally:
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
-        return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_STREAM_HEADERS)
+        return StreamingResponse(
+            _stream_assistant_sse(
+                session_id=sid,
+                queue=queue,
+                err_holder=err_holder,
+                run_pipeline=run_pipeline,
+            ),
+            media_type="text/event-stream",
+            headers=SSE_STREAM_HEADERS,
+        )
 
     try:
         qps = QueryProcessingService()
