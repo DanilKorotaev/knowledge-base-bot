@@ -136,6 +136,24 @@ class SQLiteDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_file_changes_created 
                 ON file_changes(created_at)
             """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_devices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    device_token TEXT NOT NULL,
+                    platform TEXT NOT NULL DEFAULT 'ios',
+                    apns_environment TEXT NOT NULL DEFAULT 'production',
+                    app_version TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (user_id, device_token)
+                )
+            """)
+
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
+                ON user_devices(user_id)
+            """)
             
             await db.commit()
     
@@ -756,6 +774,81 @@ class SQLiteDatabase(DatabaseInterface):
                     "is_allowed": bool(row[3]),
                     "is_admin": bool(row[4]),
                     "created_at": row[5]
+                }
+                for row in rows
+            ]
+
+    async def upsert_user_device(
+        self,
+        user_id: int,
+        device_token: str,
+        platform: str,
+        apns_environment: str,
+        app_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO user_devices
+                    (user_id, device_token, platform, apns_environment, app_version, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, device_token) DO UPDATE SET
+                    platform = excluded.platform,
+                    apns_environment = excluded.apns_environment,
+                    app_version = excluded.app_version,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, device_token, platform, apns_environment, app_version),
+            )
+            await db.commit()
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, device_token, platform, apns_environment, app_version, updated_at
+                FROM user_devices
+                WHERE user_id = ? AND device_token = ?
+                """,
+                (user_id, device_token),
+            )
+            row = await cursor.fetchone()
+            return {
+                "id": row[0],
+                "user_id": row[1],
+                "device_token": row[2],
+                "platform": row[3],
+                "apns_environment": row[4],
+                "app_version": row[5],
+                "updated_at": row[6],
+            }
+
+    async def delete_user_device(self, user_id: int, device_token: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "DELETE FROM user_devices WHERE user_id = ? AND device_token = ?",
+                (user_id, device_token),
+            )
+            await db.commit()
+
+    async def list_user_devices(self, user_id: int) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, device_token, platform, apns_environment, app_version, updated_at
+                FROM user_devices
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                """,
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "device_token": row[2],
+                    "platform": row[3],
+                    "apns_environment": row[4],
+                    "app_version": row[5],
+                    "updated_at": row[6],
                 }
                 for row in rows
             ]

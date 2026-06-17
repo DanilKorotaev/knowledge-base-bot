@@ -97,6 +97,17 @@ class Config:
     KB_APP_API_BYPASS_ACCESS_CHECK: bool = os.getenv(
         "KB_APP_API_BYPASS_ACCESS_CHECK", "false"
     ).lower() in ("true", "1", "yes")
+
+    # APNs (push о готовом ответе в чате KB App)
+    APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
+    APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "66C9VGAZR5")
+    APNS_AUTH_KEY_PATH: Optional[str] = os.getenv("APNS_AUTH_KEY_PATH")
+    APNS_TOPIC: str = os.getenv("APNS_TOPIC", "com.coredan.KnowledgeBaseApp")
+    APNS_USE_SANDBOX: bool = os.getenv("APNS_USE_SANDBOX", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     
     # Mini App
     MINIAPP_URL: Optional[str] = os.getenv("MINIAPP_URL")  # URL для Telegram Web App (HTTPS обязателен)

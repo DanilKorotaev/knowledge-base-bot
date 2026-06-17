@@ -161,6 +161,24 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_file_changes_created 
                 ON file_changes(created_at)
             """)
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_devices (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    device_token VARCHAR(512) NOT NULL,
+                    platform VARCHAR(20) NOT NULL DEFAULT 'ios',
+                    apns_environment VARCHAR(20) NOT NULL DEFAULT 'production',
+                    app_version VARCHAR(50),
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    UNIQUE (user_id, device_token)
+                )
+            """)
+
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
+                ON user_devices(user_id)
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
@@ -545,5 +563,56 @@ class PostgreSQLDatabase(DatabaseInterface):
                 WHERE is_allowed = TRUE
                 ORDER BY created_at DESC
             """)
+            return [dict(row) for row in rows]
+
+    async def upsert_user_device(
+        self,
+        user_id: int,
+        device_token: str,
+        platform: str,
+        apns_environment: str,
+        app_version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO user_devices
+                    (user_id, device_token, platform, apns_environment, app_version, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (user_id, device_token)
+                DO UPDATE SET
+                    platform = EXCLUDED.platform,
+                    apns_environment = EXCLUDED.apns_environment,
+                    app_version = EXCLUDED.app_version,
+                    updated_at = NOW()
+                RETURNING id, user_id, device_token, platform, apns_environment, app_version, updated_at
+                """,
+                user_id,
+                device_token,
+                platform,
+                apns_environment,
+                app_version,
+            )
+            return dict(row)
+
+    async def delete_user_device(self, user_id: int, device_token: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM user_devices WHERE user_id = $1 AND device_token = $2",
+                user_id,
+                device_token,
+            )
+
+    async def list_user_devices(self, user_id: int) -> List[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, user_id, device_token, platform, apns_environment, app_version, updated_at
+                FROM user_devices
+                WHERE user_id = $1
+                ORDER BY updated_at DESC
+                """,
+                user_id,
+            )
             return [dict(row) for row in rows]
 

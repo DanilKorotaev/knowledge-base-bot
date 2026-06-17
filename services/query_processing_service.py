@@ -466,7 +466,14 @@ class QueryProcessingService:
             reply = f"(Режим без базы знаний) {query}"
             if len(reply) > 10000:
                 reply = reply[:10000] + "…"
-            await db.add_message(session_id, str(MessageRole.ASSISTANT), reply)
+            assistant_msg = await db.add_message(session_id, str(MessageRole.ASSISTANT), reply)
+            from kb_app_api.push_dispatch import schedule_chat_reply_push
+
+            schedule_chat_reply_push(
+                session_id=session_id,
+                message_id=int(assistant_msg["id"]),
+                reply_text=reply,
+            )
             return reply, []
 
         request_id, cancel_event = register_cancel_request(telegram_user_id)
@@ -542,10 +549,18 @@ class QueryProcessingService:
 
             if save_user_message:
                 await db.add_message(session_id, str(MessageRole.USER), query)
-            await db.add_message(
+            assistant_msg = await db.add_message(
                 session_id,
                 str(MessageRole.ASSISTANT),
                 strip_terminal_escape_sequences(response),
+            )
+
+            from kb_app_api.push_dispatch import schedule_chat_reply_push
+
+            schedule_chat_reply_push(
+                session_id=session_id,
+                message_id=int(assistant_msg["id"]),
+                reply_text=strip_terminal_escape_sequences(response),
             )
 
             await self.handle_file_changes_for_api(session_id, changes)
