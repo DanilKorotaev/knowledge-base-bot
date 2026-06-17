@@ -26,6 +26,8 @@
 ### KB App API (iOS)
 
 - [x] [Compose message: text + multiple files + voice](tasks/completed/task-api-chat-composer-multipart.md) — completed 2026-06-09
+- [ ] [Фоновые query jobs (Cursor вне HTTP worker)](tasks/pending/task-api-background-query-jobs.md)
+- [ ] [Быстрый список сессий (message_count)](tasks/pending/task-api-sessions-list-performance.md)
 
 ### Улучшения UX
 
