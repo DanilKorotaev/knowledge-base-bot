@@ -26,4 +26,11 @@ export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
 export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 
 PORT="${KB_APP_API_PORT:-8091}"
-exec "${API_DIR}/.venv/bin/uvicorn" kb_app_api.main:app --host 0.0.0.0 --port "${PORT}"
+WORKERS="${KB_APP_API_WORKERS:-2}"
+
+UVICORN_ARGS=(kb_app_api.main:app --host 0.0.0.0 --port "${PORT}")
+if [[ "${WORKERS}" -gt 1 ]]; then
+  UVICORN_ARGS+=(--workers "${WORKERS}")
+fi
+
+exec "${API_DIR}/.venv/bin/uvicorn" "${UVICORN_ARGS[@]}"
