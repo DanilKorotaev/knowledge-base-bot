@@ -25,6 +25,27 @@ export CURSOR_CLI_PROXY="${CURSOR_CLI_PROXY:-$OPENAI_PROXY}"
 export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
 export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 
+# launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
+bootstrap_apns_auth_key() {
+  local secrets_dir="${API_DIR}/secrets"
+  local secrets_key="${secrets_dir}/AuthKey_8H282799Z5.p8"
+  local docs_key="${HOME}/Documents/AuthKey_8H282799Z5.p8"
+  if [[ -f "${secrets_key}" ]]; then
+    return 0
+  fi
+  if [[ ! -f "${docs_key}" ]]; then
+    return 0
+  fi
+  mkdir -p "${secrets_dir}"
+  if cp "${docs_key}" "${secrets_key}"; then
+    chmod 600 "${secrets_key}"
+    echo "APNs auth key copied to ${secrets_key}" >&2
+  else
+    echo "WARN: could not copy APNs key from ${docs_key}" >&2
+  fi
+}
+bootstrap_apns_auth_key
+
 PORT="${KB_APP_API_PORT:-8091}"
 WORKERS="${KB_APP_API_WORKERS:-2}"
 

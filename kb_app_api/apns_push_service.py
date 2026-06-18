@@ -65,7 +65,10 @@ def _make_jwt() -> str:
     key_path = Path(config.APNS_AUTH_KEY_PATH or "")
     if not key_path.is_file():
         raise ValueError(f"APNS auth key not found: {key_path}")
-    key = key_path.read_bytes()
+    try:
+        key = key_path.read_bytes()
+    except OSError as e:
+        raise ValueError(f"APNS auth key not readable: {key_path} ({e})") from e
     return jwt.encode(
         {"iss": config.APNS_TEAM_ID, "iat": int(time.time())},
         key,
@@ -110,7 +113,7 @@ async def send_chat_reply_to_devices(
     if not devices:
         return
     if not apns_configured():
-        logger.debug("APNs not configured — skip push for session %s", session_id)
+        logger.info("APNs not configured — skip push for session %s", session_id)
         return
 
     title = (session_title or f"Session {session_id}").strip()[:200]

@@ -467,9 +467,9 @@ class QueryProcessingService:
             if len(reply) > 10000:
                 reply = reply[:10000] + "…"
             assistant_msg = await db.add_message(session_id, str(MessageRole.ASSISTANT), reply)
-            from kb_app_api.push_dispatch import schedule_chat_reply_push
+            from kb_app_api.push_dispatch import deliver_chat_reply_push
 
-            schedule_chat_reply_push(
+            await deliver_chat_reply_push(
                 session_id=session_id,
                 message_id=int(assistant_msg["id"]),
                 reply_text=reply,
@@ -555,9 +555,9 @@ class QueryProcessingService:
                 strip_terminal_escape_sequences(response),
             )
 
-            from kb_app_api.push_dispatch import schedule_chat_reply_push
+            from kb_app_api.push_dispatch import deliver_chat_reply_push
 
-            schedule_chat_reply_push(
+            await deliver_chat_reply_push(
                 session_id=session_id,
                 message_id=int(assistant_msg["id"]),
                 reply_text=strip_terminal_escape_sequences(response),

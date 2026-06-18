@@ -39,6 +39,7 @@ ENV/
 *~
 
 # Project specific
+secrets/*.p8
 *.db
 *.sqlite
 *.sqlite3
