@@ -1,6 +1,6 @@
 # Cursor CLI: stream-json, прогресс tool calls и activity-based таймауты
 
-**Статус:** 🚧 В работе (фазы 1–2 готовы; фаза 4 Telegram — в коде)  
+**Статус:** ✅ Готово (фазы 1–2, 4; фаза 3 partial output — бэклог)  
 **Приоритет:** 🟡 Средний (UX + ложные таймауты на тяжёлых задачах)  
 **Категория:** KB App API / Cursor CLI / Telegram bot  
 **Связи:** iOS [task-ux-cursor-activity-streaming.md](../../../knowledge-base-app-ios/docs/tasks/pending/task-ux-cursor-activity-streaming.md), [task-ux-long-query-feedback.md](../completed/task-ux-long-query-feedback.md), [task-feature-streaming-responses.md](../completed/task-feature-streaming-responses.md), [Cursor CLI output format](https://cursor.com/docs/cli/reference/output-format)
