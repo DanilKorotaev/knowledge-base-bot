@@ -1,6 +1,6 @@
 # Cursor CLI: stream-json, прогресс tool calls и activity-based таймауты
 
-**Статус:** 🚧 В работе (фазы 1–2 на бэкенде)  
+**Статус:** 🚧 В работе (фазы 1–2 готовы; фаза 4 Telegram — в коде)  
 **Приоритет:** 🟡 Средний (UX + ложные таймауты на тяжёлых задачах)  
 **Категория:** KB App API / Cursor CLI / Telegram bot  
 **Связи:** iOS [task-ux-cursor-activity-streaming.md](../../../knowledge-base-app-ios/docs/tasks/pending/task-ux-cursor-activity-streaming.md), [task-ux-long-query-feedback.md](../completed/task-ux-long-query-feedback.md), [task-feature-streaming-responses.md](../completed/task-feature-streaming-responses.md), [Cursor CLI output format](https://cursor.com/docs/cli/reference/output-format)
@@ -61,7 +61,7 @@ cursor-agent -p --force --output-format stream-json ...
 - [x] **Интеграция в `cursor_cli_service.process_query`**
 - [x] **`run_simple_prompt`** — без изменений (`text` режим).
 - [x] **Тесты** (`services/tests/test_cursor_stream_parser.py`)
-- [ ] **`.env.example`** — добавить новые переменные (при доступе к файлу)
+- [x] **`.env.example`** — добавить новые переменные (при доступе к файлу)
 
 ### Критерии приёмки фазы 1
 
@@ -80,7 +80,7 @@ cursor-agent -p --force --output-format stream-json ...
 - [x] **`kb_app_api/routes/messages.py`**: SSE `{"activity":"tool","label":"…"}`
 - [x] **Контракт:** `KB_APP_API_CONTRACT.md` — поле `activity` / `label`
 - [x] **Тест:** `test_sse_disconnect` обновлён под новый формат очереди
-- [ ] **Тест:** mock `on_activity`, assert event в потоке (отдельный unit)
+- [x] **Тест:** mock `on_activity`, assert event в потоке (отдельный unit)
 
 ### Критерии приёмки фазы 2
 
@@ -116,15 +116,15 @@ Env: `CURSOR_CLI_STREAM_PARTIAL_OUTPUT=true`.
 
 ## Фаза 4 — Telegram bot UX (опционально)
 
-- [ ] В `query_processing_service` при stream-json обновлять статусное сообщение («⏳ …») текстом последней `activity` (с throttle, как `QUERY_PROGRESS_TIMER_INTERVAL`).
-- [ ] Не спамить edit_message чаще N с.
+- [x] В `query_processing_service` при stream-json обновлять статусное сообщение («⏳ …») текстом последней `activity` (с throttle, как `QUERY_PROGRESS_TIMER_INTERVAL`).
+- [x] Не спамить edit_message чаще N с.
 
 ---
 
 ## Деплой
 
-- [ ] `CURSOR_CLI_OUTPUT_FORMAT=stream-json` в `.env` на Mac mini после прохождения тестов.
-- [ ] Запись в `docs/DEPLOYMENT_SERVER.md`.
+- [x] `CURSOR_CLI_OUTPUT_FORMAT=stream-json` в `.env` на Mac mini после прохождения тестов.
+- [x] Запись в `docs/DEPLOYMENT_SERVER.md`.
 - [ ] Smoke: один лёгкий и один тяжёлый запрос на staging/mini.
 
 ## Риски

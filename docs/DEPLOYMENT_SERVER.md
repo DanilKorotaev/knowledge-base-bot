@@ -177,6 +177,9 @@ QUERY_PROGRESS_TIMER_INTERVAL=15
 # CURSOR_CLI_TIMEOUT=600
 # После первого чанка — пауза между порциями вывода (секунды).
 # CURSOR_CLI_IDLE_TIMEOUT=30
+# stdout: text (legacy) | stream-json (tool progress + activity-based timeouts; рекомендуется).
+# CURSOR_CLI_OUTPUT_FORMAT=stream-json
+# CURSOR_CLI_STREAM_PARTIAL_OUTPUT=false
 
 # ============================================
 # Транскрипция голосовых

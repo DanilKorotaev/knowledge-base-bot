@@ -47,6 +47,33 @@ def _format_query_elapsed(seconds: int) -> str:
     return f"{h} ч {m2} мин"
 
 
+def _make_throttled_activity_callback(
+    *,
+    edit_status: Callable[[str], Awaitable[None]],
+    throttle_sec: int,
+    session_suffix: str = "",
+) -> Callable[[str], Awaitable[None]]:
+    """Edit Telegram status with the latest Cursor tool label (rate-limited)."""
+    last_edit = 0.0
+
+    async def on_activity(label: str) -> None:
+        nonlocal last_edit
+        text = (label or "").strip()
+        if not text:
+            return
+        now = time.time()
+        if now - last_edit < throttle_sec:
+            return
+        last_edit = now
+        line = f"⏳ {text}{session_suffix}"
+        try:
+            await edit_status(line)
+        except Exception:
+            pass
+
+    return on_activity
+
+
 async def _run_query_status_timer(
     typing_message: Message,
     stop: asyncio.Event,
@@ -255,6 +282,15 @@ class QueryProcessingService:
                     await updater.on_chunk(chunk)
 
                 on_chunk_cb = wrapped_on_chunk
+
+            async def edit_typing_status(line: str) -> None:
+                await typing_message.edit_text(line, reply_markup=progress_keyboard)
+
+            on_activity_cb = _make_throttled_activity_callback(
+                edit_status=edit_typing_status,
+                throttle_sec=timer_interval,
+                session_suffix=session_suffix,
+            )
             
             # Обработать запрос через Cursor CLI
             response, changes = await cursor_service.process_query(
@@ -264,6 +300,7 @@ class QueryProcessingService:
                 attached_files=attached_files,
                 cursor_chat_id=cursor_chat_id,
                 on_chunk=on_chunk_cb,
+                on_activity=on_activity_cb,
                 cancel_event=cancel_event,
             )
             
@@ -298,6 +335,7 @@ class QueryProcessingService:
                     attached_files=attached_files,
                     cursor_chat_id=None,
                     on_chunk=on_chunk_cb,
+                    on_activity=on_activity_cb,
                     cancel_event=cancel_event,
                 )
             
