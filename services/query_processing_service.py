@@ -451,6 +451,7 @@ class QueryProcessingService:
         attached_files: Optional[List[Path]] = None,
         save_user_message: bool = True,
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработка запроса для KB App API без Telegram UI (тот же Cursor CLI и синк, что у бота).
@@ -526,6 +527,7 @@ class QueryProcessingService:
                 attached_files=attached_files,
                 cursor_chat_id=cursor_chat_id,
                 on_chunk=on_chunk_cb,
+                on_activity=on_activity,
                 cancel_event=cancel_event,
             )
 
@@ -540,6 +542,7 @@ class QueryProcessingService:
                     attached_files=attached_files,
                     cursor_chat_id=None,
                     on_chunk=on_chunk_fb,
+                    on_activity=on_activity,
                     cancel_event=cancel_event,
                 )
 

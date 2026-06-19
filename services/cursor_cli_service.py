@@ -12,6 +12,10 @@ import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 from config import config
+from services.cursor_stream_parser import (
+    StreamJsonAccumulator,
+    parse_ndjson_line,
+)
 from utils.terminal_sanitize import strip_terminal_escape_sequences
 
 logger = logging.getLogger(__name__)
@@ -21,7 +25,7 @@ CURSOR_QUERY_CANCELLED_MESSAGE = "⏹ Обработка запроса отме
 
 # Тексты для Telegram (без сырого stderr / traceback)
 CURSOR_USER_TIMEOUT_FIRST_CHUNK = (
-    "❌ Слишком долго нет ответа от ассистента (нет первого вывода в потоке).\n\n"
+    "❌ Слишком долго нет ответа от ассистента (нет активности в потоке).\n\n"
     "Попробуйте упростить запрос, повторить позже или проверьте сеть. "
     "Для тяжёлых задач на сервере можно увеличить CURSOR_CLI_TIMEOUT."
 )
@@ -88,9 +92,31 @@ class CursorCLIService:
 
     def _use_pty_for_stdout(self) -> bool:
         """macOS: pipe stdout is block-buffered; PTY gives line-ish streaming for on_chunk."""
+        if self._cursor_output_format() == "stream-json":
+            return False
         if sys.platform != "darwin":
             return False
         return os.getenv("CURSOR_CLI_USE_PTY", "true").lower() in ("true", "1", "yes")
+
+    def _cursor_output_format(self) -> str:
+        fmt = (config.CURSOR_CLI_OUTPUT_FORMAT or "text").strip().lower()
+        if fmt not in ("text", "stream-json"):
+            logger.warning("Неизвестный CURSOR_CLI_OUTPUT_FORMAT=%r, используем text", fmt)
+            return "text"
+        return fmt
+
+    def _stream_partial_output_enabled(self) -> bool:
+        return bool(config.CURSOR_CLI_STREAM_PARTIAL_OUTPUT)
+
+    def _append_output_format_flags(self, cmd: list[str]) -> None:
+        if self._cursor_output_format() == "stream-json":
+            cmd.extend(["--output-format", "stream-json"])
+            if self._stream_partial_output_enabled():
+                cmd.append("--stream-partial-output")
+            logger.info(
+                "Cursor CLI: output-format=stream-json (partial=%s)",
+                self._stream_partial_output_enabled(),
+            )
 
     async def _read_process_stdout_chunk(
         self,
@@ -484,6 +510,208 @@ class CursorCLIService:
                 stderr_chunks.append(chunk.decode("utf-8", errors="ignore"))
         except Exception as e:
             logger.debug(f"stderr drain: {e}")
+
+    async def _process_ndjson_line(
+        self,
+        line: str,
+        *,
+        accumulator: StreamJsonAccumulator,
+        on_chunk: Optional[Callable[[str], Awaitable[None]]],
+        on_activity: Optional[Callable[[str], Awaitable[None]]],
+    ) -> bool:
+        """Returns True if line produced a recognized stream-json event."""
+        event = parse_ndjson_line(line)
+        if event is None:
+            return False
+        chunk, activity = accumulator.consume(event)
+        if on_chunk and chunk:
+            try:
+                await on_chunk(chunk)
+            except Exception as e:
+                logger.debug(f"Ошибка в on_chunk callback: {e}")
+        if on_activity and activity:
+            try:
+                await on_activity(activity)
+            except Exception as e:
+                logger.debug(f"Ошибка в on_activity callback: {e}")
+        return True
+
+    async def _run_stdout_read_loop(
+        self,
+        *,
+        process: asyncio.subprocess.Process,
+        master_fd: int | None,
+        timeout: int,
+        idle_timeout: int,
+        cancel_event: Optional[asyncio.Event],
+        use_stream_json: bool,
+        stream_partial: bool,
+        on_chunk: Optional[Callable[[str], Awaitable[None]]],
+        on_activity: Optional[Callable[[str], Awaitable[None]]],
+        stderr_chunks: List[str],
+        process_start_time: float,
+    ) -> tuple[
+        List[str],
+        Optional[float],
+        Optional[float],
+        bool,
+        bool,
+        bool,
+        Optional[StreamJsonAccumulator],
+    ]:
+        """
+        Read stdout until EOF, idle, cancel, or activity timeout.
+
+        Returns:
+            stdout_chunks, first_activity_time, last_activity_time, stdout_eof,
+            timed_out_before_activity, user_cancelled, stream_accumulator
+        """
+        stdout_chunks: List[str] = []
+        first_activity_time: Optional[float] = None
+        last_activity_time: Optional[float] = None
+        stdout_eof = False
+        timed_out_before_activity = False
+        user_cancelled = False
+        stream_accumulator = (
+            StreamJsonAccumulator(stream_partial=stream_partial) if use_stream_json else None
+        )
+        ndjson_buffer = ""
+
+        stderr_task = asyncio.create_task(self._drain_stderr(process, stderr_chunks))
+
+        cancel_task = None
+        if cancel_event:
+            async def watch_cancel() -> None:
+                nonlocal user_cancelled
+                await cancel_event.wait()
+                user_cancelled = True
+                logger.info("Cursor CLI: запрошена отмена пользователем")
+                if process.returncode is None:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                    except (ProcessLookupError, asyncio.TimeoutError):
+                        pass
+
+            cancel_task = asyncio.create_task(watch_cancel())
+
+        try:
+            while True:
+                if first_activity_time:
+                    # stream-json: tool calls (e.g. swift test) may run minutes without new events
+                    read_timeout = timeout if use_stream_json else idle_timeout
+                else:
+                    read_timeout = timeout
+                try:
+                    chunk = await asyncio.wait_for(
+                        self._read_process_stdout_chunk(process, master_fd, 4096),
+                        timeout=read_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    if first_activity_time and stdout_chunks:
+                        idle_elapsed = time.time() - (last_activity_time or first_activity_time)
+                        logger.info(
+                            "cursor_cli: idle %.1f с после последней активности "
+                            "(CURSOR_CLI_IDLE_TIMEOUT=%s) — завершаем чтение",
+                            idle_elapsed,
+                            idle_timeout,
+                        )
+                        break
+                    timed_out_before_activity = True
+                    raise
+
+                if not chunk:
+                    stdout_eof = True
+                    break
+
+                decoded = chunk.decode("utf-8", errors="ignore")
+                stdout_chunks.append(decoded)
+                now = time.time()
+
+                if use_stream_json and stream_accumulator is not None:
+                    ndjson_buffer += decoded
+                    while "\n" in ndjson_buffer:
+                        line, ndjson_buffer = ndjson_buffer.split("\n", 1)
+                        if not line.strip():
+                            continue
+                        if await self._process_ndjson_line(
+                            line,
+                            accumulator=stream_accumulator,
+                            on_chunk=on_chunk,
+                            on_activity=on_activity,
+                        ):
+                            if first_activity_time is None:
+                                first_activity_time = now
+                                logger.info(
+                                    "cursor_cli: первое stream-json событие через %.1f с после запуска",
+                                    first_activity_time - process_start_time,
+                                )
+                            last_activity_time = now
+                else:
+                    if decoded.strip():
+                        if first_activity_time is None:
+                            first_activity_time = now
+                            logger.info(
+                                "cursor_cli: первый непустой чанк stdout через %.1f с после запуска",
+                                first_activity_time - process_start_time,
+                            )
+                        last_activity_time = now
+                        logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
+                        if on_chunk:
+                            try:
+                                await on_chunk(decoded)
+                            except Exception as e:
+                                logger.debug(f"Ошибка в on_chunk callback: {e}")
+
+            if use_stream_json and stream_accumulator is not None and ndjson_buffer.strip():
+                if await self._process_ndjson_line(
+                    ndjson_buffer,
+                    accumulator=stream_accumulator,
+                    on_chunk=on_chunk,
+                    on_activity=on_activity,
+                ):
+                    last_activity_time = time.time()
+                    if first_activity_time is None:
+                        first_activity_time = last_activity_time
+
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            if cancel_task:
+                cancel_task.cancel()
+                try:
+                    await cancel_task
+                except asyncio.CancelledError:
+                    pass
+            try:
+                await asyncio.wait_for(stderr_task, timeout=8.0)
+            except Exception:
+                if not stderr_task.done():
+                    stderr_task.cancel()
+
+        if user_cancelled:
+            return (
+                stdout_chunks,
+                first_activity_time,
+                last_activity_time,
+                stdout_eof,
+                timed_out_before_activity,
+                True,
+                stream_accumulator,
+            )
+
+        return (
+            stdout_chunks,
+            first_activity_time,
+            last_activity_time,
+            stdout_eof,
+            timed_out_before_activity,
+            False,
+            stream_accumulator,
+        )
     
     async def process_query(
         self,
@@ -494,6 +722,7 @@ class CursorCLIService:
         attached_files: Optional[List[Path]] = None,
         cursor_chat_id: Optional[str] = None,
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
         cancel_event: Optional[asyncio.Event] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
@@ -507,6 +736,7 @@ class CursorCLIService:
             attached_files: Список путей к прикрепленным файлам (фото, документы) (опционально)
             cursor_chat_id: ID чата Cursor CLI для --resume (опционально)
             on_chunk: Async callback для стриминга чанков stdout (опционально)
+            on_activity: Async callback для прогресса stream-json (tool_call и т.д.)
             cancel_event: при set() процесс cursor-agent принудительно завершается (отмена пользователем)
         
         Returns:
@@ -570,6 +800,8 @@ class CursorCLIService:
         additional_flags = os.getenv("CURSOR_CLI_EXTRA_FLAGS", "").strip()
         if additional_flags:
             cmd.extend(additional_flags.split())
+
+        self._append_output_format_flags(cmd)
         
         # Добавить полный запрос
         cmd.append(full_query)
@@ -579,6 +811,8 @@ class CursorCLIService:
         
         # Таймаут из конфига (по умолчанию 10 минут)
         timeout = int(os.getenv("CURSOR_CLI_TIMEOUT", "600"))
+        use_stream_json = self._cursor_output_format() == "stream-json"
+        stream_partial = self._stream_partial_output_enabled()
         
         master_fd: int | None = None
         try:
@@ -609,108 +843,39 @@ class CursorCLIService:
                 os.close(slave_fd)
             
             logger.info(f"Процесс Cursor CLI запущен (PID: {process.pid})")
-            
-            # Собирать вывод
-            stdout_chunks = []
-            stderr_chunks = []
+
             process_start_time = time.time()
-            first_chunk_time = None
-            last_chunk_time = None
-            
-            # Параллельное чтение stderr (иначе заполнение pipe → deadlock)
-            stderr_task = asyncio.create_task(self._drain_stderr(process, stderr_chunks))
-            
-            user_cancelled = [False]
-            cancel_task = None
-            if cancel_event:
-                async def watch_cancel():
-                    await cancel_event.wait()
-                    user_cancelled[0] = True
-                    logger.info("Cursor CLI: запрошена отмена пользователем")
-                    if process.returncode is None:
-                        try:
-                            process.kill()
-                        except ProcessLookupError:
-                            pass
-                        try:
-                            await asyncio.wait_for(process.wait(), timeout=5.0)
-                        except (ProcessLookupError, asyncio.TimeoutError):
-                            pass
-                cancel_task = asyncio.create_task(watch_cancel())
-            
-            # Таймаут бездействия: если stdout замолчал после получения первых данных
             idle_timeout = int(os.getenv("CURSOR_CLI_IDLE_TIMEOUT", "30"))
-            
-            # === Фаза 1: Читаем stdout с обнаружением idle ===
-            stdout_eof = False
-            try:
-                try:
-                    while True:
-                        # До первого чанка: ждём до общего таймаута (AI может думать долго)
-                        # После первого чанка: ждём idle_timeout (ответ уже пошёл)
-                        read_timeout = idle_timeout if first_chunk_time else timeout
-                        try:
-                            chunk = await asyncio.wait_for(
-                                self._read_process_stdout_chunk(process, master_fd, 4096),
-                                timeout=read_timeout
-                            )
-                        except asyncio.TimeoutError:
-                            if first_chunk_time and stdout_chunks:
-                                idle_elapsed = time.time() - (last_chunk_time or first_chunk_time)
-                                logger.info(
-                                    "cursor_cli: idle %.1f с после последнего чанка stdout "
-                                    "(CURSOR_CLI_IDLE_TIMEOUT=%s) — завершаем чтение",
-                                    idle_elapsed,
-                                    idle_timeout,
-                                )
-                                break  # Idle timeout — переходим к завершению процесса
-                            else:
-                                # Полный таймаут — ни одного чанка не получили
-                                raise
-                        
-                        if not chunk:
-                            stdout_eof = True
-                            break  # EOF — процесс завершился сам
-                        
-                        decoded = chunk.decode('utf-8', errors='ignore')
-                        stdout_chunks.append(decoded)
-                        last_chunk_time = time.time()
-                        
-                        if first_chunk_time is None and decoded.strip():
-                            first_chunk_time = time.time()
-                            elapsed = first_chunk_time - process_start_time
-                            logger.info(
-                                "cursor_cli: первый непустой чанк stdout через %.1f с после запуска",
-                                elapsed,
-                            )
-                        if decoded.strip():
-                            logger.debug(f"Cursor CLI stdout: {decoded.strip()[:200]}")
-                        
-                        # Стриминг: передать чанк через callback
-                        if on_chunk and decoded.strip():
-                            try:
-                                await on_chunk(decoded)
-                            except Exception as e:
-                                logger.debug(f"Ошибка в on_chunk callback: {e}")
-                finally:
-                    if cancel_task:
-                        cancel_task.cancel()
-                        try:
-                            await cancel_task
-                        except asyncio.CancelledError:
-                            pass
-                
-                if user_cancelled[0]:
-                    try:
-                        await asyncio.wait_for(stderr_task, timeout=8.0)
-                    except Exception:
-                        pass
-                    return CURSOR_QUERY_CANCELLED_MESSAGE, []
-                        
-            except asyncio.TimeoutError:
-                # Полный таймаут — AI не ответил вообще (нет первого непустого чанка в stdout)
+            stderr_chunks: List[str] = []
+
+            (
+                stdout_chunks,
+                first_activity_time,
+                _last_activity_time,
+                stdout_eof,
+                timed_out_before_activity,
+                user_cancelled,
+                stream_accumulator,
+            ) = await self._run_stdout_read_loop(
+                process=process,
+                master_fd=master_fd,
+                timeout=timeout,
+                idle_timeout=idle_timeout,
+                cancel_event=cancel_event,
+                use_stream_json=use_stream_json,
+                stream_partial=stream_partial,
+                on_chunk=on_chunk,
+                on_activity=on_activity,
+                stderr_chunks=stderr_chunks,
+                process_start_time=process_start_time,
+            )
+
+            if user_cancelled:
+                return CURSOR_QUERY_CANCELLED_MESSAGE, []
+
+            if timed_out_before_activity:
                 logger.error(
-                    "cursor_cli: таймаут до первого вывода — %s с (CURSOR_CLI_TIMEOUT); "
+                    "cursor_cli: таймаут до первой активности — %s с (CURSOR_CLI_TIMEOUT); "
                     "завершаем процесс (PID=%s)",
                     timeout,
                     getattr(process, "pid", None),
@@ -720,20 +885,14 @@ class CursorCLIService:
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except (ProcessLookupError, asyncio.TimeoutError):
                     pass
-                
-                try:
-                    await asyncio.wait_for(stderr_task, timeout=8.0)
-                except Exception:
-                    if not stderr_task.done():
-                        stderr_task.cancel()
                 stderr_text = "".join(stderr_chunks)
                 if stderr_text:
                     logger.error(
-                        "cursor_cli: stderr (хвост, таймаут до первого вывода): %s",
+                        "cursor_cli: stderr (хвост, таймаут до активности): %s",
                         stderr_text[-2000:],
                     )
                 return CURSOR_USER_TIMEOUT_FIRST_CHUNK, []
-            
+
             # === Фаза 2: Завершаем процесс и дочитываем буфер ===
             process_killed_early = False
             
@@ -797,13 +956,6 @@ class CursorCLIService:
                 except (asyncio.TimeoutError, Exception) as e:
                     logger.debug(f"Cursor CLI: не удалось дочитать stdout: {e}")
             
-            # Дождаться завершения drain stderr
-            try:
-                await asyncio.wait_for(stderr_task, timeout=8.0)
-            except Exception:
-                if not stderr_task.done():
-                    stderr_task.cancel()
-            
             # === Фаза 3: Логирование и обработка результата ===
             returncode = process.returncode
             total_process_time = time.time() - process_start_time
@@ -819,20 +971,18 @@ class CursorCLIService:
             else:
                 logger.info(f"Cursor CLI процесс завершён за {total_process_time:.1f}с (код: {returncode})")
             
-            if first_chunk_time:
-                response_to_done = time.time() - first_chunk_time
-                logger.info(f"Cursor CLI: от первого ответа до готовности: {response_to_done:.1f}с")
+            if first_activity_time:
+                response_to_done = time.time() - first_activity_time
+                logger.info(f"Cursor CLI: от первой активности до готовности: {response_to_done:.1f}с")
             
-            # Собрать весь вывод
-            stdout_text = ''.join(stdout_chunks)
-            stderr_text = ''.join(stderr_chunks)
+            stdout_text = "".join(stdout_chunks)
+            stderr_text = "".join(stderr_chunks)
             
             if stdout_text:
                 logger.debug(f"Cursor CLI stdout ({len(stdout_text)} символов): {stdout_text[:1000]}")
             if stderr_text:
                 logger.info(f"Cursor CLI stderr: {stderr_text[:1000]}")
             
-            # Проверить код возврата (игнорируем если мы сами завершили процесс)
             if returncode != 0 and not process_killed_early and stdout_eof:
                 logger.error(
                     "cursor_cli: процесс завершился с кодом %s; stderr (хвост): %s",
@@ -841,10 +991,11 @@ class CursorCLIService:
                 )
                 return CURSOR_USER_PROCESS_FAILED, []
             
-            # Получить ответ
-            response = strip_terminal_escape_sequences(stdout_text.strip())
+            if stream_accumulator is not None:
+                response = strip_terminal_escape_sequences(stream_accumulator.final_response().strip())
+            else:
+                response = strip_terminal_escape_sequences(stdout_text.strip())
             
-            # Если ответ пустой, использовать stderr как fallback
             if not response:
                 response = stderr_text.strip()
                 if not response:

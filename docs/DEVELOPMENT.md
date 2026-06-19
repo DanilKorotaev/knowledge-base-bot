@@ -64,8 +64,10 @@ LOCAL_KB_PATH=/path/to/your/local/knowledge-base
 | Переменная (окружение) | По умолчанию | Смысл |
 |------------------------|--------------|--------|
 | `QUERY_PROGRESS_TIMER_INTERVAL` | `15` | Интервал в секундах между обновлениями текста статуса. |
-| `CURSOR_CLI_TIMEOUT` | `600` | Секунд **одного** ожидания вывода **до первого непустого чанка** в stdout. Это не «общий лимит на весь ответ»; для тяжёлых задач без вывода в поток оставляйте **600+** или задавайте явно. |
-| `CURSOR_CLI_IDLE_TIMEOUT` | `30` | После первого чанка — максимум секунд **тишины между чанками** stdout; затем чтение завершается и процесс корректно закрывается. |
+| `CURSOR_CLI_OUTPUT_FORMAT` | `stream-json` | `text` — только финальный текст; `stream-json` — NDJSON-события (tool_call, assistant, result). |
+| `CURSOR_CLI_STREAM_PARTIAL_OUTPUT` | `false` | С `--output-format stream-json`: посимвольные дельты assistant (см. [доку Cursor](https://cursor.com/docs/cli/reference/output-format)). |
+| `CURSOR_CLI_TIMEOUT` | `600` | Секунд ожидания **до первой активности** в stdout: в `text` — первый непустой чанк; в `stream-json` — любое событие (init, tool_call, assistant, result). |
+| `CURSOR_CLI_IDLE_TIMEOUT` | `30` | После первой активности в режиме **`text`** — максимум секунд тишины между чанками. В **`stream-json`** между событиями действует `CURSOR_CLI_TIMEOUT` (долгие shell-команды). |
 
 Не уменьшайте `CURSOR_CLI_TIMEOUT` «для всех» без причины — иначе выше риск оборвать долгое размышление модели без вывода.
 

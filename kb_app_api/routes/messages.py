@@ -39,6 +39,9 @@ SSE_STREAM_HEADERS = {
 _SSE_PIECE_MAX = int(os.getenv("STREAM_SSE_PIECE_CHARS", "48"))
 _SSE_PIECE_DELAY_SEC = float(os.getenv("STREAM_SSE_PIECE_DELAY_MS", "18")) / 1000.0
 
+# Queue items: ("delta", text) | ("activity", label)
+SSEQueueItem = tuple[str, str] | None
+
 
 def _iter_sse_delta_pieces(text: str, *, max_piece: int = _SSE_PIECE_MAX) -> list[str]:
     if not text:
@@ -67,10 +70,15 @@ async def _yield_sse_deltas(item: str):
             await asyncio.sleep(0)
 
 
+async def _yield_sse_activity(label: str):
+    payload = json.dumps({"activity": "tool", "label": label}, ensure_ascii=False)
+    yield f"data: {payload}\n\n"
+
+
 async def _stream_assistant_sse(
     *,
     session_id: int,
-    queue: asyncio.Queue[str | None],
+    queue: asyncio.Queue[SSEQueueItem],
     err_holder: list[BaseException | None],
     run_pipeline: Callable[[], Awaitable[None]],
 ) -> AsyncIterator[str]:
@@ -87,8 +95,13 @@ async def _stream_assistant_sse(
             item = await queue.get()
             if item is None:
                 break
-            async for event in _yield_sse_deltas(item):
-                yield event
+            kind, payload = item
+            if kind == "activity" and payload:
+                async for event in _yield_sse_activity(payload):
+                    yield event
+            elif kind == "delta" and payload:
+                async for event in _yield_sse_deltas(payload):
+                    yield event
         await task
         ex = err_holder[0]
         if ex:
@@ -249,11 +262,14 @@ async def _run_compose_pipeline(
     wants_sse: bool,
 ) -> Response:
     if wants_sse:
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
         err_holder: list[BaseException | None] = [None]
 
         async def on_chunk(chunk: str) -> None:
-            await queue.put(chunk)
+            await queue.put(("delta", chunk))
+
+        async def on_activity(label: str) -> None:
+            await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
             try:
@@ -266,6 +282,7 @@ async def _run_compose_pipeline(
                     attached_files=attached_files or None,
                     save_user_message=False,
                     on_chunk=on_chunk,
+                    on_activity=on_activity,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -361,11 +378,14 @@ async def post_message(
     tid = int(user["telegram_id"])
 
     if wants_sse:
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
         err_holder: list[BaseException | None] = [None]
 
         async def on_chunk(chunk: str) -> None:
-            await queue.put(chunk)
+            await queue.put(("delta", chunk))
+
+        async def on_activity(label: str) -> None:
+            await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
             try:
@@ -376,6 +396,7 @@ async def post_message(
                     tid,
                     use_knowledge_base=body.use_knowledge_base,
                     on_chunk=on_chunk,
+                    on_activity=on_activity,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -525,11 +546,14 @@ async def post_voice_message(
         await attach_voice_to_last_user_message(sid, dest, safe, file_size, text)
 
     if wants_sse:
-        queue: asyncio.Queue[str | None] = asyncio.Queue()
+        queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
         err_holder: list[BaseException | None] = [None]
 
         async def on_chunk(chunk: str) -> None:
-            await queue.put(chunk)
+            await queue.put(("delta", chunk))
+
+        async def on_activity(label: str) -> None:
+            await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
             try:
@@ -540,6 +564,7 @@ async def post_voice_message(
                     tid,
                     use_knowledge_base=use_kb,
                     on_chunk=on_chunk,
+                    on_activity=on_activity,
                 )
                 await persist_voice()
             except BaseException as e:

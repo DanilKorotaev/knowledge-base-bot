@@ -80,6 +80,12 @@ class Config:
     STREAMING_MIN_BUFFER: int = int(os.getenv("STREAMING_MIN_BUFFER", "100"))
     # Обновление текста «Обрабатываю запрос...» с таймером (секунды)
     QUERY_PROGRESS_TIMER_INTERVAL: int = int(os.getenv("QUERY_PROGRESS_TIMER_INTERVAL", "15"))
+
+    # Cursor CLI stdout format: text | stream-json (NDJSON events + tool progress)
+    CURSOR_CLI_OUTPUT_FORMAT: str = os.getenv("CURSOR_CLI_OUTPUT_FORMAT", "stream-json")
+    CURSOR_CLI_STREAM_PARTIAL_OUTPUT: bool = os.getenv(
+        "CURSOR_CLI_STREAM_PARTIAL_OUTPUT", "false"
+    ).lower() in ("true", "1", "yes")
     
     # KB App API (iOS) — отдельный процесс `uvicorn kb_app_api.main:app`
     KB_APP_API_TOKEN: Optional[str] = os.getenv("KB_APP_API_TOKEN")
