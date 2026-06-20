@@ -58,11 +58,27 @@ def attachment_to_kb(
     return payload
 
 
+def changed_file_to_kb(row: dict[str, Any]) -> dict[str, Any]:
+    change_kind = str(row.get("change_type") or "").lower()
+    if change_kind not in ("created", "modified", "deleted"):
+        change_kind = "modified"
+    return {
+        "id": str(row["id"]),
+        "path": row.get("file_path") or "",
+        "change_kind": change_kind,
+        "before_text": row.get("old_content"),
+        "after_text": row.get("new_content"),
+        "created_at": to_iso_z(row.get("created_at")),
+    }
+
+
 def message_to_kb(
     session_id: int,
     m: dict[str, Any],
     attachments: list[dict[str, Any]] | None = None,
     transcription_by_att: dict[int, str] | None = None,
+    related_changed_files: list[dict[str, Any]] | None = None,
+    changed_files_source: str | None = None,
 ) -> dict[str, Any]:
     transcription_by_att = transcription_by_att or {}
     role = str(m.get("role") or "user")
@@ -83,6 +99,9 @@ def message_to_kb(
         )
         if voice_tr:
             payload["transcription"] = voice_tr
+    if related_changed_files:
+        payload["related_changed_files"] = [changed_file_to_kb(item) for item in related_changed_files]
+        payload["related_changed_files_source"] = changed_files_source or "reply"
     return payload
 
 
@@ -91,7 +110,11 @@ def messages_to_kb(
     messages: list[dict[str, Any]],
     attachments_by_msg: dict[int, list[dict[str, Any]]],
     transcription_by_att: dict[int, str],
+    related_changed_files_by_msg: dict[int, list[dict[str, Any]]] | None = None,
+    changed_files_source_by_msg: dict[int, str] | None = None,
 ) -> list[dict[str, Any]]:
+    related_changed_files_by_msg = related_changed_files_by_msg or {}
+    changed_files_source_by_msg = changed_files_source_by_msg or {}
     out: list[dict[str, Any]] = []
     for m in messages:
         msg_id = int(m["id"])
@@ -102,6 +125,8 @@ def messages_to_kb(
                 m,
                 attachments=atts if atts else None,
                 transcription_by_att=transcription_by_att,
+                related_changed_files=related_changed_files_by_msg.get(msg_id),
+                changed_files_source=changed_files_source_by_msg.get(msg_id),
             )
         )
     return out

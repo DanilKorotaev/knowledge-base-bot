@@ -3,7 +3,13 @@ from __future__ import annotations
 
 import unittest
 
-from kb_app_api.serializers import attachment_to_kb, infer_content_format, message_to_kb, messages_to_kb
+from kb_app_api.serializers import (
+    attachment_to_kb,
+    changed_file_to_kb,
+    infer_content_format,
+    message_to_kb,
+    messages_to_kb,
+)
 
 
 class TestMessageSerializers(unittest.TestCase):
@@ -49,6 +55,48 @@ class TestMessageSerializers(unittest.TestCase):
         ]
         out = messages_to_kb(2, msgs, {1: []}, {})
         self.assertEqual(out[0]["content_format"], "markdown")
+
+    def test_changed_file_to_kb(self) -> None:
+        row = {
+            "id": 7,
+            "file_path": "docs/guide.md",
+            "change_type": "created",
+            "old_content": None,
+            "new_content": "hello",
+            "created_at": "2026-06-01T12:00:00Z",
+        }
+        out = changed_file_to_kb(row)
+        self.assertEqual(out["id"], "7")
+        self.assertEqual(out["path"], "docs/guide.md")
+        self.assertEqual(out["change_kind"], "created")
+
+    def test_messages_to_kb_with_related_changed_files(self) -> None:
+        msgs = [
+            {"id": 101, "role": "assistant", "content": "Done", "created_at": "2026-06-01T12:00:00"},
+        ]
+        changed = {
+            101: [
+                {
+                    "id": 8,
+                    "file_path": "notes/x.md",
+                    "change_type": "modified",
+                    "old_content": "a",
+                    "new_content": "b",
+                    "created_at": "2026-06-01T11:59:59Z",
+                }
+            ]
+        }
+        out = messages_to_kb(
+            2,
+            msgs,
+            {101: []},
+            {},
+            related_changed_files_by_msg=changed,
+            changed_files_source_by_msg={101: "recent"},
+        )
+        self.assertEqual(out[0]["related_changed_files_source"], "recent")
+        self.assertEqual(out[0]["related_changed_files"][0]["id"], "8")
+        self.assertEqual(out[0]["related_changed_files"][0]["path"], "notes/x.md")
 
 
 if __name__ == "__main__":
