@@ -16,6 +16,7 @@ from services.nextcloud_service import NextCloudService
 from services.sync_service import SyncService
 from utils.db_helpers import get_db
 from utils.message_helpers import send_formatted_message, format_file_changes_info, StreamingMessageUpdater
+from utils.sync_path_filter import filter_trackable_changes
 from utils.constants import MessageRole, ChangeType
 from handlers.keyboards import get_active_session_keyboard, get_query_cancel_keyboard
 from utils.query_cancel_registry import register_cancel_request, unregister_cancel_request
@@ -411,6 +412,10 @@ class QueryProcessingService:
         Залогировать изменения в БД, Health hook, синхронизация с Nextcloud.
         Возвращает HTML-текст для уведомления или None, если changes пуст.
         """
+        if not changes:
+            return None
+
+        changes = filter_trackable_changes(changes, app_config.SYNC_EXCLUDE_PATTERNS)
         if not changes:
             return None
 

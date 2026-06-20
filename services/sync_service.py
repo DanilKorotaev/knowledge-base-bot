@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 
 from config import config
 from services.nextcloud_service import NextCloudService
+from utils.sync_path_filter import is_excluded_sync_path
 
 logger = logging.getLogger(__name__)
 
@@ -626,50 +627,8 @@ class SyncService:
         return files_set
     
     def _is_system_file(self, path: str) -> bool:
-        """
-        Проверить, является ли файл служебным (нужно ли его пропускать при синхронизации)
-        
-        Проверяет:
-        1. Dot-файлы/директории (начинаются с '.')
-        2. Известные служебные имена (__pycache__, node_modules и т.д.)
-        3. Паттерны из SYNC_EXCLUDE_PATTERNS
-        
-        Args:
-            path: Путь к файлу (относительный)
-        
-        Returns:
-            bool: True если файл служебный
-        """
-        # Нормализовать разделители
-        normalized = path.replace('\\', '/')
-        path_parts = Path(normalized).parts
-        
-        # 1. Проверить: есть ли в пути dot-директории или dot-файлы
-        for part in path_parts:
-            if part.startswith('.'):
-                return True
-        
-        # 2. Проверить известные служебные имена в любой части пути
-        system_names = {'__pycache__', 'node_modules', '.DS_Store'}
-        for part in path_parts:
-            if part in system_names:
-                return True
-        
-        # 3. Проверить паттерны из конфигурации
-        exclude_patterns = config.SYNC_EXCLUDE_PATTERNS
-        for pattern in exclude_patterns:
-            pattern_clean = pattern.rstrip('/').rstrip('\\')
-            # Проверить как часть пути (директория в пути)
-            if pattern_clean in path_parts:
-                return True
-            # Проверить как подстроку в нормализованном пути (для паттернов с /)
-            if '/' in pattern and pattern in normalized:
-                return True
-            # Проверить точное совпадение имени файла
-            if Path(normalized).name == pattern_clean:
-                return True
-        
-        return False
+        """True when path should be skipped during Nextcloud sync."""
+        return is_excluded_sync_path(path, config.SYNC_EXCLUDE_PATTERNS)
     
     async def sync_file(self, file_path: str, direction: str = "both") -> bool:
         """
@@ -713,7 +672,14 @@ class SyncService:
         """
         if not self.enabled or not changes:
             return False
-        
+
+        changes = [
+            change for change in changes
+            if not self._is_system_file(change.get("path", ""))
+        ]
+        if not changes:
+            return True
+
         try:
             # Разделить изменения по типу
             files_to_upload = [

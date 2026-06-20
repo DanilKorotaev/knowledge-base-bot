@@ -16,6 +16,7 @@ from services.cursor_stream_parser import (
     StreamJsonAccumulator,
     parse_ndjson_line,
 )
+from utils.sync_path_filter import filter_trackable_changes, is_excluded_sync_path
 from utils.terminal_sanitize import strip_terminal_escape_sequences
 
 logger = logging.getLogger(__name__)
@@ -1040,10 +1041,7 @@ class CursorCLIService:
                 if item.is_file():
                     # Пропустить служебные файлы и директории
                     rel_path = str(item.relative_to(self.kb_path))
-                    parts = Path(rel_path).parts
-                    if any(part.startswith('.') for part in parts):
-                        continue
-                    if any(part in ('__pycache__', 'node_modules') for part in parts):
+                    if is_excluded_sync_path(rel_path, config.SYNC_EXCLUDE_PATTERNS):
                         continue
                     
                     try:
@@ -1143,8 +1141,15 @@ class CursorCLIService:
                 
         except Exception as e:
             logger.warning(f"Ошибка при получении изменений файлов: {e}")
-        
-        return changes
+
+        filtered = filter_trackable_changes(changes, config.SYNC_EXCLUDE_PATTERNS)
+        if len(filtered) != len(changes):
+            logger.info(
+                "Отфильтровано служебных изменений: %d → %d",
+                len(changes),
+                len(filtered),
+            )
+        return filtered
     
     async def get_file_changes(self) -> List[Dict[str, Any]]:
         """Получить список изменённых файлов (сравнение с пустым состоянием)"""

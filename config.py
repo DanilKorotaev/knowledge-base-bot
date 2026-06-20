@@ -49,7 +49,10 @@ class Config:
     SYNC_EXCLUDE_PATTERNS: List[str] = [
         p.strip() for p in os.getenv(
             "SYNC_EXCLUDE_PATTERNS",
-            ".git/,.git\\,__pycache__/,__pycache__\\,node_modules/,node_modules\\,.DS_Store,.env,.venv/,venv/,.idea/,.vscode/"
+            ".git/,.git\\,__pycache__/,__pycache__\\,node_modules/,node_modules\\,"
+            ".DS_Store,.env,.venv/,venv/,.idea/,.vscode/,"
+            "fastlane/test_output/,fastlane/build_logs/,fastlane/screenshots/,"
+            "vendor/bundle/,DerivedData/,build/",
         ).split(",")
         if p.strip()
     ]
