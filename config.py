@@ -23,7 +23,7 @@ class Config:
     OPENAI_PROXY: Optional[str] = os.getenv("OPENAI_PROXY")  # SOCKS5/HTTP прокси для OpenAI API (например socks5://127.0.0.1:1080)
     # Прокси для cursor-agent (если не задан — используется OPENAI_PROXY): ALL_PROXY/HTTPS_PROXY в subprocess
     CURSOR_CLI_PROXY: Optional[str] = os.getenv("CURSOR_CLI_PROXY")
-    # Модель для Cursor CLI: "auto" = автовыбор, или конкретная модель (gpt-4o, claude-sonnet, etc.)
+    # Модель для Cursor CLI: "auto"/"default" → пул Auto+Composer; иначе --model как есть (API-квота)
     CURSOR_MODEL: str = os.getenv("CURSOR_MODEL", "auto")
     
     # NextCloud

@@ -37,6 +37,19 @@ CURSOR_USER_PROCESS_FAILED = (
 )
 
 
+def resolve_cursor_cli_model(model: Optional[str]) -> str:
+    """
+    Модель для флага cursor-agent --model.
+
+    В IDE «Auto» — отдельный пул (Auto + Composer). В CLI ключ модели — ``default``,
+    а не ``auto``; без --model CLI часто уходит в API-модели и жрёт API-квоту.
+    """
+    raw = (model or "").strip()
+    if not raw or raw.lower() == "auto":
+        return "default"
+    return raw
+
+
 class CursorCLIService:
     """Сервис для работы с Cursor CLI"""
     
@@ -311,13 +324,10 @@ class CursorCLIService:
             logger.error("API ключ не установлен для run_simple_prompt")
             return ""
         
-        model_to_use = model or config.TRANSCRIPTION_POLISH_MODEL
-        
+        model_to_use = resolve_cursor_cli_model(model or config.TRANSCRIPTION_POLISH_MODEL)
+
         cmd = ["cursor-agent", "-p", "--force"]
-        
-        # Добавить модель
-        if model_to_use and model_to_use.lower() != "auto":
-            cmd.extend(["--model", model_to_use])
+        cmd.extend(["--model", model_to_use])
         
         cmd.append(prompt)
         
@@ -788,13 +798,10 @@ class CursorCLIService:
         if use_resume:
             cmd.extend(["--resume", cursor_chat_id])
         
-        # Добавить модель, если указана конкретная (не auto)
-        # Если model = "auto" или пустая — Cursor CLI сам выберет модель
-        model_to_use = model or self.model
-        if model_to_use and model_to_use.lower() != "auto":
-            cmd.extend(["--model", model_to_use])
-        else:
-            logger.debug("Модель не указана или 'auto' — Cursor CLI выберет автоматически")
+        model_to_use = resolve_cursor_cli_model(model or self.model)
+        cmd.extend(["--model", model_to_use])
+        if (model or self.model or "").strip().lower() in ("", "auto"):
+            logger.debug("CURSOR_MODEL=auto → cursor-agent --model default (пул Auto+Composer)")
         
         # Дополнительные флаги для оптимизации (если доступны)
         # Можно добавить через переменные окружения для экспериментов
