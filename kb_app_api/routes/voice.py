@@ -11,6 +11,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.voice_errors import transcription_user_message
 from services.openai_service import OpenAIService
 from services.query_processing_service import QueryProcessingService
 from services.transcription_service import TranscriptionService
@@ -54,7 +55,7 @@ async def _transcribe_audio_bytes(data: bytes, filename: str | None) -> str:
         logger.exception("Whisper / полировка (KB App API): %s", e)
         raise APIError(
             "transcription_failed",
-            "Ошибка распознавания речи",
+            transcription_user_message(e),
             status_code=502,
             detail=str(e),
         ) from e
