@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "screen": {
+    "type": "vstack",
+    "id": "root",
+    "children": [
+      { "type": "text", "id": "title", "text": "Choose an action" },
+      { "type": "text", "id": "subtitle", "text": "Mock structured UI flow (MVP)." },
+      { "type": "button", "id": "btn_yes", "label": "Yes", "action_id": "confirm_yes" },
+      { "type": "button", "id": "btn_no", "label": "No", "action_id": "confirm_no" }
+    ]
+  }
+}

@@ -17,7 +17,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from kb_app_api.structured_ui.mock_flow import apply_mock_ui_event
-from kb_app_api.structured_ui.store import clear_all, get_for_message, set_for_message
+from kb_app_api.structured_ui.persistence import parse_structured_ui, structured_ui_by_message_ids
 from kb_app_api.structured_ui.validate import StructuredUIValidationError, validate_screen_document
 
 _db_file: str | None = None
@@ -94,6 +94,25 @@ class TestStructuredUIMockFlow(unittest.TestCase):
             apply_mock_ui_event(action_id="unknown", component_id="x")
 
 
+class TestStructuredUIPersistence(unittest.TestCase):
+    def test_structured_ui_by_message_ids_from_rows(self) -> None:
+        doc = apply_mock_ui_event(action_id="start", component_id="bootstrap").screen
+        by_msg = structured_ui_by_message_ids(
+            [
+                {"id": 1, "role": "user", "content": "hi"},
+                {"id": 2, "role": "assistant", "content": "ready", "structured_ui": doc},
+            ]
+        )
+        self.assertEqual(by_msg[2]["schema_version"], 1)
+
+    def test_parse_structured_ui_from_json_string(self) -> None:
+        doc = apply_mock_ui_event(action_id="start", component_id="bootstrap").screen
+        import json
+
+        parsed = parse_structured_ui(json.dumps(doc, ensure_ascii=False))
+        self.assertEqual(parsed, doc)
+
+
 @unittest.skipUnless(TestClient is not None, "Нужен fastapi (requirements.txt бота)")
 class TestStructuredUIEventsHTTP(unittest.TestCase):
     @classmethod
@@ -102,9 +121,6 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
 
         cls.client = TestClient(app)
         cls.headers = {"Authorization": "Bearer structured-ui-test-bearer"}
-
-    def setUp(self) -> None:
-        clear_all()
 
     def _create_session(self) -> str:
         response = self.client.post(
@@ -179,10 +195,19 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "validation_error")
 
-    def test_in_memory_store_roundtrip(self) -> None:
-        doc = apply_mock_ui_event(action_id="start", component_id="bootstrap").screen
-        set_for_message(42, doc)
-        self.assertEqual(get_for_message(42), doc)
+    def test_structured_ui_survives_get_messages(self) -> None:
+        sid = self._create_session()
+        self.client.post(
+            f"/api/sessions/{sid}/ui-events",
+            headers=self.headers,
+            json={"action_id": "start", "component_id": "bootstrap"},
+        )
+        listed = self.client.get(
+            f"/api/sessions/{sid}/messages",
+            headers=self.headers,
+        )
+        assistant = next(m for m in listed.json()["messages"] if m["role"] == "assistant")
+        self.assertEqual(assistant["structured_ui"]["screen"]["type"], "vstack")
 
 
 if __name__ == "__main__":

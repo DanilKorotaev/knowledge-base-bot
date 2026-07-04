@@ -16,7 +16,9 @@ E2E mock flow: server returns `structured_ui` JSON → iOS renders vstack/text/b
 - [x] `POST /api/sessions/{session_id}/ui-events` with mock FSM (`start` → yes/no → done)
 - [x] `structured_ui` on messages via enrichment + serializers
 - [x] Unit + HTTP tests (`kb_app_api/tests/test_structured_ui.py`)
-- [ ] OpenAPI / JSON Schema artifact (MVP-1 follow-up)
+- [x] JSON Schema + fixture (`kb_app_api/structured_ui/schema_v1.json`)
+- [x] Persist `structured_ui` on `messages` row (SQLite + PostgreSQL migration)
+- [ ] OpenAPI in bot repo (canonical copy lives in iOS `docs/openapi/`)
 - [ ] LLM integration (MVP-8+)
 
 ## Deploy

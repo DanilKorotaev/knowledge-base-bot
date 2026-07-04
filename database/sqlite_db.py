@@ -2,6 +2,7 @@
 Реализация работы с SQLite (для локальной разработки)
 """
 import aiosqlite
+import json
 from typing import Optional, List, Dict, Any
 from .base import DatabaseInterface
 from config import config
@@ -83,6 +84,11 @@ class SQLiteDatabase(DatabaseInterface):
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            cursor = await db.execute("PRAGMA table_info(messages)")
+            message_columns = {row[1] for row in await cursor.fetchall()}
+            if "structured_ui" not in message_columns:
+                await db.execute("ALTER TABLE messages ADD COLUMN structured_ui TEXT")
             
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS attachments (
@@ -378,13 +384,20 @@ class SQLiteDatabase(DatabaseInterface):
                 FROM messages WHERE id = ?
             """, (message_id,))
             row = await cursor.fetchone()
-            return {
-                "id": row[0],
-                "session_id": row[1],
-                "role": row[2],
-                "content": row[3],
-                "created_at": row[4]
-            }
+            return self._message_row_to_dict(row)
+    
+    async def set_message_structured_ui(
+        self,
+        message_id: int,
+        structured_ui: Dict[str, Any],
+    ) -> None:
+        payload = json.dumps(structured_ui, ensure_ascii=False, separators=(",", ":"))
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE messages SET structured_ui = ? WHERE id = ?",
+                (payload, message_id),
+            )
+            await db.commit()
     
     async def get_session_messages(
         self,
@@ -399,25 +412,22 @@ class SQLiteDatabase(DatabaseInterface):
             
             cursor = await db.execute(query, (session_id,))
             rows = await cursor.fetchall()
-            return [
-                {
-                    "id": row[0],
-                    "session_id": row[1],
-                    "role": row[2],
-                    "content": row[3],
-                    "created_at": row[4]
-                }
-                for row in rows
-            ]
+            return [self._message_row_to_dict(row) for row in rows]
 
     def _message_row_to_dict(self, row: tuple) -> Dict[str, Any]:
-        return {
+        payload: Dict[str, Any] = {
             "id": row[0],
             "session_id": row[1],
             "role": row[2],
             "content": row[3],
             "created_at": row[4],
         }
+        if len(row) > 5 and row[5]:
+            try:
+                payload["structured_ui"] = json.loads(row[5])
+            except (TypeError, json.JSONDecodeError):
+                payload["structured_ui"] = row[5]
+        return payload
 
     async def get_session_messages_window(
         self,

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kbapp.coredan.ru/schemas/structured-ui/v1.json",
+  "title": "StructuredUIScreenDocumentV1",
+  "type": "object",
+  "required": ["schema_version", "screen"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "screen": {
+      "$ref": "#/$defs/node"
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["vstack", "text", "button"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "action_id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } } },
+          "then": { "required": ["text"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "button" } } },
+          "then": { "required": ["label", "action_id"] }
+        }
+      ]
+    }
+  }
+}

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from kb_app_api.serializers import messages_to_kb
-from kb_app_api.structured_ui.store import screens_by_message_ids
+from kb_app_api.structured_ui.persistence import structured_ui_by_message_ids
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ async def enrich_session_messages(session_id: int, messages: list[dict[str, Any]
             transcription_by_att[att_id] = str(tr["text"])
 
     related_changed_files_by_msg, changed_files_source_by_msg = _related_changed_files_by_message(messages, file_changes)
-    structured_ui_by_msg = screens_by_message_ids([int(m["id"]) for m in messages])
+    structured_ui_by_msg = structured_ui_by_message_ids(messages)
     return messages_to_kb(
         session_id,
         messages,
