@@ -21,6 +21,14 @@ PRODUCTION_URL = "https://api.push.apple.com"
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"\s+")
+_FENCED_CODE_RE = re.compile(r"```[^\n]*\n(.*?)```|```([^`]+)```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_MD_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
+_LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+")
+_BLOCKQUOTE_PREFIX_RE = re.compile(r"^\s*>\s?")
 
 
 def apns_configured() -> bool:
@@ -33,10 +41,39 @@ def apns_configured() -> bool:
     )
 
 
+def strip_markdown_for_push(text: str) -> str:
+    """Normalize assistant markdown into plain text suitable for APNs alert body."""
+    plain = text or ""
+    plain = _HTML_TAG_RE.sub("", plain)
+    plain = _FENCED_CODE_RE.sub(lambda match: match.group(1) or match.group(2) or "", plain)
+    plain = _INLINE_CODE_RE.sub(r"\1", plain)
+    plain = _MD_IMAGE_RE.sub(r"\1", plain)
+    plain = _MD_LINK_RE.sub(r"\1", plain)
+
+    for _ in range(3):
+        updated = _MD_BOLD_RE.sub(lambda match: match.group(1) or match.group(2) or "", plain)
+        if updated == plain:
+            break
+        plain = updated
+
+    for _ in range(3):
+        updated = _MD_ITALIC_RE.sub(lambda match: match.group(1) or match.group(2) or "", plain)
+        if updated == plain:
+            break
+        plain = updated
+
+    normalized_lines: list[str] = []
+    for line in plain.splitlines():
+        line = _BLOCKQUOTE_PREFIX_RE.sub("", line)
+        line = _LIST_PREFIX_RE.sub("", line)
+        normalized_lines.append(line.strip())
+    plain = " ".join(part for part in normalized_lines if part)
+    return _WHITESPACE_RE.sub(" ", plain).strip()
+
+
 def preview_plain_text(text: str, limit: int = 100) -> str:
     """Превью ответа для alert body (plain text, без разметки)."""
-    plain = _HTML_TAG_RE.sub("", text or "")
-    plain = _WHITESPACE_RE.sub(" ", plain).strip()
+    plain = strip_markdown_for_push(text)
     if len(plain) <= limit:
         return plain or "Ответ готов"
     return plain[: limit - 1].rstrip() + "…"

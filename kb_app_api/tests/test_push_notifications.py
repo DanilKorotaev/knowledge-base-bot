@@ -49,6 +49,61 @@ class TestApnsPayload(unittest.TestCase):
         self.assertLessEqual(len(out), 100)
         self.assertTrue(out.endswith("…"))
 
+    def test_strip_markdown_removes_emphasis(self) -> None:
+        from kb_app_api.apns_push_service import strip_markdown_for_push
+
+        self.assertEqual(strip_markdown_for_push("**bold** and _italic_"), "bold and italic")
+
+    def test_strip_markdown_removes_code_markers(self) -> None:
+        from kb_app_api.apns_push_service import strip_markdown_for_push
+
+        self.assertEqual(strip_markdown_for_push("Use `foo()` here"), "Use foo() here")
+        self.assertEqual(
+            strip_markdown_for_push("```python\nprint('hi')\n```"),
+            "print('hi')",
+        )
+
+    def test_strip_markdown_link_uses_label(self) -> None:
+        from kb_app_api.apns_push_service import strip_markdown_for_push
+
+        self.assertEqual(
+            strip_markdown_for_push("See [docs](https://example.com/docs)"),
+            "See docs",
+        )
+
+    def test_strip_markdown_normalizes_lists_and_blockquotes(self) -> None:
+        from kb_app_api.apns_push_service import strip_markdown_for_push
+
+        self.assertEqual(
+            strip_markdown_for_push("- first\n* second\n1. third\n> quote"),
+            "first second third quote",
+        )
+
+    def test_strip_markdown_strips_html(self) -> None:
+        from kb_app_api.apns_push_service import strip_markdown_for_push
+
+        self.assertEqual(
+            strip_markdown_for_push("<p>**Hi**</p>"),
+            "Hi",
+        )
+
+    def test_preview_plain_text_avoids_markdown_artifacts(self) -> None:
+        from kb_app_api.apns_push_service import preview_plain_text
+
+        out = preview_plain_text("**Done:** updated `file.md` — see [link](https://x.test/a)")
+        self.assertNotIn("**", out)
+        self.assertNotIn("`", out)
+        self.assertIn("Done:", out)
+        self.assertIn("file.md", out)
+        self.assertIn("link", out)
+        self.assertNotIn("https://x.test/a", out)
+
+    def test_preview_plain_text_multiline_collapses(self) -> None:
+        from kb_app_api.apns_push_service import preview_plain_text
+
+        out = preview_plain_text("Line one\n\nLine two")
+        self.assertEqual(out, "Line one Line two")
+
     def test_build_chat_reply_payload(self) -> None:
         from kb_app_api.apns_push_service import build_chat_reply_payload
 
