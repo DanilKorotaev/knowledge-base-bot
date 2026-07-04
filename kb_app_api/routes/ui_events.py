@@ -10,7 +10,6 @@ from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from kb_app_api.structured_ui.mock_flow import apply_mock_ui_event
-from kb_app_api.structured_ui.store import set_for_message
 from kb_app_api.structured_ui.validate import StructuredUIValidationError, validate_document_size
 
 router = APIRouter(prefix="/sessions", tags=["structured-ui"])
@@ -64,7 +63,7 @@ async def post_ui_event(
         await db.add_message(sid, "user", result.user_content)
 
     assistant = await db.add_message(sid, "assistant", result.assistant_content)
-    set_for_message(int(assistant["id"]), result.screen)
+    await db.set_message_structured_ui(int(assistant["id"]), result.screen)
 
     messages = await enrich_session_messages(sid, await db.get_session_messages(sid))
     return {

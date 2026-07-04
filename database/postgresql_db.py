@@ -2,6 +2,7 @@
 Реализация работы с PostgreSQL
 """
 import asyncpg
+import json
 from typing import Optional, List, Dict, Any
 from .base import DatabaseInterface
 from config import config
@@ -108,6 +109,16 @@ class PostgreSQLDatabase(DatabaseInterface):
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+
+            message_column_check = await conn.fetch("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='messages' AND column_name = 'structured_ui'
+            """)
+            if not message_column_check:
+                await conn.execute("""
+                    ALTER TABLE messages ADD COLUMN structured_ui TEXT
+                """)
             
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS attachments (
@@ -312,7 +323,20 @@ class PostgreSQLDatabase(DatabaseInterface):
                 "UPDATE sessions SET updated_at = NOW() WHERE id = $1",
                 session_id,
             )
-            return dict(row)
+            return self._message_row_to_dict(row)
+    
+    async def set_message_structured_ui(
+        self,
+        message_id: int,
+        structured_ui: Dict[str, Any],
+    ) -> None:
+        payload = json.dumps(structured_ui, ensure_ascii=False, separators=(",", ":"))
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE messages SET structured_ui = $1 WHERE id = $2",
+                payload,
+                message_id,
+            )
     
     async def get_session_messages(
         self,
@@ -325,7 +349,17 @@ class PostgreSQLDatabase(DatabaseInterface):
             if limit:
                 query += f" LIMIT {limit}"
             rows = await conn.fetch(query, session_id)
-            return [dict(row) for row in rows]
+            return [self._message_row_to_dict(row) for row in rows]
+
+    def _message_row_to_dict(self, row: Any) -> Dict[str, Any]:
+        payload = dict(row)
+        raw = payload.get("structured_ui")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                payload["structured_ui"] = json.loads(raw)
+            except json.JSONDecodeError:
+                pass
+        return payload
 
     async def get_session_messages_window(
         self,
@@ -362,7 +396,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                     session_id,
                     limit,
                 )
-            messages = [dict(row) for row in reversed(rows)]
+            messages = [self._message_row_to_dict(row) for row in reversed(rows)]
 
             has_more = False
             if messages:
