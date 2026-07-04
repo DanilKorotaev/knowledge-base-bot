@@ -176,6 +176,17 @@ class TestKbAppApiSmoke(unittest.TestCase):
         )
         self.assertEqual(r.status_code, 422)
 
+    def test_create_session_without_knowledge_base(self) -> None:
+        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        create = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "Chat only", "use_knowledge_base": False},
+        )
+        self.assertEqual(create.status_code, 201)
+        session = create.json()["session"]
+        self.assertFalse(session["use_knowledge_base"])
+
     def test_delete_and_patch_session(self) -> None:
         headers = {"Authorization": "Bearer smoke-test-bearer"}
         create = self.client.post(

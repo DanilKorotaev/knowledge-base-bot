@@ -16,6 +16,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 class CreateSessionBody(BaseModel):
     title: str = Field(default="Новый чат", max_length=500)
+    use_knowledge_base: bool = True
 
 
 class PatchSessionBody(BaseModel):
@@ -100,9 +101,12 @@ async def create_session(
     from utils.db_helpers import get_db
 
     db = await get_db()
+    session_type = (
+        SessionType.QUERY_WITH_KB if body.use_knowledge_base else SessionType.EMPTY_CHAT
+    )
     session = await db.create_session(
         user_id=user["id"],
-        session_type=str(SessionType.QUERY_WITH_KB),
+        session_type=str(session_type),
         status=str(SessionStatus.ACTIVE),
         context_files=None,
         display_title=body.title.strip() or None,

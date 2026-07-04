@@ -138,9 +138,12 @@ def session_to_kb(session: dict[str, Any], messages: list[dict[str, Any]]) -> di
         last_ts = max(m["created_at"] for m in messages)
     else:
         last_ts = session.get("updated_at") or session.get("created_at")
+    session_type = str(session.get("session_type") or "")
+    use_knowledge_base = session_type != "empty_chat"
     return {
         "id": str(session["id"]),
         "title": title,
         "message_count": len(messages),
         "updated_at": to_iso_z(last_ts),
+        "use_knowledge_base": use_knowledge_base,
     }
