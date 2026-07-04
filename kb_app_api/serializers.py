@@ -87,6 +87,7 @@ def message_to_kb(
     transcription_by_att: dict[int, str] | None = None,
     related_changed_files: list[dict[str, Any]] | None = None,
     changed_files_source: str | None = None,
+    structured_ui: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     transcription_by_att = transcription_by_att or {}
     role = str(m.get("role") or "user")
@@ -110,6 +111,8 @@ def message_to_kb(
     if related_changed_files:
         payload["related_changed_files"] = [changed_file_to_kb(item) for item in related_changed_files]
         payload["related_changed_files_source"] = changed_files_source or "reply"
+    if structured_ui is not None:
+        payload["structured_ui"] = structured_ui
     return payload
 
 
@@ -120,9 +123,11 @@ def messages_to_kb(
     transcription_by_att: dict[int, str],
     related_changed_files_by_msg: dict[int, list[dict[str, Any]]] | None = None,
     changed_files_source_by_msg: dict[int, str] | None = None,
+    structured_ui_by_msg: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     related_changed_files_by_msg = related_changed_files_by_msg or {}
     changed_files_source_by_msg = changed_files_source_by_msg or {}
+    structured_ui_by_msg = structured_ui_by_msg or {}
     out: list[dict[str, Any]] = []
     for m in messages:
         msg_id = int(m["id"])
@@ -135,6 +140,7 @@ def messages_to_kb(
                 transcription_by_att=transcription_by_att,
                 related_changed_files=related_changed_files_by_msg.get(msg_id),
                 changed_files_source=changed_files_source_by_msg.get(msg_id),
+                structured_ui=structured_ui_by_msg.get(msg_id),
             )
         )
     return out
