@@ -9,7 +9,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
-from kb_app_api.structured_ui.mock_flow import apply_mock_ui_event
+from kb_app_api.structured_ui.agent import resolve_ui_event
 from kb_app_api.structured_ui.validate import StructuredUIValidationError, validate_document_size
 
 router = APIRouter(prefix="/sessions", tags=["structured-ui"])
@@ -45,8 +45,18 @@ async def post_ui_event(
     if body.metadata:
         validate_document_size({"metadata": body.metadata})
 
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    session_messages = await db.get_session_messages(sid)
+
     try:
-        result = apply_mock_ui_event(action_id=body.action_id, component_id=body.component_id)
+        result = await resolve_ui_event(
+            session_id=sid,
+            action_id=body.action_id,
+            component_id=body.component_id,
+            session_messages=session_messages,
+        )
     except KeyError as exc:
         raise APIError(
             "validation_error",
@@ -56,9 +66,6 @@ async def post_ui_event(
     except StructuredUIValidationError as exc:
         raise APIError(exc.code, exc.message, detail=exc.detail, status_code=422) from exc
 
-    from utils.db_helpers import get_db
-
-    db = await get_db()
     if result.user_content:
         await db.add_message(sid, "user", result.user_content)
 

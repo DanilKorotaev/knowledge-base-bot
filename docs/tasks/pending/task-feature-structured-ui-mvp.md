@@ -18,12 +18,16 @@ E2E mock flow: server returns `structured_ui` JSON → iOS renders vstack/text/b
 - [x] Unit + HTTP tests (`kb_app_api/tests/test_structured_ui.py`)
 - [x] JSON Schema + fixture (`kb_app_api/structured_ui/schema_v1.json`)
 - [x] Persist `structured_ui` on `messages` row (SQLite + PostgreSQL migration)
+- [x] LLM agent path for `ui-events` (`STRUCTURED_UI_AGENT_ENABLED`, mock fallback)
 - [ ] OpenAPI in bot repo (canonical copy lives in iOS `docs/openapi/`)
-- [ ] LLM integration (MVP-8+)
+- [ ] LLM on regular text messages (post-MVP)
 
 ## Deploy
 
 Roll out on `feature/structured-ui-mvp` separately from iOS. Rollback = revert branch / disable route.
+
+**Agent mode:** set `STRUCTURED_UI_AGENT_ENABLED=true` on the API server (requires `CURSOR_API_KEY`).  
+Keep `STRUCTURED_UI_AGENT_MOCK_FALLBACK=true` (default) so unknown/bad LLM output falls back to the mock FSM.
 
 ## Acceptance
 

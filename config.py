@@ -107,6 +107,17 @@ class Config:
         "KB_APP_API_BYPASS_ACCESS_CHECK", "false"
     ).lower() in ("true", "1", "yes")
 
+    # Structured UI (backend-driven JSON screens for iOS)
+    STRUCTURED_UI_AGENT_ENABLED: bool = os.getenv(
+        "STRUCTURED_UI_AGENT_ENABLED", "false"
+    ).lower() in ("true", "1", "yes")
+    STRUCTURED_UI_AGENT_MOCK_FALLBACK: bool = os.getenv(
+        "STRUCTURED_UI_AGENT_MOCK_FALLBACK", "true"
+    ).lower() in ("true", "1", "yes")
+    STRUCTURED_UI_AGENT_MODEL: str = os.getenv("STRUCTURED_UI_AGENT_MODEL", "")
+    STRUCTURED_UI_AGENT_TIMEOUT: int = int(os.getenv("STRUCTURED_UI_AGENT_TIMEOUT", "90"))
+    STRUCTURED_UI_AGENT_PROMPT_PATH: Optional[str] = os.getenv("STRUCTURED_UI_AGENT_PROMPT_PATH")
+
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
     APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "66C9VGAZR5")
