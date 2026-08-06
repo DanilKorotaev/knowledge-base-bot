@@ -47,7 +47,8 @@ bootstrap_apns_auth_key() {
 bootstrap_apns_auth_key
 
 PORT="${KB_APP_API_PORT:-8091}"
-WORKERS="${KB_APP_API_WORKERS:-2}"
+# Default 1: uvicorn --workers>1 on macOS LaunchAgent leaves :8091 in CLOSED and refuses connections.
+WORKERS="${KB_APP_API_WORKERS:-1}"
 
 UVICORN_ARGS=(kb_app_api.main:app --host 0.0.0.0 --port "${PORT}")
 if [[ "${WORKERS}" -gt 1 ]]; then
