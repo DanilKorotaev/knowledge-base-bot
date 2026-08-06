@@ -36,17 +36,25 @@ CURSOR_USER_PROCESS_FAILED = (
     "Повторите попытку; если повторяется — сообщите администратору."
 )
 
+CURSOR_USER_MODEL_UNAVAILABLE = (
+    "❌ Cursor CLI не смог выбрать модель (каталог моделей пуст или модель недоступна). "
+    "Повторите попытку через минуту; если повторяется — проверьте VPN/прокси на сервере "
+    "и что cursor-agent залогинен (agent status)."
+)
+
 
 def resolve_cursor_cli_model(model: Optional[str]) -> str:
     """
     Модель для флага cursor-agent --model.
 
-    В IDE «Auto» — отдельный пул (Auto + Composer). В CLI ключ модели — ``default``,
-    а не ``auto``; без --model CLI часто уходит в API-модели и жрёт API-квоту.
+    В IDE и в актуальном CLI пул Auto — ключ ``auto`` (``cursor-agent --list-models``:
+    ``auto - Auto (current, default)``). Исторически CLI принимал ``default``; с ~2026.07
+    ``--model default`` отвергается с пустым списком available models.
+    Пустой / ``auto`` / ``default`` → ``auto``. Без --model CLI может уйти в API-модели.
     """
     raw = (model or "").strip()
-    if not raw or raw.lower() == "auto":
-        return "default"
+    if not raw or raw.lower() in ("auto", "default"):
+        return "auto"
     return raw
 
 
@@ -800,8 +808,8 @@ class CursorCLIService:
         
         model_to_use = resolve_cursor_cli_model(model or self.model)
         cmd.extend(["--model", model_to_use])
-        if (model or self.model or "").strip().lower() in ("", "auto"):
-            logger.debug("CURSOR_MODEL=auto → cursor-agent --model default (пул Auto+Composer)")
+        if (model or self.model or "").strip().lower() in ("", "auto", "default"):
+            logger.debug("CURSOR_MODEL=auto → cursor-agent --model auto (пул Auto)")
         
         # Дополнительные флаги для оптимизации (если доступны)
         # Можно добавить через переменные окружения для экспериментов
@@ -997,6 +1005,12 @@ class CursorCLIService:
                     returncode,
                     (stderr_text[-2000:] if stderr_text else "(пусто)"),
                 )
+                stderr_l = (stderr_text or "").lower()
+                if "cannot use this model" in stderr_l or (
+                    "available models:" in stderr_l
+                    and stderr_l.rstrip().endswith("available models:")
+                ):
+                    return CURSOR_USER_MODEL_UNAVAILABLE, []
                 return CURSOR_USER_PROCESS_FAILED, []
             
             if stream_accumulator is not None:
