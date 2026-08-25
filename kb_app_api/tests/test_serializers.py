@@ -19,6 +19,10 @@ class TestMessageSerializers(unittest.TestCase):
     def test_infer_content_format_assistant_html(self) -> None:
         self.assertEqual(infer_content_format("assistant", "Hello <b>world</b>"), "html")
 
+    def test_infer_content_format_ignores_html_tags_in_backticks(self) -> None:
+        md = "## Сценарий\n**6.** append слился в один `<ul>`\n- item"
+        self.assertEqual(infer_content_format("assistant", md), "markdown")
+
     def test_infer_content_format_user_plain(self) -> None:
         self.assertEqual(infer_content_format("user", "**not md**"), "plain")
 

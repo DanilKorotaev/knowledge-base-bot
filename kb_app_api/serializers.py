@@ -7,6 +7,8 @@ from typing import Any
 from kb_app_api.timefmt import to_iso_z
 
 _HTML_TAG_RE = re.compile(r"<\s*(/?)\s*(b|strong|i|em|code|pre|ul|ol|li|a|p|br|blockquote)\b", re.I)
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+_FENCED_CODE_RE = re.compile(r"```[\s\S]*?```")
 
 _ATTACHMENT_MIME: dict[str, str] = {
     "photo": "image/jpeg",
@@ -18,10 +20,16 @@ _ATTACHMENT_MIME: dict[str, str] = {
 
 
 def infer_content_format(role: str, content: str) -> str:
-    """markdown for assistant (Cursor default), plain for user/system; html if content looks like HTML."""
-    if role == "assistant" and content and _HTML_TAG_RE.search(content):
-        return "html"
-    if role == "assistant":
+    """markdown for assistant (Cursor default), plain for user/system; html if content looks like HTML.
+
+    Tags inside markdown code spans/fences (e.g. `` `<ul>` ``) must not force HTML — that makes
+    iOS WebKit paint black Times text that is invisible on dark chat backgrounds.
+    """
+    if role == "assistant" and content:
+        without_code = _FENCED_CODE_RE.sub("", content)
+        without_code = _INLINE_CODE_RE.sub("", without_code)
+        if _HTML_TAG_RE.search(without_code):
+            return "html"
         return "markdown"
     return "plain"
 
