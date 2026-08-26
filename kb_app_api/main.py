@@ -28,6 +28,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 
+from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
 from kb_app_api.routes import attachments, auth, devices, files, health, messages, sessions, voice
 
@@ -62,6 +63,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(ClientMetadataMiddleware)
 
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
