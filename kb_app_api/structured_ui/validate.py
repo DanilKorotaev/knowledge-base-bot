@@ -14,9 +14,24 @@ MAX_OPTIONS = 32
 MAX_VALUES_KEYS = 40
 SUPPORTED_SCHEMA_VERSION = 1
 ALLOWED_NODE_TYPES = frozenset(
-    {"vstack", "text", "button", "checkbox", "radio_group", "select", "text_field"}
+    {
+        "vstack",
+        "text",
+        "button",
+        "checkbox",
+        "radio_group",
+        "select",
+        "text_field",
+        "image",
+        "link",
+        "file",
+        "divider",
+    }
 )
 FORM_FIELD_TYPES = frozenset({"checkbox", "radio_group", "select", "text_field"})
+MAX_URL_LENGTH = 2_000
+MAX_FILE_NAME_LENGTH = 260
+MAX_ALT_LENGTH = 500
 
 
 class StructuredUIValidationError(ValueError):
@@ -61,6 +76,53 @@ def _validate_options(options: Any) -> None:
                 detail="options",
             )
         seen.add(opt_id)
+
+
+def _validate_http_url(raw: Any, *, field: str) -> str:
+    url = _require_string(raw, field=field, max_len=MAX_URL_LENGTH)
+    lowered = url.lower()
+    if not (lowered.startswith("https://") or lowered.startswith("http://")):
+        raise StructuredUIValidationError(
+            "validation_error",
+            f"{field} must be http(s) URL",
+            detail=field,
+        )
+    rest = url.split("://", 1)[1]
+    host = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    if not host:
+        raise StructuredUIValidationError(
+            "validation_error",
+            f"{field} must include a host",
+            detail=field,
+        )
+    return url
+
+
+def _validate_download_path(raw: Any, *, field: str) -> str:
+    path = _require_string(raw, field=field, max_len=MAX_URL_LENGTH)
+    if ".." in path:
+        raise StructuredUIValidationError(
+            "validation_error",
+            f"{field} must not contain '..'",
+            detail=field,
+        )
+    lowered = path.lower()
+    if lowered.startswith("https://") or lowered.startswith("http://"):
+        _validate_http_url(path, field=field)
+        return path
+    if lowered.startswith("file://"):
+        return path
+    if path.startswith("/"):
+        return path
+    # Relative API path — reject other URI schemes (javascript:, data:, …)
+    scheme, sep, _ = path.partition(":")
+    if sep and scheme.isalpha():
+        raise StructuredUIValidationError(
+            "validation_error",
+            f"{field} has unsupported URI scheme",
+            detail=field,
+        )
+    return path
 
 
 def _validate_value_for_type(node_type: str, value: Any) -> None:
@@ -210,6 +272,71 @@ def validate_screen_document(document: dict[str, Any]) -> dict[str, Any]:
                         detail="max_length",
                     )
             _validate_value_for_type(node_type, node.get("value"))
+            return
+
+        if node_type == "divider":
+            return
+
+        if node_type == "link":
+            _validate_http_url(node.get("url"), field="url")
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            return
+
+        if node_type == "image":
+            url = node.get("url")
+            download_url = node.get("download_url")
+            if url is None and download_url is None:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "image requires url or download_url",
+                    detail="url",
+                )
+            if url is not None:
+                _validate_http_url(url, field="url")
+            if download_url is not None:
+                _validate_download_path(download_url, field="download_url")
+            alt = node.get("alt")
+            if alt is not None:
+                if not isinstance(alt, str) or len(alt) > MAX_ALT_LENGTH:
+                    raise StructuredUIValidationError(
+                        "validation_error",
+                        "invalid alt",
+                        detail="alt",
+                    )
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            content_mode = node.get("content_mode")
+            if content_mode is not None and content_mode not in {"fit", "fill"}:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "content_mode must be fit or fill",
+                    detail="content_mode",
+                )
+            return
+
+        if node_type == "file":
+            _validate_download_path(node.get("download_url"), field="download_url")
+            file_name = node.get("file_name")
+            if file_name is not None:
+                if not isinstance(file_name, str) or not file_name.strip() or len(file_name) > MAX_FILE_NAME_LENGTH:
+                    raise StructuredUIValidationError(
+                        "validation_error",
+                        "invalid file_name",
+                        detail="file_name",
+                    )
+            file_size = node.get("file_size")
+            if file_size is not None and (not isinstance(file_size, int) or file_size < 0):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "invalid file_size",
+                    detail="file_size",
+                )
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
             return
 
         children = node.get("children")

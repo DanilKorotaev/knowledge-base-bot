@@ -33,6 +33,10 @@ Return **only** one JSON object (no markdown fences, no commentary):
 | `radio_group` | `id`, `options[{id,label}]`; optional `label`, `value` string |
 | `select` | `id`, `options[{id,label}]`; optional `label`, `value` string or string[], `multi` bool |
 | `text_field` | `id`; optional `label`, `placeholder`, `max_length`, `value` string |
+| `image` | `id` + `url` (http/https) and/or `download_url` (API attachment path); optional `alt`, `content_mode` (`fit`/`fill`), `label` |
+| `link` | `id`, `url` (http/https); optional `label` |
+| `file` | `id`, `download_url`; optional `file_name`, `file_size`, `label` |
+| `divider` | `id` |
 
 Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 
@@ -40,13 +44,14 @@ Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 
 - **Immediate:** normal `button` without `submit` — each tap is a `ui-events` round-trip.
 - **Local draft → submit:** `checkbox` / `radio_group` / `select` / `text_field` change only on device until a `button` with `"submit": true` sends `values` (map of field id → bool/string/string[]).
+- **Media:** `image` / `link` / `file` are display/open only (no `ui-events` unless paired with a button). Prefer `download_url` from KB attachments for private files; public `https` only for remote images/links. Never use `javascript:` or arbitrary disk paths.
 
 Prefer forms when the user should pick several options before one commit.
 
 ## Rules
 
 - Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs.
-- Prefer 2–8 nodes per screen; clear labels; no HTML, URLs, or images in MVP.
+- Prefer 2–8 nodes per screen; clear labels; use `image`/`link`/`file` when they help the task (not decorative noise).
 - Match the user's language when possible (RU or EN from session context).
 - On `action_id: start` — build a screen for the **current conversation topic** (from session context): 1–3 actions and/or a short form. Titles and labels must reflect that topic.
 - On `action_id: dismiss` — turn Interactive UI off: short assistant line, **no buttons / form fields**, `user_content: null` (user cancelled without answering).
