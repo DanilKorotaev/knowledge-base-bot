@@ -73,6 +73,60 @@ class TestStructuredUIValidation(unittest.TestCase):
             validate_screen_document(doc)
         self.assertEqual(ctx.exception.code, "unsupported_schema_version")
 
+    def test_accepts_media_nodes(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {
+                "type": "vstack",
+                "id": "root",
+                "children": [
+                    {"type": "divider", "id": "d1"},
+                    {
+                        "type": "image",
+                        "id": "img1",
+                        "url": "https://example.com/a.png",
+                        "alt": "Sample",
+                        "content_mode": "fit",
+                    },
+                    {
+                        "type": "link",
+                        "id": "lnk1",
+                        "url": "https://example.com/docs",
+                        "label": "Docs",
+                    },
+                    {
+                        "type": "file",
+                        "id": "f1",
+                        "download_url": "/api/attachments/1/download",
+                        "file_name": "notes.pdf",
+                        "file_size": 10,
+                    },
+                ],
+            },
+        }
+        validated = validate_screen_document(doc)
+        self.assertEqual(len(validated["screen"]["children"]), 4)
+
+    def test_rejects_javascript_link(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {
+                "type": "link",
+                "id": "bad",
+                "url": "javascript:alert(1)",
+            },
+        }
+        with self.assertRaises(StructuredUIValidationError):
+            validate_screen_document(doc)
+
+    def test_rejects_image_without_source(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {"type": "image", "id": "img"},
+        }
+        with self.assertRaises(StructuredUIValidationError):
+            validate_screen_document(doc)
+
 
 class TestStructuredUIMockFlow(unittest.TestCase):
     def test_start_returns_welcome(self) -> None:

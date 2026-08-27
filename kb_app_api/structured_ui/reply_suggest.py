@@ -50,7 +50,7 @@ or
 - Do **not** attach a screen when the reply is already a complete answer with nothing to choose.
 - Do **not** attach when the reply is an error or empty.
 
-Schema v1 nodes only: vstack, text, button (+ optional submit), checkbox, radio_group, select, text_field.
+Schema v1 nodes only: vstack, text, button (+ optional submit), checkbox, radio_group, select, text_field, image (url and/or download_url), link (url), file (download_url), divider.
 """
 
 

@@ -30,7 +30,19 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["vstack", "text", "button", "checkbox", "radio_group", "select", "text_field"]
+          "enum": [
+            "vstack",
+            "text",
+            "button",
+            "checkbox",
+            "radio_group",
+            "select",
+            "text_field",
+            "image",
+            "link",
+            "file",
+            "divider"
+          ]
         },
         "id": { "type": "string", "minLength": 1, "maxLength": 128 },
         "text": { "type": "string", "maxLength": 4000 },
@@ -60,7 +72,13 @@
           "maxItems": 32
         },
         "multi": { "type": "boolean" },
-        "submit": { "type": "boolean" }
+        "submit": { "type": "boolean" },
+        "url": { "type": "string", "maxLength": 2000 },
+        "download_url": { "type": "string", "maxLength": 2000 },
+        "file_name": { "type": "string", "maxLength": 260 },
+        "file_size": { "type": "integer", "minimum": 0 },
+        "alt": { "type": "string", "maxLength": 500 },
+        "content_mode": { "type": "string", "enum": ["fit", "fill"] }
       },
       "allOf": [
         {
@@ -82,6 +100,14 @@
         {
           "if": { "properties": { "type": { "const": "select" } } },
           "then": { "required": ["options"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "link" } } },
+          "then": { "required": ["url"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "file" } } },
+          "then": { "required": ["download_url"] }
         }
       ]
     }
