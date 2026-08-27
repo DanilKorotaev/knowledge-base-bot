@@ -27,12 +27,13 @@ class ClientMetadataMiddleware(BaseHTTPMiddleware):
             path = request.url.path
             if path.startswith("/api/"):
                 logger.info(
-                    "client_meta method=%s path=%s version=%s build=%s platform=%s os=%s",
+                    "client_meta method=%s path=%s version=%s build=%s platform=%s os=%s log_session=%s",
                     request.method,
                     path,
                     meta.get("x-kb-app-version", "-"),
                     meta.get("x-kb-app-build", "-"),
                     meta.get("x-kb-app-platform", "-"),
                     meta.get("x-kb-app-os", "-"),
+                    meta.get("x-kb-app-log-session", "-"),
                 )
         return await call_next(request)

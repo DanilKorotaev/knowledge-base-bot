@@ -9,6 +9,7 @@ _HEADER_KEYS = (
     "x-kb-app-build",
     "x-kb-app-platform",
     "x-kb-app-os",
+    "x-kb-app-log-session",
 )
 
 

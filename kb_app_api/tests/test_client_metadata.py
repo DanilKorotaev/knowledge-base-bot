@@ -14,6 +14,7 @@ class TestClientMetadata(unittest.TestCase):
             "X-KB-App-Build": "42",
             "X-KB-App-Platform": "ios",
             "X-KB-App-OS": "18.5",
+            "X-KB-App-Log-Session": "abc-log-session",
             "User-Agent": "KnowledgeBaseApp/1.2.3 (ios 18.5; build 42)",
         }
         meta = client_meta_from_headers(headers)
@@ -21,6 +22,7 @@ class TestClientMetadata(unittest.TestCase):
         self.assertEqual(meta["x-kb-app-build"], "42")
         self.assertEqual(meta["x-kb-app-platform"], "ios")
         self.assertEqual(meta["x-kb-app-os"], "18.5")
+        self.assertEqual(meta["x-kb-app-log-session"], "abc-log-session")
         self.assertIn("KnowledgeBaseApp/1.2.3", meta["user-agent"])
 
     def test_missing_headers_ok(self) -> None:
