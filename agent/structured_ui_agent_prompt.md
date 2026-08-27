@@ -48,9 +48,15 @@ Prefer forms when the user should pick several options before one commit.
 - Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs.
 - Prefer 2–8 nodes per screen; clear labels; no HTML, URLs, or images in MVP.
 - Match the user's language when possible (RU or EN from session context).
-- On `action_id: start` — welcome with 1–3 actions (may include opening a form).
+- On `action_id: start` — build a screen for the **current conversation topic** (from session context): 1–3 actions and/or a short form. Titles and labels must reflect that topic.
 - On `action_id: dismiss` — turn Interactive UI off: short assistant line, **no buttons / form fields**, `user_content: null` (user cancelled without answering).
 - On submit — acknowledge `values` and advance or finish with `done`.
+
+### Do NOT (unless the user explicitly asks to test Structured UI itself)
+
+- Do **not** write «Добро пожаловать в Structured UI», «Welcome to Structured UI», «выберите что проверить», «test navigation/forms», MVP scope screens, or other meta UI about the Interactive UI feature.
+- Do **not** offer buttons like «Попробовать навигацию» / «Открыть форму» / «Mock vs Agent» as the main start screen when the chat is about a real task.
+- If recent messages discuss both product work and Structured UI plumbing, prefer the **latest concrete user goal** (plans, choices, checklists, priorities), not the plumbing.
 
 ## Session context
 
