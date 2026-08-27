@@ -84,9 +84,18 @@ class TestStructuredUIMockFlow(unittest.TestCase):
             for child in result.screen["screen"].get("children", [])
             if child.get("type") == "button"
         ]
-        self.assertEqual(len(buttons), 2)
+        self.assertEqual(len(buttons), 3)
+        self.assertTrue(any(b.get("action_id") == "open_form" for b in buttons))
 
-    def test_confirm_yes_stub_user_message(self) -> None:
+    def test_submit_form_uses_values(self) -> None:
+        result = apply_mock_ui_event(
+            action_id="submit_form",
+            component_id="btn_submit",
+            values={"notify": True, "theme": "dark", "note": "hi"},
+        )
+        self.assertEqual(result.user_content, "[UI] note=hi; notify=true; theme=dark")
+        self.assertEqual(result.screen["screen"]["children"][0]["text"], "Submitted")
+
         result = apply_mock_ui_event(action_id="confirm_yes", component_id="btn_yes")
         self.assertEqual(result.user_content, "[UI] Yes")
 
@@ -128,6 +137,9 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
         config.DB_TYPE = "sqlite"
         config.DB_FILE = os.environ["DB_FILE"]
         config.LOCAL_KB_PATH = Path(os.environ["LOCAL_KB_PATH"])
+        # Prod dotenv may enable agent — HTTP tests assert the deterministic mock FSM.
+        config.STRUCTURED_UI_AGENT_ENABLED = False
+        config.STRUCTURED_UI_AGENT_MOCK_FALLBACK = True
 
         # Reset cached DB so sqlite test DB is used instead of prod postgres from dotenv
         import utils.db_helpers as db_helpers

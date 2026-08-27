@@ -10,7 +10,11 @@ from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from kb_app_api.structured_ui.agent import resolve_ui_event
-from kb_app_api.structured_ui.validate import StructuredUIValidationError, validate_document_size
+from kb_app_api.structured_ui.validate import (
+    StructuredUIValidationError,
+    validate_document_size,
+    validate_event_values,
+)
 
 router = APIRouter(prefix="/sessions", tags=["structured-ui"])
 
@@ -22,6 +26,7 @@ class UIEventBody(BaseModel):
     component_id: str = Field(..., min_length=1, max_length=128)
     client_schema_version: int = Field(default=1, ge=1, le=99)
     metadata: dict[str, Any] | None = None
+    values: dict[str, Any] | None = None
 
 
 @router.post("/{session_id}/ui-events")
@@ -45,6 +50,11 @@ async def post_ui_event(
     if body.metadata:
         validate_document_size({"metadata": body.metadata})
 
+    try:
+        values = validate_event_values(body.values)
+    except StructuredUIValidationError as exc:
+        raise APIError(exc.code, exc.message, detail=exc.detail, status_code=422) from exc
+
     from utils.db_helpers import get_db
 
     db = await get_db()
@@ -56,6 +66,7 @@ async def post_ui_event(
             action_id=body.action_id,
             component_id=body.component_id,
             session_messages=session_messages,
+            values=values,
         )
     except KeyError as exc:
         raise APIError(

@@ -63,13 +63,18 @@ def _build_agent_prompt(
     action_id: str,
     component_id: str,
     session_messages: list[dict[str, Any]],
+    values: dict[str, Any] | None,
 ) -> str:
+    import json
+
     template = _load_agent_prompt_template()
     session_context = _format_session_context(session_messages)
+    values_json = json.dumps(values, ensure_ascii=False) if values else "null"
     return (
         template.replace("{action_id}", action_id)
         .replace("{component_id}", component_id)
         .replace("{session_context}", session_context)
+        .replace("{values_json}", values_json)
     )
 
 
@@ -78,6 +83,7 @@ async def _resolve_via_agent(
     action_id: str,
     component_id: str,
     session_messages: list[dict[str, Any]],
+    values: dict[str, Any] | None,
 ) -> MockUIEventResult:
     from services.cursor_cli_service import CursorCLIService
 
@@ -85,6 +91,7 @@ async def _resolve_via_agent(
         action_id=action_id,
         component_id=component_id,
         session_messages=session_messages,
+        values=values,
     )
     cursor = CursorCLIService()
     model = config.STRUCTURED_UI_AGENT_MODEL or config.TRANSCRIPTION_POLISH_MODEL
@@ -111,6 +118,7 @@ async def resolve_ui_event(
     action_id: str,
     component_id: str,
     session_messages: list[dict[str, Any]],
+    values: dict[str, Any] | None = None,
 ) -> MockUIEventResult:
     """
     Resolve a UI event to the next screen.
@@ -122,13 +130,14 @@ async def resolve_ui_event(
     component = component_id.strip()
 
     if not config.STRUCTURED_UI_AGENT_ENABLED:
-        return apply_mock_ui_event(action_id=action, component_id=component)
+        return apply_mock_ui_event(action_id=action, component_id=component, values=values)
 
     try:
         return await _resolve_via_agent(
             action_id=action,
             component_id=component,
             session_messages=session_messages,
+            values=values,
         )
     except (StructuredUIAgentParseError, StructuredUIValidationError, KeyError) as exc:
         logger.warning(
@@ -138,7 +147,7 @@ async def resolve_ui_event(
             exc,
         )
         if config.STRUCTURED_UI_AGENT_MOCK_FALLBACK:
-            return apply_mock_ui_event(action_id=action, component_id=component)
+            return apply_mock_ui_event(action_id=action, component_id=component, values=values)
         raise
     except Exception as exc:
         logger.error(
@@ -149,5 +158,5 @@ async def resolve_ui_event(
             exc_info=True,
         )
         if config.STRUCTURED_UI_AGENT_MOCK_FALLBACK:
-            return apply_mock_ui_event(action_id=action, component_id=component)
+            return apply_mock_ui_event(action_id=action, component_id=component, values=values)
         raise
