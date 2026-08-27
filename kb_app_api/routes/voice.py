@@ -5,8 +5,9 @@ import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
+from kb_app_api.client_metadata import structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
@@ -82,6 +83,7 @@ async def transcribe_voice(
 
 @router.post("/voice")
 async def voice_query(
+    request: Request,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     audio: UploadFile | None = File(default=None),
     session_id: str = Form(default=""),
@@ -100,6 +102,7 @@ async def voice_query(
 
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
     tid = int(user["telegram_id"])
+    allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     text_for_pipeline: str
     transcription_out: str
@@ -131,6 +134,7 @@ async def voice_query(
             sid,
             tid,
             use_knowledge_base=use_kb,
+            allow_structured_ui=allow_sui,
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e

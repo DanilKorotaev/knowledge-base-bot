@@ -11,12 +11,13 @@ from pathlib import Path
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Form, Header, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from config import config
 
+from kb_app_api.client_metadata import structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
@@ -260,6 +261,7 @@ async def _run_compose_pipeline(
     use_kb: bool,
     attached_files: list[Path],
     wants_sse: bool,
+    allow_structured_ui: bool = False,
 ) -> Response:
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -283,6 +285,7 @@ async def _run_compose_pipeline(
                     save_user_message=False,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
+                    allow_structured_ui=allow_structured_ui,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -309,6 +312,7 @@ async def _run_compose_pipeline(
             use_knowledge_base=use_kb,
             attached_files=attached_files or None,
             save_user_message=False,
+            allow_structured_ui=allow_structured_ui,
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -367,6 +371,7 @@ async def get_messages(
 @router.post("/{session_id}/messages")
 async def post_message(
     session_id: str,
+    request: Request,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     body: PostMessageBody,
     accept: Annotated[str | None, Header()] = None,
@@ -376,6 +381,7 @@ async def post_message(
 
     wants_sse = accept and "text/event-stream" in accept.lower()
     tid = int(user["telegram_id"])
+    allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -397,6 +403,7 @@ async def post_message(
                     use_knowledge_base=body.use_knowledge_base,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
+                    allow_structured_ui=allow_sui,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -421,6 +428,7 @@ async def post_message(
             sid,
             tid,
             use_knowledge_base=body.use_knowledge_base,
+            allow_structured_ui=allow_sui,
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -436,6 +444,7 @@ async def post_message(
 @router.post("/{session_id}/attachments")
 async def post_attachment(
     session_id: str,
+    request: Request,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     file: UploadFile = File(...),
     use_knowledge_base: str = Form(default="true"),
@@ -448,6 +457,7 @@ async def post_attachment(
     await require_session_for_user(sid, user["id"])
     tid = int(user["telegram_id"])
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
+    allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     data = await file.read()
     if not data:
@@ -471,6 +481,7 @@ async def post_attachment(
             tid,
             use_knowledge_base=use_kb,
             attached_files=[dest],
+            allow_structured_ui=allow_sui,
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -508,6 +519,7 @@ async def post_attachment(
 @router.post("/{session_id}/messages/voice")
 async def post_voice_message(
     session_id: str,
+    request: Request,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     audio: UploadFile = File(...),
     content: str = Form(...),
@@ -541,6 +553,7 @@ async def post_voice_message(
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
     tid = int(user["telegram_id"])
     wants_sse = accept and "text/event-stream" in accept.lower()
+    allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     async def persist_voice() -> None:
         await attach_voice_to_last_user_message(sid, dest, safe, file_size, text)
@@ -565,6 +578,7 @@ async def post_voice_message(
                     use_knowledge_base=use_kb,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
+                    allow_structured_ui=allow_sui,
                 )
                 await persist_voice()
             except BaseException as e:
@@ -591,6 +605,7 @@ async def post_voice_message(
             sid,
             tid,
             use_knowledge_base=use_kb,
+            allow_structured_ui=allow_sui,
         )
         await persist_voice()
     except RuntimeError as e:
@@ -611,6 +626,7 @@ async def post_voice_message(
 @router.post("/{session_id}/messages/compose")
 async def post_compose_message(
     session_id: str,
+    request: Request,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     content: str = Form(default=""),
     use_knowledge_base: str = Form(default="true"),
@@ -628,6 +644,7 @@ async def post_compose_message(
     tid = int(user["telegram_id"])
     use_kb = _parse_use_kb(use_knowledge_base)
     wants_sse = accept and "text/event-stream" in accept.lower()
+    allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     file_uploads = [item for item in files if item.filename]
     audio_uploads = [item for item in audio if item.filename]
@@ -672,6 +689,7 @@ async def post_compose_message(
             use_kb=use_kb,
             attached_files=file_paths,
             wants_sse=bool(wants_sse),
+            allow_structured_ui=allow_sui,
         )
     except APIError:
         raise
