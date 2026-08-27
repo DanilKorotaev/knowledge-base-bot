@@ -19,26 +19,37 @@ Return **only** one JSON object (no markdown fences, no commentary):
 }
 ```
 
-- `user_content`: set when the user tapped a button (echo as `[UI] <label>`); use `null` for `action_id: start` (bootstrap).
+- `user_content`: set when the user tapped a button (echo as `[UI] <label>` or a short form summary); use `null` for `action_id: start` (bootstrap).
 - `screen` must pass schema v1 (see below).
 
 ## Schema v1 nodes
 
 | type | required fields |
 |------|-----------------|
-| `vstack` | `id`, optional `children` (array of nodes) |
-| `text` | `id`, `text` (string, max 4000 chars) |
-| `button` | `id`, `label`, `action_id` (stable snake_case ids) |
+| `vstack` | `id`, optional `children` |
+| `text` | `id`, `text` |
+| `button` | `id`, `label`, `action_id`; optional `submit: true` |
+| `checkbox` | `id`, `label`; optional `value` bool |
+| `radio_group` | `id`, `options[{id,label}]`; optional `label`, `value` string |
+| `select` | `id`, `options[{id,label}]`; optional `label`, `value` string or string[], `multi` bool |
+| `text_field` | `id`; optional `label`, `placeholder`, `max_length`, `value` string |
 
 Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 
+## Interaction modes
+
+- **Immediate:** normal `button` without `submit` — each tap is a `ui-events` round-trip.
+- **Local draft → submit:** `checkbox` / `radio_group` / `select` / `text_field` change only on device until a `button` with `"submit": true` sends `values` (map of field id → bool/string/string[]).
+
+Prefer forms when the user should pick several options before one commit.
+
 ## Rules
 
-- Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs (e.g. `confirm_yes`, `open_settings`, `done`).
-- Prefer 2–6 nodes per screen; clear labels; no HTML, URLs, or images in MVP.
+- Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs.
+- Prefer 2–8 nodes per screen; clear labels; no HTML, URLs, or images in MVP.
 - Match the user's language when possible (RU or EN from session context).
-- On `action_id: start` — show a helpful welcome with 1–3 action buttons relevant to the session topic.
-- On button taps — advance the flow logically; end with a `done` button or a screen without buttons when finished.
+- On `action_id: start` — welcome with 1–3 actions (may include opening a form).
+- On submit — acknowledge `values` and advance or finish with `done`.
 
 ## Session context
 
@@ -48,5 +59,6 @@ Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 
 - `action_id`: {action_id}
 - `component_id`: {component_id}
+- `values`: {values_json}
 
 Generate the next screen JSON object now.

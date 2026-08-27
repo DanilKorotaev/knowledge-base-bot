@@ -15,38 +15,52 @@
     }
   },
   "$defs": {
+    "option": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
     "node": {
       "type": "object",
       "required": ["type", "id"],
-      "additionalProperties": false,
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["vstack", "text", "button"]
+          "enum": ["vstack", "text", "button", "checkbox", "radio_group", "select", "text_field"]
         },
-        "id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        },
-        "text": {
-          "type": "string",
-          "maxLength": 4000
-        },
-        "label": {
-          "type": "string",
-          "maxLength": 200
-        },
-        "action_id": {
-          "type": "string",
-          "maxLength": 128
-        },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "text": { "type": "string", "maxLength": 4000 },
+        "label": { "type": "string", "maxLength": 200 },
+        "action_id": { "type": "string", "maxLength": 128 },
         "children": {
           "type": "array",
-          "items": {
-            "$ref": "#/$defs/node"
-          }
-        }
+          "items": { "$ref": "#/$defs/node" }
+        },
+        "value": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "string", "maxLength": 4000 },
+            {
+              "type": "array",
+              "items": { "type": "string", "maxLength": 128 },
+              "maxItems": 32
+            }
+          ]
+        },
+        "placeholder": { "type": "string", "maxLength": 200 },
+        "max_length": { "type": "integer", "minimum": 1, "maximum": 4000 },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/option" },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "multi": { "type": "boolean" },
+        "submit": { "type": "boolean" }
       },
       "allOf": [
         {
@@ -56,6 +70,18 @@
         {
           "if": { "properties": { "type": { "const": "button" } } },
           "then": { "required": ["label", "action_id"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "checkbox" } } },
+          "then": { "required": ["label"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "radio_group" } } },
+          "then": { "required": ["options"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "select" } } },
+          "then": { "required": ["options"] }
         }
       ]
     }
