@@ -10,6 +10,7 @@ _HEADER_KEYS = (
     "x-kb-app-platform",
     "x-kb-app-os",
     "x-kb-app-log-session",
+    "x-kb-structured-ui",
 )
 
 
@@ -25,3 +26,10 @@ def client_meta_from_headers(headers: Mapping[str, str]) -> dict[str, str]:
     if ua:
         meta["user-agent"] = ua
     return meta
+
+
+def structured_ui_allowed_from_headers(headers: Mapping[str, str]) -> bool:
+    """Client preference: X-KB-Structured-UI=1 enables agent-attached panels (default off if missing)."""
+    lower = {str(key).lower(): str(value).strip() for key, value in headers.items() if value}
+    value = lower.get("x-kb-structured-ui", "").lower()
+    return value in ("1", "true", "yes", "on")

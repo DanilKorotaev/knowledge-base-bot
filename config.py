@@ -117,6 +117,14 @@ class Config:
     STRUCTURED_UI_AGENT_MODEL: str = os.getenv("STRUCTURED_UI_AGENT_MODEL", "")
     STRUCTURED_UI_AGENT_TIMEOUT: int = int(os.getenv("STRUCTURED_UI_AGENT_TIMEOUT", "90"))
     STRUCTURED_UI_AGENT_PROMPT_PATH: Optional[str] = os.getenv("STRUCTURED_UI_AGENT_PROMPT_PATH")
+    # Attach optional Interactive UI panels to normal chat replies (second lightweight prompt).
+    STRUCTURED_UI_IN_REPLIES_ENABLED: bool = os.getenv(
+        "STRUCTURED_UI_IN_REPLIES_ENABLED",
+        os.getenv("STRUCTURED_UI_AGENT_ENABLED", "false"),
+    ).lower() in ("true", "1", "yes")
+    STRUCTURED_UI_REPLY_SUGGEST_TIMEOUT: int = int(
+        os.getenv("STRUCTURED_UI_REPLY_SUGGEST_TIMEOUT", "45")
+    )
 
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")

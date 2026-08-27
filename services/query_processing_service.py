@@ -495,11 +495,13 @@ class QueryProcessingService:
         save_user_message: bool = True,
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
         on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
+        allow_structured_ui: bool = False,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработка запроса для KB App API без Telegram UI (тот же Cursor CLI и синк, что у бота).
 
         При use_knowledge_base=False — без Cursor и без начального sync: короткий ответ в чате.
+        При allow_structured_ui — после ответа может быть прикреплён structured_ui (если env включён).
         """
         db = await self._get_db()
         session_messages = await db.get_session_messages(session_id)
@@ -601,12 +603,31 @@ class QueryProcessingService:
                 strip_terminal_escape_sequences(response),
             )
 
+            clean_reply = strip_terminal_escape_sequences(response)
+            if allow_structured_ui:
+                try:
+                    from kb_app_api.structured_ui.reply_suggest import attach_structured_ui_if_suggested
+
+                    session_after = await db.get_session_messages(session_id)
+                    await attach_structured_ui_if_suggested(
+                        db=db,
+                        message_id=int(assistant_msg["id"]),
+                        assistant_reply=clean_reply,
+                        session_messages=session_after,
+                    )
+                except Exception as sui_exc:
+                    logger.warning(
+                        "Structured UI reply attach failed (session_id=%s): %s",
+                        session_id,
+                        sui_exc,
+                    )
+
             from kb_app_api.push_dispatch import deliver_chat_reply_push
 
             await deliver_chat_reply_push(
                 session_id=session_id,
                 message_id=int(assistant_msg["id"]),
-                reply_text=strip_terminal_escape_sequences(response),
+                reply_text=clean_reply,
             )
 
             await self.handle_file_changes_for_api(session_id, changes)
