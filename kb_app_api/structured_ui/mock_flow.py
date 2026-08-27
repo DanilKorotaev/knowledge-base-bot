@@ -164,6 +164,23 @@ def _finished_screen() -> dict[str, Any]:
     )
 
 
+def _dismissed_screen() -> dict[str, Any]:
+    return _document(
+        {
+            "type": "vstack",
+            "id": "root",
+            "children": [
+                {"type": "text", "id": "title", "text": "Interactive UI off"},
+                {
+                    "type": "text",
+                    "id": "body",
+                    "text": "Mode turned off. You can continue in the chat.",
+                },
+            ],
+        }
+    )
+
+
 def apply_mock_ui_event(
     *,
     action_id: str,
@@ -214,6 +231,13 @@ def apply_mock_ui_event(
             screen=_finished_screen(),
             user_content="[UI] Done",
             assistant_content="Flow finished.",
+        )
+
+    if action == "dismiss":
+        return MockUIEventResult(
+            screen=_dismissed_screen(),
+            user_content=None,
+            assistant_content="Interactive UI closed.",
         )
 
     raise KeyError(action)

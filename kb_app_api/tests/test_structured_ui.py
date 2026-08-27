@@ -96,6 +96,17 @@ class TestStructuredUIMockFlow(unittest.TestCase):
         self.assertEqual(result.user_content, "[UI] note=hi; notify=true; theme=dark")
         self.assertEqual(result.screen["screen"]["children"][0]["text"], "Submitted")
 
+    def test_dismiss_has_no_user_stub_and_no_buttons(self) -> None:
+        result = apply_mock_ui_event(action_id="dismiss", component_id="toolbar_dismiss")
+        self.assertIsNone(result.user_content)
+        self.assertEqual(result.assistant_content, "Interactive UI closed.")
+        buttons = [
+            child
+            for child in result.screen["screen"].get("children", [])
+            if child.get("type") == "button"
+        ]
+        self.assertEqual(buttons, [])
+
         result = apply_mock_ui_event(action_id="confirm_yes", component_id="btn_yes")
         self.assertEqual(result.user_content, "[UI] Yes")
 

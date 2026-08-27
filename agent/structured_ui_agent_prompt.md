@@ -49,6 +49,7 @@ Prefer forms when the user should pick several options before one commit.
 - Prefer 2–8 nodes per screen; clear labels; no HTML, URLs, or images in MVP.
 - Match the user's language when possible (RU or EN from session context).
 - On `action_id: start` — welcome with 1–3 actions (may include opening a form).
+- On `action_id: dismiss` — turn Interactive UI off: short assistant line, **no buttons / form fields**, `user_content: null` (user cancelled without answering).
 - On submit — acknowledge `values` and advance or finish with `done`.
 
 ## Session context
