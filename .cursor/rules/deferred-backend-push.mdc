@@ -1,0 +1,32 @@
+---
+description: Defer git push to knowledge-base-bot — CI redeploy kills the agent mid-chat
+alwaysApply: true
+---
+
+# Deferred push (Mac mini CI/CD)
+
+This repo (`knowledge-base-bot`) deploys on push. The Cursor agent often runs **inside** that same process on the Mac mini. A `git push` to `develop`/`main` can **kill the agent mid-reply**.
+
+## Required workflow
+
+1. Finish **all** code, tests, and the user-facing answer **first**.
+2. Only then: `git commit` + `git push` (last actions in the turn).
+3. After a backend push, **do not continue** with more tool calls or long follow-up work in the same turn — the session may die. Tell the user the push landed and that a **new chat** may be needed if the agent disconnects.
+
+## Do NOT
+
+- Push “early” to “kick CI” while still implementing features
+- Push backend and then keep editing / running long commands in the same turn
+- Assume the agent will survive redeploy
+
+## OK without delay
+
+- Local commits without push
+- Pushing **other** repos (e.g. `knowledge-base-app-ios`) — that does not redeploy this backend
+- Answering the user after push in **one short** final message (no more tools)
+
+## If both iOS and backend changed
+
+1. Push **iOS** first (safe).
+2. Finish the reply.
+3. Push **backend last**, then stop.
