@@ -31,9 +31,19 @@ def _welcome_screen() -> dict[str, Any]:
                 {"type": "button", "id": "btn_yes", "label": "Yes", "action_id": "confirm_yes"},
                 {"type": "button", "id": "btn_no", "label": "No", "action_id": "confirm_no"},
                 {"type": "button", "id": "btn_form", "label": "Open form", "action_id": "open_form"},
+                {"type": "button", "id": "btn_media", "label": "Media demo", "action_id": "open_media_demo"},
             ],
         }
     )
+
+
+def _media_demo_screen() -> dict[str, Any]:
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / "media_demo_v1.json"
+    doc = json.loads(fixture.read_text(encoding="utf-8"))
+    return validate_screen_document(doc)
 
 
 def _form_screen() -> dict[str, Any]:
@@ -216,6 +226,36 @@ def apply_mock_ui_event(
             screen=_form_screen(),
             user_content="[UI] Open form",
             assistant_content="Fill the form, then submit.",
+        )
+
+    if action == "open_media_demo":
+        return MockUIEventResult(
+            screen=_media_demo_screen(),
+            user_content="[UI] Media demo",
+            assistant_content="Демо: image, link, file, divider и кнопки.",
+        )
+
+    if action in {"prio_high", "prio_med", "prio_low"}:
+        labels = {"prio_high": "Высокий", "prio_med": "Средний", "prio_low": "Низкий"}
+        label = labels[action]
+        return MockUIEventResult(
+            screen=_document(
+                {
+                    "type": "vstack",
+                    "id": "root",
+                    "children": [
+                        {"type": "text", "id": "title", "text": f"Приоритет: {label}"},
+                        {
+                            "type": "text",
+                            "id": "body",
+                            "text": "Кнопки и медиа-ноды отработали. Tap Done.",
+                        },
+                        {"type": "button", "id": "btn_done", "label": "Done", "action_id": "done"},
+                    ],
+                }
+            ),
+            user_content=f"[UI] {label}",
+            assistant_content=f"Выбран приоритет: {label}.",
         )
 
     if action == "submit_form":
