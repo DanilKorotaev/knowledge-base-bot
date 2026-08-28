@@ -56,6 +56,7 @@ Prefer forms when the user should pick several options before one commit.
 - Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs.
 - Prefer 2–8 nodes per screen; clear labels; use `image`/`link`/`file` when they help the task (not decorative noise).
 - Match the user's language when possible (RU or EN from session context).
+- **`link` for docs:** when pointing to KB/bot files, use real **https** URLs only: public Nextcloud share (`nextcloud.coredan.ru/index.php/s/…`) or GitHub `blob/develop/…` path. Never guess attachment ids.
 - On `action_id: start` — build a screen for the **current conversation topic** (from session context): 1–3 actions and/or a short form. Titles and labels must reflect that topic.
 - On `action_id: dismiss` — turn Interactive UI off: short assistant line, **no buttons / form fields**, `user_content: null` (user cancelled without answering).
 - On submit — acknowledge `values` and advance or finish with `done`.
