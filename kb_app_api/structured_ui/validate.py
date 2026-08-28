@@ -33,9 +33,15 @@ ALLOWED_NODE_TYPES = frozenset(
         "progress",
         "date",
         "time",
+        "slider",
+        "stepper",
+        "confirm",
+        "markdown",
     }
 )
-FORM_FIELD_TYPES = frozenset({"checkbox", "radio_group", "select", "text_field", "date", "time"})
+FORM_FIELD_TYPES = frozenset(
+    {"checkbox", "radio_group", "select", "text_field", "date", "time", "slider", "stepper"}
+)
 CALLOUT_VARIANTS = frozenset({"info", "warning", "tip", "success"})
 DATE_VALUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TIME_VALUE_RE = re.compile(r"^\d{2}:\d{2}$")
@@ -135,6 +141,36 @@ def _validate_download_path(raw: Any, *, field: str) -> str:
     return path
 
 
+def _validate_min_max_step(node: dict[str, Any], *, node_type: str) -> None:
+    min_v = node.get("min")
+    max_v = node.get("max")
+    step_v = node.get("step")
+    if min_v is not None and not isinstance(min_v, (int, float)):
+        raise StructuredUIValidationError("validation_error", "invalid min", detail="min")
+    if max_v is not None and not isinstance(max_v, (int, float)):
+        raise StructuredUIValidationError("validation_error", "invalid max", detail="max")
+    if step_v is not None and (not isinstance(step_v, (int, float)) or step_v <= 0):
+        raise StructuredUIValidationError("validation_error", "step must be positive", detail="step")
+    min_num = float(min_v) if min_v is not None else 0.0
+    max_num = float(max_v) if max_v is not None else 100.0
+    if max_num <= min_num:
+        raise StructuredUIValidationError("validation_error", "max must be greater than min", detail="max")
+    value = node.get("value")
+    if value is not None:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise StructuredUIValidationError(
+                "validation_error",
+                f"{node_type} value must be number",
+                detail="value",
+            )
+        if float(value) < min_num or float(value) > max_num:
+            raise StructuredUIValidationError(
+                "validation_error",
+                f"{node_type} value out of range",
+                detail="value",
+            )
+
+
 def _validate_value_for_type(node_type: str, value: Any) -> None:
     if value is None:
         return
@@ -194,6 +230,14 @@ def _validate_value_for_type(node_type: str, value: Any) -> None:
             raise StructuredUIValidationError(
                 "validation_error",
                 "time value must be HH:mm (24h)",
+                detail="value",
+            )
+        return
+    if node_type in {"slider", "stepper"}:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise StructuredUIValidationError(
+                "validation_error",
+                f"{node_type} value must be number",
                 detail="value",
             )
         return
@@ -446,6 +490,40 @@ def validate_screen_document(document: dict[str, Any]) -> dict[str, Any]:
             _validate_value_for_type(node_type, node.get("value"))
             return
 
+        if node_type in {"slider", "stepper"}:
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            _validate_min_max_step(node, node_type=node_type)
+            _validate_value_for_type(node_type, node.get("value"))
+            return
+
+        if node_type == "confirm":
+            _require_string(node.get("label"), field="label", max_len=MAX_LABEL_LENGTH)
+            _require_string(node.get("action_id"), field="action_id", max_len=MAX_ID_LENGTH)
+            text = node.get("text")
+            if not isinstance(text, str):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "confirm node requires string text",
+                    detail="text",
+                )
+            if len(text) > MAX_TEXT_LENGTH:
+                raise StructuredUIValidationError("validation_error", "text is too long", detail="text")
+            return
+
+        if node_type == "markdown":
+            text = node.get("text")
+            if not isinstance(text, str):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "markdown node requires string text",
+                    detail="text",
+                )
+            if len(text) > MAX_TEXT_LENGTH:
+                raise StructuredUIValidationError("validation_error", "text is too long", detail="text")
+            return
+
         if node_type == "hstack":
             spacing = node.get("spacing")
             if spacing is not None and (not isinstance(spacing, int) or spacing < 0 or spacing > 32):
@@ -504,9 +582,12 @@ def validate_event_values(values: Any) -> dict[str, Any] | None:
                 items.append(item)
             cleaned[key] = items
             continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            cleaned[key] = value
+            continue
         raise StructuredUIValidationError(
             "validation_error",
-            "values entries must be bool, string, or string array",
+            "values entries must be bool, number, string, or string array",
             detail="values",
         )
 

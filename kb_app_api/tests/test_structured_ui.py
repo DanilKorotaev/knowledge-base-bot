@@ -73,6 +73,35 @@ class TestStructuredUIValidation(unittest.TestCase):
             validate_screen_document(doc)
         self.assertEqual(ctx.exception.code, "unsupported_schema_version")
 
+    def test_accepts_p3_nodes(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {
+                "type": "vstack",
+                "id": "root",
+                "children": [
+                    {"type": "markdown", "id": "md", "text": "**Hi**"},
+                    {"type": "slider", "id": "s", "min": 0, "max": 10, "value": 4},
+                    {"type": "stepper", "id": "n", "min": 1, "max": 5, "value": 2},
+                    {
+                        "type": "confirm",
+                        "id": "c",
+                        "label": "Delete",
+                        "action_id": "delete",
+                        "text": "Sure?",
+                    },
+                ],
+            },
+        }
+        validated = validate_screen_document(doc)
+        self.assertEqual(len(validated["screen"]["children"]), 4)
+
+    def test_event_values_accepts_numbers(self) -> None:
+        from kb_app_api.structured_ui.validate import validate_event_values
+
+        cleaned = validate_event_values({"volume": 7, "qty": 2.5})
+        self.assertEqual(cleaned, {"volume": 7, "qty": 2.5})
+
     def test_accepts_p2_layout_nodes(self) -> None:
         doc = {
             "schema_version": 1,

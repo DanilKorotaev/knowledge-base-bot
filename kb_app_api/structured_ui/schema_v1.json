@@ -47,7 +47,11 @@
             "spacer",
             "progress",
             "date",
-            "time"
+            "time",
+            "slider",
+            "stepper",
+            "confirm",
+            "markdown"
           ]
         },
         "id": { "type": "string", "minLength": 1, "maxLength": 128 },
@@ -67,7 +71,8 @@
               "items": { "type": "string", "maxLength": 128 },
               "maxItems": 32
             },
-            { "type": "number", "minimum": 0, "maximum": 1 }
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "number" }
           ]
         },
         "placeholder": { "type": "string", "maxLength": 200 },
@@ -90,7 +95,10 @@
         "height": { "type": "integer", "minimum": 4, "maximum": 64 },
         "current": { "type": "integer", "minimum": 0 },
         "total": { "type": "integer", "minimum": 1 },
-        "spacing": { "type": "integer", "minimum": 0, "maximum": 32 }
+        "spacing": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "step": { "type": "number", "exclusiveMinimum": 0 }
       },
       "allOf": [
         {
@@ -133,6 +141,14 @@
               { "required": ["current", "total"] }
             ]
           }
+        },
+        {
+          "if": { "properties": { "type": { "const": "markdown" } } },
+          "then": { "required": ["text"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "confirm" } } },
+          "then": { "required": ["label", "action_id", "text"] }
         }
       ]
     }
