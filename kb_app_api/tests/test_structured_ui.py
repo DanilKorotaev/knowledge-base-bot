@@ -214,8 +214,58 @@ class TestStructuredUIMockFlow(unittest.TestCase):
             for child in result.screen["screen"].get("children", [])
             if child.get("type") == "button"
         ]
-        self.assertEqual(len(buttons), 3)
+        self.assertEqual(len(buttons), 4)
         self.assertTrue(any(b.get("action_id") == "open_form" for b in buttons))
+        self.assertTrue(any(b.get("action_id") == "open_gallery" for b in buttons))
+
+    def test_gallery_screen_has_all_node_families(self) -> None:
+        result = apply_mock_ui_event(action_id="open_gallery", component_id="btn_gallery")
+
+        def collect_types(node: dict) -> list[str]:
+            types = [node.get("type", "")]
+            for child in node.get("children") or []:
+                types.extend(collect_types(child))
+            return types
+
+        types = collect_types(result.screen["screen"])
+        for expected in (
+            "markdown",
+            "callout",
+            "hstack",
+            "spacer",
+            "progress",
+            "image",
+            "link",
+            "file",
+            "checkbox",
+            "radio_group",
+            "select",
+            "text_field",
+            "date",
+            "time",
+            "slider",
+            "stepper",
+            "confirm",
+        ):
+            self.assertIn(expected, types, msg=f"missing node type {expected}")
+
+    def test_submit_gallery_uses_numeric_values(self) -> None:
+        result = apply_mock_ui_event(
+            action_id="submit_gallery",
+            component_id="btn_submit",
+            values={"volume": 7, "qty": 2, "theme": "dark", "note": "ok"},
+        )
+        self.assertIn("volume=7", result.user_content or "")
+        self.assertIn("qty=2", result.user_content or "")
+        self.assertIn("theme=dark", result.user_content or "")
+
+    def test_gallery_confirm_action(self) -> None:
+        result = apply_mock_ui_event(
+            action_id="gallery_confirm_delete",
+            component_id="btn_delete",
+        )
+        self.assertEqual(result.user_content, "[UI] Удалить черновик")
+        self.assertEqual(result.screen["screen"]["children"][0]["text"], "Confirm OK")
 
     def test_submit_form_uses_values(self) -> None:
         result = apply_mock_ui_event(

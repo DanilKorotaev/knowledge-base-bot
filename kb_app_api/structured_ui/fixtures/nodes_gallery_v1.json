@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "screen": {
+    "type": "vstack",
+    "id": "root",
+    "children": [
+      {
+        "type": "text",
+        "id": "title",
+        "text": "Structured UI — полный тест нод"
+      },
+      {
+        "type": "markdown",
+        "id": "md_intro",
+        "text": "**Markdown:** жирный, *курсив*, `код`.\n\n- первый пункт\n- второй пункт"
+      },
+      { "type": "divider", "id": "d_layout" },
+      {
+        "type": "text",
+        "id": "sec_layout",
+        "text": "Layout & feedback"
+      },
+      {
+        "type": "callout",
+        "id": "call_info",
+        "variant": "info",
+        "label": "Info",
+        "text": "Callout info — подсказка."
+      },
+      {
+        "type": "callout",
+        "id": "call_warn",
+        "variant": "warning",
+        "text": "Callout warning — проверь значения."
+      },
+      {
+        "type": "hstack",
+        "id": "row_tip_success",
+        "spacing": 8,
+        "children": [
+          {
+            "type": "callout",
+            "id": "call_tip",
+            "variant": "tip",
+            "text": "Tip в hstack"
+          },
+          {
+            "type": "callout",
+            "id": "call_ok",
+            "variant": "success",
+            "text": "Success"
+          }
+        ]
+      },
+      { "type": "spacer", "id": "sp1", "height": 12 },
+      {
+        "type": "progress",
+        "id": "prog_frac",
+        "label": "Progress (fraction)",
+        "value": 0.65
+      },
+      {
+        "type": "progress",
+        "id": "prog_steps",
+        "label": "Progress (steps)",
+        "current": 2,
+        "total": 5
+      },
+      { "type": "divider", "id": "d_media" },
+      {
+        "type": "text",
+        "id": "sec_media",
+        "text": "Media"
+      },
+      {
+        "type": "image",
+        "id": "img_demo",
+        "url": "https://placehold.co/360x200/png?text=KB+SUI",
+        "alt": "Тестовое изображение",
+        "content_mode": "fit"
+      },
+      {
+        "type": "link",
+        "id": "lnk_docs",
+        "label": "Документация Structured UI",
+        "url": "https://github.com/DanilKorotaev/knowledge-base-app-ios/blob/main/docs/KB_APP_API_CONTRACT.md"
+      },
+      {
+        "type": "file",
+        "id": "file_pdf",
+        "label": "Пример PDF",
+        "file_name": "dummy.pdf",
+        "file_size": 13264,
+        "download_url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+      },
+      { "type": "divider", "id": "d_form" },
+      {
+        "type": "text",
+        "id": "sec_form",
+        "text": "Form controls"
+      },
+      {
+        "type": "checkbox",
+        "id": "notify",
+        "label": "Уведомлять",
+        "value": true
+      },
+      {
+        "type": "radio_group",
+        "id": "theme",
+        "label": "Тема",
+        "value": "system",
+        "options": [
+          { "id": "system", "label": "System" },
+          { "id": "light", "label": "Light" },
+          { "id": "dark", "label": "Dark" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "priority",
+        "label": "Приоритет (single)",
+        "value": "med",
+        "options": [
+          { "id": "low", "label": "Низкий" },
+          { "id": "med", "label": "Средний" },
+          { "id": "high", "label": "Высокий" }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "topics",
+        "label": "Темы (multi)",
+        "multi": true,
+        "value": ["ios"],
+        "options": [
+          { "id": "ios", "label": "iOS" },
+          { "id": "bot", "label": "Bot" },
+          { "id": "infra", "label": "Infra" }
+        ]
+      },
+      {
+        "type": "text_field",
+        "id": "note",
+        "label": "Заметка",
+        "placeholder": "Необязательно",
+        "max_length": 120,
+        "value": ""
+      },
+      {
+        "type": "date",
+        "id": "due",
+        "label": "Дата",
+        "value": "2026-08-28"
+      },
+      {
+        "type": "time",
+        "id": "at",
+        "label": "Время",
+        "value": "09:30"
+      },
+      {
+        "type": "slider",
+        "id": "volume",
+        "label": "Громкость",
+        "min": 0,
+        "max": 10,
+        "step": 1,
+        "value": 7
+      },
+      {
+        "type": "stepper",
+        "id": "qty",
+        "label": "Количество",
+        "min": 1,
+        "max": 5,
+        "step": 1,
+        "value": 2
+      },
+      { "type": "divider", "id": "d_actions" },
+      {
+        "type": "confirm",
+        "id": "btn_delete",
+        "label": "Удалить черновик",
+        "action_id": "gallery_confirm_delete",
+        "text": "Действие необратимо. Продолжить?"
+      },
+      {
+        "type": "button",
+        "id": "btn_submit",
+        "label": "Отправить форму",
+        "action_id": "submit_gallery",
+        "submit": true
+      }
+    ]
+  }
+}

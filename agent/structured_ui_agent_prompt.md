@@ -29,7 +29,7 @@ Return **only** one JSON object (no markdown fences, no commentary):
 | `vstack` | `id`, optional `children` |
 | `hstack` | `id`, optional `children`, `spacing` (0–32) |
 | `text` | `id`, `text` |
-| `markdown` | `id`, `text` (subset: `**bold**`, `*italic*`, `-` bullets) |
+| `markdown` | `id`, `text` (subset: `**bold**`, `*italic*`, `-` bullets — **one list item per line**) |
 | `button` | `id`, `label`, `action_id`; optional `submit: true` |
 | `confirm` | `id`, `label`, `action_id`, `text` (alert message before destructive action) |
 | `checkbox` | `id`, `label`; optional `value` bool |
@@ -45,7 +45,7 @@ Return **only** one JSON object (no markdown fences, no commentary):
 | `file` | `id`, `download_url`; optional `file_name`, `file_size`, `label` |
 | `callout` | `id`, `text`; optional `label`, `variant` (`info`/`warning`/`tip`/`success`) |
 | `spacer` | `id`; optional `height` (4–64 pt) |
-| `progress` | `id` + `value` (0–1) **or** `current` + `total`; optional `label` |
+| `progress` | `id` + `value` (0–1) **or** `current` + `total`; optional `label` — **read-only status**, not a live upload bar |
 | `divider` | `id` |
 
 Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
@@ -62,7 +62,8 @@ Prefer forms when the user should pick several options before one commit.
 
 - Use stable `id` on every node; `action_id` on buttons must be unique snake_case verbs.
 - Prefer **2–8 nodes** per screen; **short button labels** (≤ 4 words). Put long explanations in `text`, `callout`, or `markdown` — never cram lists into button labels.
-- Use `callout` for tips/warnings; `progress` for wizard steps; `date`/`time` for reminders; `hstack` for 2–3 side-by-side actions; `confirm` for delete/cancel irreversible actions; `slider`/`stepper` for numeric input.
+- Use `callout` for tips/warnings; `progress` for wizard step status (static fraction or step count); `date`/`time` for reminders; `hstack` for 2–3 side-by-side actions; `confirm` for delete/cancel irreversible actions; `slider`/`stepper` for numeric input.
+- **`markdown` text:** put spaces between words and inline markers (`**bold** text`, not `**bold**text`); bullet lists need `\n` before each `- item`.
 - Match the user's language when possible (RU or EN from session context).
 - **`link` for docs:** real **https** URLs only (Nextcloud share or GitHub `blob/develop/…`). Never guess attachment ids.
 - On `action_id: start` — build a screen for the **current conversation topic** (from session context): 1–3 actions and/or a short form.
