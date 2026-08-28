@@ -73,6 +73,53 @@ class TestStructuredUIValidation(unittest.TestCase):
             validate_screen_document(doc)
         self.assertEqual(ctx.exception.code, "unsupported_schema_version")
 
+    def test_accepts_p2_layout_nodes(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {
+                "type": "vstack",
+                "id": "root",
+                "children": [
+                    {
+                        "type": "callout",
+                        "id": "c1",
+                        "variant": "tip",
+                        "text": "Remember to save.",
+                    },
+                    {"type": "spacer", "id": "s1", "height": 16},
+                    {"type": "progress", "id": "p1", "value": 0.4, "label": "Loading"},
+                    {"type": "progress", "id": "p2", "current": 1, "total": 3},
+                    {"type": "date", "id": "due", "value": "2026-08-28"},
+                    {"type": "time", "id": "at", "value": "09:15"},
+                    {
+                        "type": "hstack",
+                        "id": "row",
+                        "children": [
+                            {"type": "button", "id": "b1", "label": "OK", "action_id": "ok"},
+                        ],
+                    },
+                ],
+            },
+        }
+        validated = validate_screen_document(doc)
+        self.assertEqual(len(validated["screen"]["children"]), 7)
+
+    def test_rejects_invalid_progress(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {"type": "progress", "id": "p1", "value": 1.5},
+        }
+        with self.assertRaises(StructuredUIValidationError):
+            validate_screen_document(doc)
+
+    def test_rejects_invalid_date_value(self) -> None:
+        doc = {
+            "schema_version": 1,
+            "screen": {"type": "date", "id": "d1", "value": "28-08-2026"},
+        }
+        with self.assertRaises(StructuredUIValidationError):
+            validate_screen_document(doc)
+
     def test_accepts_media_nodes(self) -> None:
         doc = {
             "schema_version": 1,

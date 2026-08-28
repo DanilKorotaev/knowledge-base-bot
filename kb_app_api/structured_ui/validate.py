@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 MAX_DOCUMENT_BYTES = 32_768
@@ -16,6 +17,7 @@ SUPPORTED_SCHEMA_VERSION = 1
 ALLOWED_NODE_TYPES = frozenset(
     {
         "vstack",
+        "hstack",
         "text",
         "button",
         "checkbox",
@@ -26,9 +28,17 @@ ALLOWED_NODE_TYPES = frozenset(
         "link",
         "file",
         "divider",
+        "callout",
+        "spacer",
+        "progress",
+        "date",
+        "time",
     }
 )
-FORM_FIELD_TYPES = frozenset({"checkbox", "radio_group", "select", "text_field"})
+FORM_FIELD_TYPES = frozenset({"checkbox", "radio_group", "select", "text_field", "date", "time"})
+CALLOUT_VARIANTS = frozenset({"info", "warning", "tip", "success"})
+DATE_VALUE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+TIME_VALUE_RE = re.compile(r"^\d{2}:\d{2}$")
 MAX_URL_LENGTH = 2_000
 MAX_FILE_NAME_LENGTH = 260
 MAX_ALT_LENGTH = 500
@@ -167,6 +177,26 @@ def _validate_value_for_type(node_type: str, value: Any) -> None:
             "select value must be string or string array",
             detail="value",
         )
+    if node_type in {"date", "time"}:
+        if not isinstance(value, str):
+            raise StructuredUIValidationError(
+                "validation_error",
+                f"{node_type} value must be string",
+                detail="value",
+            )
+        if node_type == "date" and not DATE_VALUE_RE.fullmatch(value):
+            raise StructuredUIValidationError(
+                "validation_error",
+                "date value must be YYYY-MM-DD",
+                detail="value",
+            )
+        if node_type == "time" and not TIME_VALUE_RE.fullmatch(value):
+            raise StructuredUIValidationError(
+                "validation_error",
+                "time value must be HH:mm (24h)",
+                detail="value",
+            )
+        return
 
 
 def validate_screen_document(document: dict[str, Any]) -> dict[str, Any]:
@@ -338,6 +368,92 @@ def validate_screen_document(document: dict[str, Any]) -> dict[str, Any]:
             if label is not None:
                 _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
             return
+
+        if node_type == "callout":
+            text = node.get("text")
+            if not isinstance(text, str):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "callout node requires string text",
+                    detail="text",
+                )
+            if len(text) > MAX_TEXT_LENGTH:
+                raise StructuredUIValidationError("validation_error", "text is too long", detail="text")
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            variant = node.get("variant")
+            if variant is not None and variant not in CALLOUT_VARIANTS:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "invalid callout variant",
+                    detail="variant",
+                )
+            return
+
+        if node_type == "spacer":
+            height = node.get("height")
+            if height is not None and (not isinstance(height, int) or height < 4 or height > 64):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "spacer height must be 4..64",
+                    detail="height",
+                )
+            return
+
+        if node_type == "progress":
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            value = node.get("value")
+            current = node.get("current")
+            total = node.get("total")
+            has_fraction = isinstance(value, (int, float)) and not isinstance(value, bool)
+            has_steps = current is not None or total is not None
+            if has_fraction and has_steps:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "progress must use value or current/total, not both",
+                    detail="value",
+                )
+            if has_fraction:
+                fraction = float(value)
+                if fraction < 0 or fraction > 1:
+                    raise StructuredUIValidationError(
+                        "validation_error",
+                        "progress value must be between 0 and 1",
+                        detail="value",
+                    )
+                return
+            if current is None or total is None:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "progress requires value or current and total",
+                    detail="value",
+                )
+            if not isinstance(current, int) or not isinstance(total, int) or total < 1 or current < 0:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "invalid progress current/total",
+                    detail="current",
+                )
+            return
+
+        if node_type in {"date", "time"}:
+            label = node.get("label")
+            if label is not None:
+                _require_string(label, field="label", max_len=MAX_LABEL_LENGTH)
+            _validate_value_for_type(node_type, node.get("value"))
+            return
+
+        if node_type == "hstack":
+            spacing = node.get("spacing")
+            if spacing is not None and (not isinstance(spacing, int) or spacing < 0 or spacing > 32):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "hstack spacing must be 0..32",
+                    detail="spacing",
+                )
 
         children = node.get("children")
         if children is None:
