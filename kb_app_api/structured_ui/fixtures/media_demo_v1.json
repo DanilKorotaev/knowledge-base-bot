@@ -18,7 +18,7 @@
       {
         "type": "image",
         "id": "img_remote",
-        "url": "https://picsum.photos/seed/kbstructuredui/360/200",
+        "url": "https://placehold.co/360x200/png?text=KB+SUI",
         "alt": "Тестовое изображение",
         "content_mode": "fit"
       },
