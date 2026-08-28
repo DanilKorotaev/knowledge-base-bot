@@ -138,22 +138,8 @@ class TestStructuredUIMockFlow(unittest.TestCase):
             for child in result.screen["screen"].get("children", [])
             if child.get("type") == "button"
         ]
-        self.assertEqual(len(buttons), 4)
+        self.assertEqual(len(buttons), 3)
         self.assertTrue(any(b.get("action_id") == "open_form" for b in buttons))
-        self.assertTrue(any(b.get("action_id") == "open_media_demo" for b in buttons))
-
-    def test_media_demo_screen_has_new_node_types(self) -> None:
-        result = apply_mock_ui_event(action_id="open_media_demo", component_id="btn_media")
-        types = [c.get("type") for c in result.screen["screen"].get("children", [])]
-        self.assertIn("image", types)
-        self.assertIn("link", types)
-        self.assertIn("file", types)
-        self.assertIn("divider", types)
-
-    def test_media_demo_priority_button(self) -> None:
-        result = apply_mock_ui_event(action_id="prio_high", component_id="btn_high")
-        self.assertEqual(result.user_content, "[UI] Высокий")
-        self.assertIn("Высокий", result.screen["screen"]["children"][0]["text"])
 
     def test_submit_form_uses_values(self) -> None:
         result = apply_mock_ui_event(
