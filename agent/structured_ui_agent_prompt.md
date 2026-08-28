@@ -45,6 +45,9 @@ Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 - **Immediate:** normal `button` without `submit` — each tap is a `ui-events` round-trip.
 - **Local draft → submit:** `checkbox` / `radio_group` / `select` / `text_field` change only on device until a `button` with `"submit": true` sends `values` (map of field id → bool/string/string[]).
 - **Media:** `image` / `link` / `file` are display/open only (no `ui-events` unless paired with a button). Prefer `download_url` from KB attachments for private files; public `https` only for remote images/links. Never use `javascript:` or arbitrary disk paths.
+- **`image`:** use `url` with a **real public https image** (e.g. `https://placehold.co/360x200/png`). Do **not** invent `/api/attachments/...` unless that attachment exists in the current message/session.
+- **`file`:** use `download_url` only for a **real** KB attachment path from context, **or** a known public https file URL. Never invent `guide.pdf` / fake attachment ids — client will get 404.
+- **`link`:** `url` must be http(s); optional `label`.
 
 Prefer forms when the user should pick several options before one commit.
 

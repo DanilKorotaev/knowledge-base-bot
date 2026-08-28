@@ -47,6 +47,7 @@ or
 - Prefer 1–4 `button`s or a small form (`checkbox` / `radio_group` / `select` / `text_field` + submit button).
 - Match the user's language (RU/EN from context).
 - Do **not** attach meta “Welcome to Structured UI / test MVP” screens.
+- Do **not** invent `download_url` paths (`/api/attachments/...`, `guide.pdf`) — use real attachment paths from context or public `https` URLs in `url` / `download_url`.
 - Do **not** attach a screen when the reply is already a complete answer with nothing to choose.
 - Do **not** attach when the reply is an error or empty.
 
