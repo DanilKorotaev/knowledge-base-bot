@@ -31,9 +31,28 @@ def _welcome_screen() -> dict[str, Any]:
                 {"type": "button", "id": "btn_yes", "label": "Yes", "action_id": "confirm_yes"},
                 {"type": "button", "id": "btn_no", "label": "No", "action_id": "confirm_no"},
                 {"type": "button", "id": "btn_form", "label": "Open form", "action_id": "open_form"},
+                {
+                    "type": "button",
+                    "id": "btn_gallery",
+                    "label": "Node gallery",
+                    "action_id": "open_gallery",
+                },
             ],
         }
     )
+
+
+def _load_fixture(name: str) -> dict[str, Any]:
+    import json
+    from pathlib import Path
+
+    fixture = Path(__file__).resolve().parent / "fixtures" / name
+    doc = json.loads(fixture.read_text(encoding="utf-8"))
+    return validate_screen_document(doc)
+
+
+def _gallery_screen() -> dict[str, Any]:
+    return _load_fixture("nodes_gallery_v1.json")
 
 
 def _form_screen() -> dict[str, Any]:
@@ -102,6 +121,8 @@ def _form_summary(values: dict[str, Any] | None) -> str:
             parts.append(f"{key}={'true' if value else 'false'}")
         elif isinstance(value, list):
             parts.append(f"{key}=[{','.join(str(item) for item in value)}]")
+        elif isinstance(value, (int, float)):
+            parts.append(f"{key}={value}")
         else:
             text = str(value).strip()
             if text:
@@ -216,6 +237,47 @@ def apply_mock_ui_event(
             screen=_form_screen(),
             user_content="[UI] Open form",
             assistant_content="Fill the form, then submit.",
+        )
+
+    if action == "open_gallery":
+        return MockUIEventResult(
+            screen=_gallery_screen(),
+            user_content="[UI] Node gallery",
+            assistant_content="Полный тест всех нод Structured UI v1.",
+        )
+
+    if action == "gallery_confirm_delete":
+        return MockUIEventResult(
+            screen=_document(
+                {
+                    "type": "vstack",
+                    "id": "root",
+                    "children": [
+                        {"type": "text", "id": "title", "text": "Confirm OK"},
+                        {
+                            "type": "text",
+                            "id": "body",
+                            "text": "Confirm сработал. Можно отправить форму или вернуться.",
+                        },
+                        {
+                            "type": "button",
+                            "id": "btn_back",
+                            "label": "Назад в gallery",
+                            "action_id": "open_gallery",
+                        },
+                    ],
+                }
+            ),
+            user_content="[UI] Удалить черновик",
+            assistant_content="Destructive confirm accepted.",
+        )
+
+    if action == "submit_gallery":
+        summary = _form_summary(values)
+        return MockUIEventResult(
+            screen=_form_submitted_screen(summary),
+            user_content=summary,
+            assistant_content="Gallery form received.",
         )
 
     if action == "submit_form":
