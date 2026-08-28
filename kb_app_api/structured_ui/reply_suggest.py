@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from config import config
@@ -13,6 +14,8 @@ from kb_app_api.structured_ui.validate import StructuredUIValidationError, valid
 logger = logging.getLogger(__name__)
 
 _PROMPT = """You decide whether the Knowledge Base iOS chat reply should include an interactive Structured UI panel.
+
+The user has **Interactive UI enabled** — prefer buttons/forms over asking them to type a choice in chat.
 
 ## Assistant reply (already shown / streaming to the user)
 
@@ -28,7 +31,7 @@ Return **only** one JSON object (no markdown fences):
 
 {{"screen": null}}
 
-or
+or a full document:
 
 {{
   "screen": {{
@@ -41,18 +44,46 @@ or
   }}
 }}
 
-## When to attach a screen
+## When to attach a screen (important)
 
-- Attach when a short choice would help: pick priority, confirm next step, multi-option checklist, yes/no fork.
-- Prefer 1–4 `button`s or a small form (`checkbox` / `radio_group` / `select` / `text_field` + submit button).
+- **Attach** when the reply invites a decision: pick priority, yes/no, confirm next step, choose among options, set date/time, rate on a scale, or fill a short form — **even if options are already listed in the text**. Mirror options as short `button` labels or a small form.
+- **Attach** when the reply ends with a question or «что выберем / как поступим / какой вариант».
+- Prefer 2–6 nodes: short `text` or `callout` + `button`s, or `date`/`time`/`slider`/`stepper` + submit `button`.
+- Button labels: **≤ 4 words** each. Long explanations go in `text` / `callout` / `markdown`, not button labels.
 - Match the user's language (RU/EN from context).
-- Do **not** attach meta “Welcome to Structured UI / test MVP” screens.
-- Do **not** invent `download_url` paths (`/api/attachments/...`, `guide.pdf`) — use real attachment paths from context or public `https` URLs in `url` / `download_url`.
-- Do **not** attach a screen when the reply is already a complete answer with nothing to choose.
-- Do **not** attach when the reply is an error or empty.
+- **Do not attach** for pure statements, finished explanations with no decision, errors, or greetings.
+- **Do not** build meta/catalog screens («P2-блоки», «покрытие схемы», «выберите что проверить», Structured UI plumbing).
+- **Do not** invent `download_url` paths — use real attachment paths from context or public `https` in `url` / `download_url`.
 
-Schema v1 nodes only: vstack, text, button (+ optional submit), checkbox, radio_group, select, text_field, image (url and/or download_url), link (url), file (download_url), divider.
+## Schema v1 nodes
+
+vstack, hstack, text, markdown, button, confirm, checkbox, radio_group, select, text_field,
+slider, stepper, date, time, image, link, file, callout, spacer, progress, divider.
+
+Forms: local draft until `button` with `"submit": true` sends `values` (bool / string / string[] / number).
 """
+
+_CHOICE_HINT_RE = re.compile(
+    r"(?:\?|"
+    r"выбер|выбери|выбрать|какой|какая|какое|какую|что\s+бер|что\s+выб|"
+    r"which|pick|choose|decide|confirm|подтверд|"
+    r"да\s+или\s+нет|yes\s+or\s+no|"
+    r"приоритет|вариант|option|alternativ)",
+    re.IGNORECASE,
+)
+
+
+def reply_likely_needs_ui(assistant_reply: str) -> bool:
+    """Cheap gate: skip LLM when the reply clearly needs no user choice."""
+    text = (assistant_reply or "").strip()
+    if not text or text.startswith("❌"):
+        return False
+    if _CHOICE_HINT_RE.search(text):
+        return True
+    # Short replies without a question rarely need a panel.
+    if len(text) < 80 and "?" not in text:
+        return False
+    return "?" in text
 
 
 def _format_session_context(messages: list[dict[str, Any]], *, max_messages: int = 10) -> str:
@@ -80,7 +111,7 @@ async def suggest_structured_ui_for_reply(
     if not getattr(config, "STRUCTURED_UI_IN_REPLIES_ENABLED", False):
         return None
     text = (assistant_reply or "").strip()
-    if not text or text.startswith("❌"):
+    if not reply_likely_needs_ui(text):
         return None
 
     from services.cursor_cli_service import CursorCLIService
@@ -102,11 +133,7 @@ async def suggest_structured_ui_for_reply(
         return None
 
     try:
-        # Reuse ui-event parser shape, or accept {"screen": null|doc}
         stripped = raw.strip()
-        if "```" in stripped:
-            # fall through to parse_agent which handles fences for full ui-event payloads
-            pass
         try:
             payload = json.loads(stripped)
         except json.JSONDecodeError:
@@ -118,12 +145,10 @@ async def suggest_structured_ui_for_reply(
 
         if not isinstance(payload, dict):
             return None
-        # Full document: {schema_version, screen}
         if "schema_version" in payload and "screen" in payload:
             if payload.get("screen") is None:
                 return None
             return validate_screen_document(payload)
-        # Wrapper from ui-event style: {screen: document} or {screen: null}
         screen = payload.get("screen")
         if screen is None:
             return None
