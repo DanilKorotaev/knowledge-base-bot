@@ -16,6 +16,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from kb_app_api.structured_ui.apply_values import apply_values_to_document, document_has_form_fields
 from kb_app_api.structured_ui.mock_flow import apply_mock_ui_event
 from kb_app_api.structured_ui.persistence import parse_structured_ui, structured_ui_by_message_ids
 from kb_app_api.structured_ui.validate import StructuredUIValidationError, validate_screen_document
@@ -46,6 +47,23 @@ def tearDownModule() -> None:
             os.unlink(_db_file)
         except OSError:
             pass
+
+
+class TestApplySubmittedValues(unittest.TestCase):
+    def test_apply_values_updates_form_fields(self) -> None:
+        doc = apply_mock_ui_event(action_id="open_form", component_id="btn_form").screen
+        self.assertTrue(document_has_form_fields(doc))
+        baked = apply_values_to_document(
+            doc,
+            {"notify": False, "theme": "dark", "note": "hi"},
+        )
+        by_id = {child["id"]: child for child in baked["screen"]["children"]}
+        self.assertEqual(by_id["notify"]["value"], False)
+        self.assertEqual(by_id["theme"]["value"], "dark")
+        self.assertEqual(by_id["note"]["value"], "hi")
+        # Original document unchanged
+        original = {child["id"]: child for child in doc["screen"]["children"]}
+        self.assertNotEqual(original["notify"].get("value"), False)
 
 
 class TestStructuredUIValidation(unittest.TestCase):
@@ -414,6 +432,45 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "validation_error")
+
+    def test_submit_bakes_values_into_previous_form(self) -> None:
+        sid = self._create_session()
+        self.client.post(
+            f"/api/sessions/{sid}/ui-events",
+            headers=self.headers,
+            json={"action_id": "start", "component_id": "bootstrap"},
+        )
+        self.client.post(
+            f"/api/sessions/{sid}/ui-events",
+            headers=self.headers,
+            json={"action_id": "open_form", "component_id": "btn_form"},
+        )
+        response = self.client.post(
+            f"/api/sessions/{sid}/ui-events",
+            headers=self.headers,
+            json={
+                "action_id": "submit_form",
+                "component_id": "btn_submit",
+                "values": {"notify": False, "theme": "dark", "note": "baked"},
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        messages = response.json()["messages"]
+        form_panels = [
+            m
+            for m in messages
+            if m.get("role") == "assistant"
+            and m.get("structured_ui", {}).get("screen", {}).get("children")
+            and any(
+                child.get("type") == "checkbox"
+                for child in m["structured_ui"]["screen"]["children"]
+            )
+        ]
+        self.assertTrue(form_panels)
+        by_id = {child["id"]: child for child in form_panels[-1]["structured_ui"]["screen"]["children"]}
+        self.assertEqual(by_id["notify"]["value"], False)
+        self.assertEqual(by_id["theme"]["value"], "dark")
+        self.assertEqual(by_id["note"]["value"], "baked")
 
     def test_structured_ui_survives_get_messages(self) -> None:
         sid = self._create_session()
