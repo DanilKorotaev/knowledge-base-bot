@@ -10,6 +10,7 @@ from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from kb_app_api.structured_ui.agent import resolve_ui_event
+from kb_app_api.structured_ui.apply_values import apply_values_to_document, latest_form_message
 from kb_app_api.structured_ui.validate import (
     StructuredUIValidationError,
     validate_document_size,
@@ -76,6 +77,14 @@ async def post_ui_event(
         ) from exc
     except StructuredUIValidationError as exc:
         raise APIError(exc.code, exc.message, detail=exc.detail, status_code=422) from exc
+
+    # Bake submitted values into the previous form panel so history stays accurate.
+    if values:
+        form_hit = latest_form_message(session_messages)
+        if form_hit is not None:
+            form_message, form_document = form_hit
+            baked = apply_values_to_document(form_document, values)
+            await db.set_message_structured_ui(int(form_message["id"]), baked)
 
     if result.user_content:
         await db.add_message(sid, "user", result.user_content)
