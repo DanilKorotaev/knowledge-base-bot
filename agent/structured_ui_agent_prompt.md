@@ -55,6 +55,7 @@ Limits: max depth 8, max 50 nodes total, max 32 KiB JSON.
 - **Immediate:** normal `button` / `confirm` without `submit` — each tap is a `ui-events` round-trip (`confirm` shows alert first).
 - **Local draft → submit:** `checkbox` / `radio_group` / `select` / `text_field` / `date` / `time` / `slider` / `stepper` change only on device until a `button` with `"submit": true` sends `values` (bool / string / string[] / number).
 - **Media:** `image` / `link` / `file` are display/open only. Prefer real `download_url` from KB attachments; public `https` for remote assets. Never invent attachment paths.
+- **Public demo URLs that work:** image `https://placehold.co/360x200/png?text=KB+Image`; file `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`. Do **not** use `raw.githubusercontent.com` paths (often 404).
 
 Prefer forms when the user should pick several options before one commit.
 

@@ -54,6 +54,7 @@ or a full document:
 - **Do not attach** for pure statements, finished explanations with no decision, errors, or greetings.
 - **Do not** build meta/catalog screens («P2-блоки», «покрытие схемы», «выберите что проверить», Structured UI plumbing).
 - **Do not** invent `download_url` paths — use real attachment paths from context or public `https` in `url` / `download_url`.
+- For public demos use known-good URLs: image `https://placehold.co/360x200/png?text=KB+Image`, file `https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf`. Avoid `raw.githubusercontent.com` (often 404).
 
 ## Schema v1 nodes
 
