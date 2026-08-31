@@ -51,7 +51,7 @@ class PostgreSQLDatabase(DatabaseInterface):
             column_check = await conn.fetch("""
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name='users' AND column_name IN ('is_allowed', 'is_admin')
+                WHERE table_name='users' AND column_name IN ('is_allowed', 'is_admin', 'health_data_relative')
             """)
             existing_columns = {row['column_name'] for row in column_check}
             
@@ -63,6 +63,11 @@ class PostgreSQLDatabase(DatabaseInterface):
             if 'is_admin' not in existing_columns:
                 await conn.execute("""
                     ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE
+                """)
+
+            if 'health_data_relative' not in existing_columns:
+                await conn.execute("""
+                    ALTER TABLE users ADD COLUMN health_data_relative VARCHAR(255) DEFAULT 'HealthData'
                 """)
             
             await conn.execute("""
@@ -649,4 +654,25 @@ class PostgreSQLDatabase(DatabaseInterface):
                 user_id,
             )
             return [dict(row) for row in rows]
+
+    async def get_user_health_data_relative(self, user_id: int) -> str:
+        from kb_app_api.health_paths import DEFAULT_HEALTH_DATA_RELATIVE
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT health_data_relative FROM users WHERE id = $1",
+                user_id,
+            )
+            if not row or not row["health_data_relative"]:
+                return DEFAULT_HEALTH_DATA_RELATIVE
+            return str(row["health_data_relative"])
+
+    async def set_user_health_data_relative(self, user_id: int, health_data_relative: str) -> str:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET health_data_relative = $1 WHERE id = $2",
+                health_data_relative,
+                user_id,
+            )
+        return health_data_relative
 

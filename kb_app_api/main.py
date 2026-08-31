@@ -30,7 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
-from kb_app_api.routes import attachments, auth, devices, files, health, messages, sessions, ui_events, voice
+from kb_app_api.routes import attachments, auth, devices, files, health, health_sync, me, messages, sessions, ui_events, voice
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,6 +77,8 @@ app.include_router(attachments.router, prefix="/api")
 app.include_router(voice.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(devices.router, prefix="/api")
+app.include_router(me.router, prefix="/api")
+app.include_router(health_sync.router, prefix="/api")
 
 
 if __name__ == "__main__":
