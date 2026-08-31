@@ -196,3 +196,13 @@ class DatabaseInterface(ABC):
         """Получить список всех разрешенных пользователей"""
         pass
 
+    @abstractmethod
+    async def get_user_health_data_relative(self, user_id: int) -> str:
+        """Relative vault folder for HealthKit JSON exports."""
+        pass
+
+    @abstractmethod
+    async def set_user_health_data_relative(self, user_id: int, health_data_relative: str) -> str:
+        """Update relative vault folder for HealthKit JSON exports."""
+        pass
+

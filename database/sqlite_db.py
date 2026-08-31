@@ -46,6 +46,11 @@ class SQLiteDatabase(DatabaseInterface):
             
             if 'is_admin' not in columns:
                 await db.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+
+            if 'health_data_relative' not in columns:
+                await db.execute(
+                    "ALTER TABLE users ADD COLUMN health_data_relative TEXT DEFAULT 'HealthData'"
+                )
             
             await db.commit()
             
@@ -862,4 +867,26 @@ class SQLiteDatabase(DatabaseInterface):
                 }
                 for row in rows
             ]
+
+    async def get_user_health_data_relative(self, user_id: int) -> str:
+        from kb_app_api.health_paths import DEFAULT_HEALTH_DATA_RELATIVE
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT health_data_relative FROM users WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            if not row or not row[0]:
+                return DEFAULT_HEALTH_DATA_RELATIVE
+            return str(row[0])
+
+    async def set_user_health_data_relative(self, user_id: int, health_data_relative: str) -> str:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE users SET health_data_relative = ? WHERE id = ?",
+                (health_data_relative, user_id),
+            )
+            await db.commit()
+        return health_data_relative
 
