@@ -71,7 +71,8 @@ async def sync_complete(
 ) -> SyncCompleteResponse:
     """
     Вызывается приложением после успешной загрузки файлов.
-    Обрабатывает пути `HealthData/workouts/*.json` и связывает с заметками по дате.
+    Связывает `HealthData/workouts/*.json` с заметками по дате для типов из
+    `LINKABLE_WORKOUT_TYPES` (по умолчанию `traditional_strength_training`).
     """
     kb = settings.kb_path
     if not kb.is_dir():

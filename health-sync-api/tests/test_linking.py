@@ -60,6 +60,25 @@ class TestProcessSync(unittest.TestCase):
             self.assertTrue(data["linked_note"].endswith(".md"))
             self.assertIn("Тренировки", data["linked_note"])
 
+    def test_skips_non_strength_workout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            note_dir = kb / "Тренировки" / "2026" / "Июнь"
+            note_dir.mkdir(parents=True)
+            (note_dir / "2026-06-15 Понедельник — Тест.md").write_text("---\n---\n", encoding="utf-8")
+
+            wo_dir = kb / "HealthData" / "workouts"
+            wo_dir.mkdir(parents=True)
+            rel = "HealthData/workouts/2026-06-15_run.json"
+            (kb / rel).write_text(
+                json.dumps({"date": "2026-06-15", "workout_type": "running"}),
+                encoding="utf-8",
+            )
+
+            result = process_sync_payload(kb, "2026-06-15", [rel])
+            self.assertEqual(len(result.linked), 0)
+            self.assertTrue(any("unsupported_type" in s for s in result.skipped))
+
 
 if __name__ == "__main__":
     unittest.main()
