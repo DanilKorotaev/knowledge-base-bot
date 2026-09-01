@@ -70,8 +70,8 @@ async def sync_complete(
     _: Annotated[None, Depends(require_bearer)],
 ) -> SyncCompleteResponse:
     """
-    Вызывается приложением HealthSync после успешной загрузки файлов.
-    Обрабатывает только пути `HealthData/workouts/*.json` с `is_gym: true`.
+    Вызывается приложением после успешной загрузки файлов.
+    Обрабатывает пути `HealthData/workouts/*.json` и связывает с заметками по дате.
     """
     kb = settings.kb_path
     if not kb.is_dir():

@@ -20,7 +20,7 @@ class TestFindWorkoutNote(unittest.TestCase):
 
 
 class TestProcessSync(unittest.TestCase):
-    def test_links_gym_workout(self):
+    def test_links_workout_when_note_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
             kb = Path(tmp)
             note_dir = kb / "Тренировки" / "2026" / "Июнь"
@@ -43,7 +43,7 @@ class TestProcessSync(unittest.TestCase):
                 json.dumps(
                     {
                         "date": "2026-06-15",
-                        "is_gym": True,
+                        "workout_type": "traditional_strength_training",
                         "avg_heart_rate": 120,
                         "max_heart_rate": 150,
                         "active_calories": 300,
