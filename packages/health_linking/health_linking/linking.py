@@ -39,6 +39,9 @@ class LinkingPaths:
 
 DEFAULT_PATHS = LinkingPaths()
 
+# HealthKit slugs eligible for linking to training notes (extend in KB scripts if needed).
+LINKABLE_WORKOUT_TYPES = frozenset({"traditional_strength_training"})
+
 
 def _month_folder(year: int, month: int) -> str:
     if not 1 <= month <= 12:
@@ -157,8 +160,8 @@ def process_sync_payload(
     paths: LinkingPaths = DEFAULT_PATHS,
 ) -> LinkResult:
     """
-    Для каждого workout JSON из `files`: найти заметку за дату, дописать `health:` в frontmatter,
-    выставить `linked_note` в JSON.
+    Для каждого workout JSON из `files` с типом из `LINKABLE_WORKOUT_TYPES`: найти заметку за дату,
+    дописать `health:` в frontmatter, выставить `linked_note` в JSON.
     """
     result = LinkResult()
     prefix = paths.workouts_subdir.rstrip("/") + "/"
@@ -176,6 +179,10 @@ def process_sync_payload(
             continue
         if data.get("linked_note"):
             result.skipped.append(f"already_linked:{rel_norm}")
+            continue
+        workout_type = data.get("workout_type")
+        if workout_type not in LINKABLE_WORKOUT_TYPES:
+            result.skipped.append(f"unsupported_type:{rel_norm}")
             continue
         wdate = data.get("date") or date
         if not isinstance(wdate, str):
