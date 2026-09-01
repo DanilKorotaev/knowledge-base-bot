@@ -79,6 +79,20 @@ class TestComposeMessage(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
+    def test_compose_rejects_too_many_files(self) -> None:
+        sid = self._create_session()
+        files = [
+            ("files", (f"file{i}.txt", b"x", "text/plain"))
+            for i in range(11)
+        ]
+        response = self.client.post(
+            f"/api/sessions/{sid}/messages/compose",
+            headers=self.headers,
+            data={"content": "too many"},
+            files=files,
+        )
+        self.assertEqual(response.status_code, 422)
+
     @patch("kb_app_api.routes.messages.QueryProcessingService.process_query_for_api", new_callable=AsyncMock)
     def test_compose_accepts_text_and_files(self, mock_process: AsyncMock) -> None:
         mock_process.return_value = ("ok", [])
