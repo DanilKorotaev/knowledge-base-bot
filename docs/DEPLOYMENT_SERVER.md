@@ -156,7 +156,7 @@ DB_PASSWORD=СГЕНЕРИРУЙТЕ_НАДЁЖНЫЙ_ПАРОЛЬ
 # ============================================
 LOG_LEVEL=INFO
 MAX_SESSION_MESSAGES=50
-MAX_ATTACHMENTS_PER_MESSAGE=5
+MAX_ATTACHMENTS_PER_MESSAGE=10
 ENABLE_CHANGE_TRACKING=true
 
 # ============================================

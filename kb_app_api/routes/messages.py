@@ -658,6 +658,14 @@ async def post_compose_message(
     transcriptions = _parse_audio_transcriptions(audio_transcriptions, len(audio_uploads))
     query_text = _compose_query_text(content, len(file_uploads), transcriptions)
 
+    max_files = config.MAX_ATTACHMENTS_PER_MESSAGE
+    if len(file_uploads) > max_files:
+        raise APIError(
+            "validation_error",
+            f"Не более {max_files} файлов за сообщение",
+            detail="files",
+        )
+
     from utils.db_helpers import get_db
 
     db = await get_db()

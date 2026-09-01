@@ -69,7 +69,7 @@ class Config:
     # Bot settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     MAX_SESSION_MESSAGES: int = int(os.getenv("MAX_SESSION_MESSAGES", "50"))
-    MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "5"))
+    MAX_ATTACHMENTS_PER_MESSAGE: int = int(os.getenv("MAX_ATTACHMENTS_PER_MESSAGE", "10"))
     ENABLE_CHANGE_TRACKING: bool = os.getenv("ENABLE_CHANGE_TRACKING", "true").lower() == "true"
     
     # Transcription polish (постобработка транскрипции через LLM)
