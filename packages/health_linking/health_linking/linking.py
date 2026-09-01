@@ -157,7 +157,7 @@ def process_sync_payload(
     paths: LinkingPaths = DEFAULT_PATHS,
 ) -> LinkResult:
     """
-    Для каждого gym-workout JSON из `files`: найти заметку за дату, дописать `health:` в frontmatter,
+    Для каждого workout JSON из `files`: найти заметку за дату, дописать `health:` в frontmatter,
     выставить `linked_note` в JSON.
     """
     result = LinkResult()
@@ -173,9 +173,6 @@ def process_sync_payload(
         data = _load_json(wpath)
         if not data:
             result.errors.append(f"bad_json:{rel_norm}")
-            continue
-        if not data.get("is_gym"):
-            result.skipped.append(f"not_gym:{rel_norm}")
             continue
         if data.get("linked_note"):
             result.skipped.append(f"already_linked:{rel_norm}")
