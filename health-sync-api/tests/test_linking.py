@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from health_linking import find_workout_note, process_sync_payload
+from health_linking import (
+    backfill_all_linkable_workouts,
+    find_workout_note,
+    linkable_workout_path_for_date,
+    process_sync_payload,
+)
 
 
 class TestFindWorkoutNote(unittest.TestCase):
@@ -78,6 +83,61 @@ class TestProcessSync(unittest.TestCase):
             result = process_sync_payload(kb, "2026-06-15", [rel])
             self.assertEqual(len(result.linked), 0)
             self.assertTrue(any("unsupported_type" in s for s in result.skipped))
+
+    def test_picks_longest_strength_when_multiple_same_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            wo_dir = kb / "HealthData" / "workouts"
+            wo_dir.mkdir(parents=True)
+            short = "HealthData/workouts/2026-06-15_a.json"
+            long = "HealthData/workouts/2026-06-15_b.json"
+            (kb / short).write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-15",
+                        "workout_type": "traditional_strength_training",
+                        "duration_minutes": 30,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (kb / long).write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-15",
+                        "workout_type": "traditional_strength_training",
+                        "duration_minutes": 90,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            picked = linkable_workout_path_for_date(kb, "2026-06-15")
+            self.assertEqual(picked, long)
+
+    def test_backfill_links_when_note_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            note_dir = kb / "Тренировки" / "2026" / "Июнь"
+            note_dir.mkdir(parents=True)
+            (note_dir / "2026-06-15 Понедельник — Тест.md").write_text("---\n---\n", encoding="utf-8")
+            wo_dir = kb / "HealthData" / "workouts"
+            wo_dir.mkdir(parents=True)
+            rel = "HealthData/workouts/2026-06-15_x.json"
+            (kb / rel).write_text(
+                json.dumps(
+                    {
+                        "date": "2026-06-15",
+                        "workout_type": "traditional_strength_training",
+                        "duration_minutes": 45,
+                        "active_calories": 200,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = backfill_all_linkable_workouts(kb)
+            self.assertEqual(len(result.linked), 1)
+            data = json.loads((kb / rel).read_text(encoding="utf-8"))
+            self.assertIn("linked_note", data)
 
 
 if __name__ == "__main__":

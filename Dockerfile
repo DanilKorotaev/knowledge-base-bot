@@ -15,8 +15,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 # Рабочая директория
 WORKDIR /app
 
-# Пакет health_linking (import health_linking)
-ENV PYTHONPATH="/app/packages/health_linking"
+# Пакеты health_linking, health_aggregate
+ENV PYTHONPATH="/app/packages/health_linking:/app/packages/health_aggregate"
 
 # Копировать зависимости
 COPY requirements.txt .

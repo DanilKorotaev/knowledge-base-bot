@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import logging
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -114,5 +115,20 @@ async def upload_health_sync_files(
     except Exception:
         logger.exception("Health sync Nextcloud upload failed")
         synced = False
+
+    post_sync: dict[str, object] = {}
+    try:
+        from utils.health_pipeline import run_health_post_sync
+
+        kb_root = Path(config.LOCAL_KB_PATH).resolve()
+        dates = {
+            validate_health_file_path(item.path).split("/")[-1].replace(".json", "")[:10]
+            for item in body.files
+            if item.path.endswith(".json")
+        }
+        trigger_date = max(dates) if dates else ""
+        post_sync = run_health_post_sync(kb_root, trigger_date, vault_paths)
+    except Exception:
+        logger.exception("Health post-sync pipeline failed")
 
     return SyncFilesResponse(written=written_relative, synced_to_nextcloud=synced)
