@@ -95,5 +95,32 @@ class TestRefreshDerived(unittest.TestCase):
             self.assertEqual(summary["rings"]["longest_all_rings"], 1)
 
 
+    def test_streak_requires_calendar_contiguity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            daily = kb / "HealthData" / "daily"
+            daily.mkdir(parents=True)
+            rings_closed = {
+                "active_calories": 800,
+                "active_calories_goal": 750,
+                "exercise_minutes": 70,
+                "exercise_minutes_goal": 60,
+                "stand_hours": 12,
+                "stand_hours_goal": 10,
+            }
+            (daily / "2026-09-01.json").write_text(
+                json.dumps({"date": "2026-09-01", "activity_rings": rings_closed}),
+                encoding="utf-8",
+            )
+            # Gap on 2026-09-02 — no file
+            (daily / "2026-09-03.json").write_text(
+                json.dumps({"date": "2026-09-03", "activity_rings": rings_closed}),
+                encoding="utf-8",
+            )
+            summary = refresh_derived(kb, reference_date=date(2026, 9, 3))
+            self.assertEqual(summary["rings"]["longest_all_rings"], 1)
+            self.assertEqual(summary["rings"]["current_all_rings"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
