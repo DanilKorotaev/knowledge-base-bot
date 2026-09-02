@@ -80,6 +80,12 @@ async def sync_complete(
     result = process_sync_payload(kb, body.date, body.files)
     if result.errors:
         logger.warning("sync-complete errors: %s", result.errors)
+    try:
+        from health_aggregate import refresh_derived
+
+        refresh_derived(kb)
+    except Exception as e:
+        logger.warning("derived refresh after sync-complete: %s", e)
     return SyncCompleteResponse(
         date=body.date,
         linked=result.linked,

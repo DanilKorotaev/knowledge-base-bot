@@ -11,6 +11,7 @@ COPY health-sync-api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY packages/health_linking/health_linking ./health_linking/
+COPY packages/health_aggregate/health_aggregate ./health_aggregate/
 COPY health-sync-api/app ./app/
 
 EXPOSE 8090

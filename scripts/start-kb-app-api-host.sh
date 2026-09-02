@@ -23,7 +23,7 @@ export TELEGRAM_PROXY="${TELEGRAM_PROXY:-socks5://127.0.0.1:1080}"
 export OPENAI_PROXY="${OPENAI_PROXY:-socks5://127.0.0.1:1080}"
 export CURSOR_CLI_PROXY="${CURSOR_CLI_PROXY:-$OPENAI_PROXY}"
 export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
-export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
+export PYTHONPATH="${API_DIR}/packages/health_linking:${API_DIR}/packages/health_aggregate:${PYTHONPATH:-}"
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {

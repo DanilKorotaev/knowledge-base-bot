@@ -58,7 +58,7 @@ def maybe_link_health_for_kb_changes(kb_root: Path, changes: list[dict[str, Any]
 def _run_link_for_note_path(path: Path) -> None:
     from config import config
 
-    from health_linking import DEFAULT_PATHS, process_sync_payload, workout_json_rel_paths_for_date
+    from health_linking import DEFAULT_PATHS, linkable_workout_path_for_date, process_sync_payload
 
     if not path.is_file():
         return
@@ -82,13 +82,20 @@ def _run_link_for_note_path(path: Path) -> None:
         return
     date_str = m.group("date")
 
-    files = workout_json_rel_paths_for_date(kb, date_str)
-    if not files:
-        logger.debug("Path 2: нет workout JSON для даты %s", date_str)
+    workout_rel = linkable_workout_path_for_date(kb, date_str)
+    if not workout_rel:
+        logger.debug("Path 2: нет linkable workout JSON для даты %s", date_str)
         return
 
-    result = process_sync_payload(kb, date_str, files)
+    result = process_sync_payload(kb, date_str, [workout_rel])
     if result.linked:
         logger.info("Path 2 health link: %s", result.linked)
     if result.errors:
         logger.warning("Path 2 health link errors: %s", result.errors)
+
+    try:
+        from health_aggregate import refresh_derived
+
+        refresh_derived(kb)
+    except Exception as e:
+        logger.warning("Path 2 derived refresh: %s", e)

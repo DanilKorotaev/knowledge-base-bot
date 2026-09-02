@@ -153,6 +153,86 @@ def workout_json_rel_paths_for_date(
     return sorted(out)
 
 
+def _linkable_workout_candidates(
+    kb: Path,
+    date_str: str,
+    paths: LinkingPaths = DEFAULT_PATHS,
+) -> list[tuple[float, Path, dict[str, Any]]]:
+    """Кандидаты traditional_strength за дату: (duration, path, data)."""
+    wo_dir = kb / paths.workouts_subdir
+    if not wo_dir.is_dir():
+        return []
+    prefix = f"{date_str}_"
+    out: list[tuple[float, Path, dict[str, Any]]] = []
+    for p in wo_dir.iterdir():
+        if not (p.is_file() and p.suffix.lower() == ".json" and p.name.startswith(prefix)):
+            continue
+        data = _load_json(p)
+        if not data or data.get("workout_type") not in LINKABLE_WORKOUT_TYPES:
+            continue
+        duration = float(data.get("duration_minutes") or 0)
+        out.append((duration, p, data))
+    return out
+
+
+def linkable_workout_path_for_date(
+    kb: Path,
+    date_str: str,
+    paths: LinkingPaths = DEFAULT_PATHS,
+) -> str | None:
+    """
+    Одна силовая тренировка на день: если уже связана — она; иначе самая длинная по duration.
+    """
+    candidates = _linkable_workout_candidates(kb, date_str, paths)
+    if not candidates:
+        return None
+    for _dur, path, data in candidates:
+        if data.get("linked_note"):
+            return _relative_posix(path, kb)
+    _dur, best_path, _data = max(candidates, key=lambda item: item[0])
+    return _relative_posix(best_path, kb)
+
+
+def backfill_all_linkable_workouts(
+    kb: Path,
+    paths: LinkingPaths = DEFAULT_PATHS,
+) -> LinkResult:
+    """Связать все подходящие workout JSON с заметками (один traditional_strength на дату)."""
+    result = LinkResult()
+    wo_dir = kb / paths.workouts_subdir
+    if not wo_dir.is_dir():
+        return result
+
+    dates: set[str] = set()
+    for p in wo_dir.iterdir():
+        if not (p.is_file() and p.suffix.lower() == ".json"):
+            continue
+        data = _load_json(p)
+        if not data or data.get("workout_type") not in LINKABLE_WORKOUT_TYPES:
+            continue
+        wdate = data.get("date")
+        if isinstance(wdate, str):
+            dates.add(wdate)
+
+    for date_str in sorted(dates):
+        rel = linkable_workout_path_for_date(kb, date_str, paths)
+        if not rel:
+            continue
+        wpath = kb / rel
+        data = _load_json(wpath)
+        if data and data.get("linked_note"):
+            result.skipped.append(f"already_linked:{rel}")
+            continue
+        if not find_workout_note(kb, date_str, paths):
+            result.skipped.append(f"no_note:{date_str}")
+            continue
+        batch = process_sync_payload(kb, date_str, [rel], paths)
+        result.linked.extend(batch.linked)
+        result.skipped.extend(batch.skipped)
+        result.errors.extend(batch.errors)
+    return result
+
+
 def process_sync_payload(
     kb: Path,
     date: str,
