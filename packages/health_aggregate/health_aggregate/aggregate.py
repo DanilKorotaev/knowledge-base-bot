@@ -187,20 +187,37 @@ def _compute_streaks(
         }
 
     def streak_for(key: str) -> tuple[int, int]:
+        """Calendar-contiguous streaks (missing / open days break the run)."""
         longest = 0
         run = 0
-        for d in sorted_dates:
-            rings = _ring_closed(daily[d], default_goals)
+        prev: date | None = None
+        for d_str in sorted_dates:
+            rings = _ring_closed(daily[d_str], default_goals)
+            day = date.fromisoformat(d_str)
             if rings[key]:
-                run += 1
+                if prev is not None and day == prev + timedelta(days=1):
+                    run += 1
+                else:
+                    run = 1
                 longest = max(longest, run)
+                prev = day
             else:
                 run = 0
+                prev = None
+
         current = 0
-        for d in reversed(sorted_dates):
-            rings = _ring_closed(daily[d], default_goals)
-            if rings[key]:
+        expected: date | None = None
+        for d_str in reversed(sorted_dates):
+            rings = _ring_closed(daily[d_str], default_goals)
+            day = date.fromisoformat(d_str)
+            if not rings[key]:
+                break
+            if expected is None:
+                current = 1
+                expected = day - timedelta(days=1)
+            elif day == expected:
                 current += 1
+                expected = day - timedelta(days=1)
             else:
                 break
         return current, longest
