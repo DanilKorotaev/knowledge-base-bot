@@ -51,6 +51,49 @@ class TestRefreshDerived(unittest.TestCase):
             self.assertTrue((derived / "monthly.json").is_file())
             self.assertTrue((derived / "series_sleep_90d.json").is_file())
 
+    def test_ring_streak_uses_per_day_goals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kb = Path(tmp)
+            daily = kb / "HealthData" / "daily"
+            daily.mkdir(parents=True)
+            (daily / "2026-09-01.json").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-09-01",
+                        "activity_rings": {
+                            "active_calories": 560,
+                            "active_calories_goal": 550,
+                            "exercise_minutes": 35,
+                            "exercise_minutes_goal": 30,
+                            "stand_hours": 10,
+                            "stand_hours_goal": 10,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (daily / "2026-09-02.json").write_text(
+                json.dumps(
+                    {
+                        "date": "2026-09-02",
+                        "activity_rings": {
+                            "active_calories": 700,
+                            "active_calories_goal": 750,
+                            "exercise_minutes": 55,
+                            "exercise_minutes_goal": 60,
+                            "stand_hours": 12,
+                            "stand_hours_goal": 12,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = refresh_derived(kb, reference_date=date(2026, 9, 2))
+            self.assertEqual(summary["rings"]["days_all_rings_closed"], 1)
+            self.assertEqual(summary["rings"]["current_all_rings"], 0)
+            self.assertEqual(summary["rings"]["longest_all_rings"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

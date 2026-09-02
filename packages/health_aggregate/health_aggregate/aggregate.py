@@ -118,29 +118,61 @@ def _period_stats(days: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _ring_closed(data: dict[str, Any], goals: ActivityGoals) -> dict[str, bool]:
-    move = _num(data, "active_calories")
-    exercise = _num(data, "exercise_minutes")
-    stand = _num(data, "stand_hours")
+def _day_ring_metrics(
+    data: dict[str, Any],
+    default_goals: ActivityGoals,
+) -> tuple[dict[str, float | None], dict[str, float | None]]:
+    rings = data.get("activity_rings")
+    if isinstance(rings, dict):
+        actual = {
+            "move": _num(rings, "active_calories"),
+            "exercise": _num(rings, "exercise_minutes"),
+            "stand": _num(rings, "stand_hours"),
+        }
+        goals = {
+            "move": _num(rings, "active_calories_goal") or default_goals.active_calories,
+            "exercise": _num(rings, "exercise_minutes_goal") or default_goals.exercise_minutes,
+            "stand": _num(rings, "stand_hours_goal") or default_goals.stand_hours,
+        }
+        return actual, goals
+
+    return (
+        {
+            "move": _num(data, "active_calories"),
+            "exercise": _num(data, "exercise_minutes"),
+            "stand": _num(data, "stand_hours"),
+        },
+        {
+            "move": default_goals.active_calories,
+            "exercise": default_goals.exercise_minutes,
+            "stand": default_goals.stand_hours,
+        },
+    )
+
+
+def _ring_closed(data: dict[str, Any], default_goals: ActivityGoals) -> dict[str, bool]:
+    actual, goals = _day_ring_metrics(data, default_goals)
+
+    def closed(key: str) -> bool:
+        value = actual[key]
+        goal = goals[key]
+        return value is not None and goal is not None and value >= goal
+
+    move = closed("move")
+    exercise = closed("exercise")
+    stand = closed("stand")
     return {
-        "move": move is not None and move >= goals.active_calories,
-        "exercise": exercise is not None and exercise >= goals.exercise_minutes,
-        "stand": stand is not None and stand >= goals.stand_hours,
-        "all": (
-            move is not None
-            and move >= goals.active_calories
-            and exercise is not None
-            and exercise >= goals.exercise_minutes
-            and stand is not None
-            and stand >= goals.stand_hours
-        ),
+        "move": move,
+        "exercise": exercise,
+        "stand": stand,
+        "all": move and exercise and stand,
     }
 
 
 def _compute_streaks(
     sorted_dates: list[str],
     daily: dict[str, dict[str, Any]],
-    goals: ActivityGoals,
+    default_goals: ActivityGoals,
 ) -> dict[str, Any]:
     if not sorted_dates:
         return {
@@ -158,7 +190,7 @@ def _compute_streaks(
         longest = 0
         run = 0
         for d in sorted_dates:
-            rings = _ring_closed(daily[d], goals)
+            rings = _ring_closed(daily[d], default_goals)
             if rings[key]:
                 run += 1
                 longest = max(longest, run)
@@ -166,7 +198,7 @@ def _compute_streaks(
                 run = 0
         current = 0
         for d in reversed(sorted_dates):
-            rings = _ring_closed(daily[d], goals)
+            rings = _ring_closed(daily[d], default_goals)
             if rings[key]:
                 current += 1
             else:
@@ -274,19 +306,36 @@ def refresh_derived(
     ring_days = sum(
         1 for d in sorted_dates if _ring_closed(daily[d], goals)["all"]
     )
+    days_with_activity_rings = sum(
+        1
+        for d in sorted_dates
+        if isinstance(daily[d].get("activity_rings"), dict)
+    )
+
+    ref_key = ref.isoformat()
+    current_goals = goals
+    if ref_key in daily:
+        _actual, ref_goals = _day_ring_metrics(daily[ref_key], goals)
+        current_goals = ActivityGoals(
+            active_calories=ref_goals["move"] or goals.active_calories,
+            exercise_minutes=ref_goals["exercise"] or goals.exercise_minutes,
+            stand_hours=ref_goals["stand"] or goals.stand_hours,
+        )
 
     summary: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "reference_date": ref.isoformat(),
         "goals": {
-            "active_calories": goals.active_calories,
-            "exercise_minutes": goals.exercise_minutes,
-            "stand_hours": goals.stand_hours,
+            "active_calories": current_goals.active_calories,
+            "exercise_minutes": current_goals.exercise_minutes,
+            "stand_hours": current_goals.stand_hours,
+            "source": "activity_rings" if ref_key in daily and isinstance(daily[ref_key].get("activity_rings"), dict) else "default",
         },
         "periods": periods,
         "rings": {
             **rings,
             "days_all_rings_closed": ring_days,
+            "days_with_activity_rings": days_with_activity_rings,
         },
         "daily_files_count": len(sorted_dates),
     }
