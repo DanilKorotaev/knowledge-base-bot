@@ -210,7 +210,7 @@ class CursorCLIService:
         rules_dir = self.kb_path / ".cursor" / "rules"
         rules_dir.mkdir(parents=True, exist_ok=True)
         
-        # Загрузить промпт бота
+        # Generic OSS runtime prompt (no vault-specific paths)
         bot_prompt = self._load_bot_prompt()
         if bot_prompt:
             bot_prompt_file = rules_dir / "bot-system-prompt.md"
@@ -218,29 +218,53 @@ class CursorCLIService:
                 bot_prompt_file.write_text(bot_prompt, encoding="utf-8")
                 logger.info(f"Промпт бота скопирован в .cursor/rules/")
         
-        # Загрузить промпт БЗ
+        # Vault domain prompt (operator-configured / optional local convention)
         kb_prompt = self._load_kb_prompt()
         if kb_prompt:
             kb_prompt_file = rules_dir / "kb-system-prompt.md"
             if not kb_prompt_file.exists() or kb_prompt_file.read_text(encoding="utf-8") != kb_prompt:
                 kb_prompt_file.write_text(kb_prompt, encoding="utf-8")
                 logger.info(f"Промпт БЗ скопирован в .cursor/rules/")
+
+    def _ensure_channel_prompt(self, channel: str) -> None:
+        """Write only the active channel prompt into vault rules (telegram | app)."""
+        text = self._load_channel_prompt(channel)
+        if not text:
+            return
+        rules_dir = self.kb_path / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        channel_file = rules_dir / "channel-prompt.md"
+        if not channel_file.exists() or channel_file.read_text(encoding="utf-8") != text:
+            channel_file.write_text(text, encoding="utf-8")
+            logger.info("Channel prompt (%s) written to .cursor/rules/channel-prompt.md", channel)
+
+    def _wrap_query_with_channel(self, query: str, channel: Optional[str]) -> str:
+        """
+        Prefix the user query with channel capabilities.
+
+        Bound to this invocation so concurrent telegram/app requests do not rely only on
+        a shared channel-prompt.md file.
+        """
+        if not channel:
+            return query
+        channel_prompt = self._load_channel_prompt(channel)
+        if not channel_prompt:
+            return query
+        return f"{channel_prompt.strip()}\n\n---\n\n{query}"
     
     def _load_system_prompt(self) -> str:
         """
-        Загрузить системные промпты (промпт бота + промпт БЗ)
-        
-        Приоритет загрузки промпта бота:
-        1. Путь из переменной окружения BOT_SYSTEM_PROMPT_PATH (если указан)
-        2. Файл из проекта: agent/system_prompt.md
-        
-        Приоритет загрузки промпта БЗ:
-        1. Путь из переменной окружения KB_SYSTEM_PROMPT_PATH (если указан)
-        2. Файл из базы знаний: Документация/Системный промпт.md
-        3. Другие возможные пути (можно расширить)
-        
-        Returns:
-            str: Объединенный системный промпт (промпт бота + промпт БЗ)
+        Load combined prompts for logging/diagnostics (bot runtime + vault domain).
+
+        Bot runtime prompt:
+        1. BOT_SYSTEM_PROMPT_PATH
+        2. agent/system_prompt.md
+
+        Vault domain prompt (not part of the open-source defaults):
+        1. KB_SYSTEM_PROMPT_PATH
+        2. Optional convention path inside the vault (see _load_kb_prompt)
+
+        Channel prompts are applied per request (see process_query channel=).
         """
         prompts = []
         
@@ -253,7 +277,7 @@ class CursorCLIService:
         kb_prompt = self._load_kb_prompt()
         if kb_prompt:
             prompts.append("---")
-            prompts.append("# Системный промпт базы знаний")
+            prompts.append("# Vault domain prompt")
             prompts.append("")
             prompts.append(kb_prompt)
         
@@ -262,47 +286,91 @@ class CursorCLIService:
             return ""
         
         return "\n\n".join(prompts)
+
+    def _project_root(self) -> Path:
+        return Path(__file__).parent.parent
+
+    def _read_prompt_file(self, prompt_path: Path, *, label: str) -> str:
+        if prompt_path.exists():
+            logger.info("Loaded %s from %s", label, prompt_path)
+            return prompt_path.read_text(encoding="utf-8")
+        return ""
     
     def _load_bot_prompt(self) -> str:
-        """Загрузить системный промпт бота"""
-        # Проверяем, указан ли путь в переменной окружения
+        """Load generic OSS agent runtime prompt."""
         custom_path = os.getenv("BOT_SYSTEM_PROMPT_PATH")
         if custom_path:
             prompt_path = Path(custom_path)
             if not prompt_path.is_absolute():
-                # Относительный путь - от проекта
-                project_root = Path(__file__).parent.parent
-                prompt_path = project_root / prompt_path
-            if prompt_path.exists():
-                logger.info(f"Загружен промпт бота из указанного пути: {prompt_path}")
-                return prompt_path.read_text(encoding="utf-8")
-            else:
-                logger.warning(f"Указанный путь к промпту бота не найден: {prompt_path}")
-        
-        # Загрузить из проекта
-        project_root = Path(__file__).parent.parent
-        project_prompt_path = project_root / "agent" / "system_prompt.md"
-        if project_prompt_path.exists():
-            logger.info(f"Загружен промпт бота из проекта: {project_prompt_path}")
-            return project_prompt_path.read_text(encoding="utf-8")
-        
-        return ""
+                prompt_path = self._project_root() / prompt_path
+            text = self._read_prompt_file(prompt_path, label="bot runtime prompt")
+            if text:
+                return text
+            logger.warning(f"Указанный путь к промпту бота не найден: {prompt_path}")
+
+        return self._read_prompt_file(
+            self._project_root() / "agent" / "system_prompt.md",
+            label="bot runtime prompt",
+        )
+
+    def _load_channel_prompt(self, channel: str) -> str:
+        """
+        Load short channel capability prompt.
+
+        channel: \"telegram\" | \"app\"
+        Overrides: CHANNEL_TELEGRAM_PROMPT_PATH / CHANNEL_APP_PROMPT_PATH
+        """
+        normalized = (channel or "").strip().lower()
+        if normalized in ("ios", "kb_app", "kb-app", "application"):
+            normalized = "app"
+        if normalized not in ("telegram", "app"):
+            logger.warning("Unknown agent channel %r — no channel prompt", channel)
+            return ""
+
+        env_key = (
+            "CHANNEL_TELEGRAM_PROMPT_PATH"
+            if normalized == "telegram"
+            else "CHANNEL_APP_PROMPT_PATH"
+        )
+        custom_path = os.getenv(env_key)
+        if custom_path:
+            prompt_path = Path(custom_path)
+            if not prompt_path.is_absolute():
+                prompt_path = self._project_root() / prompt_path
+            text = self._read_prompt_file(prompt_path, label=f"{normalized} channel prompt")
+            if text:
+                return text
+            logger.warning("Channel prompt path not found: %s", prompt_path)
+
+        filename = (
+            "channel_telegram_prompt.md"
+            if normalized == "telegram"
+            else "channel_app_prompt.md"
+        )
+        return self._read_prompt_file(
+            self._project_root() / "agent" / filename,
+            label=f"{normalized} channel prompt",
+        )
     
     def _load_kb_prompt(self) -> str:
-        """Загрузить системный промпт базы знаний"""
-        # Проверяем, указан ли путь в переменной окружения
+        """Load vault domain prompt (deployment-specific; not shipped as personal content)."""
         custom_path = os.getenv("KB_SYSTEM_PROMPT_PATH")
         if custom_path:
             prompt_path = Path(custom_path)
             if not prompt_path.is_absolute():
-                # Относительный путь - от базы знаний
                 prompt_path = self.kb_path / prompt_path
             if prompt_path.exists():
                 logger.info(f"Загружен промпт БЗ из указанного пути: {prompt_path}")
                 return prompt_path.read_text(encoding="utf-8")
             else:
                 logger.warning(f"Указанный путь к промпту БЗ не найден: {prompt_path}")
-        
+
+        # Optional local convention used by some vaults (override via KB_SYSTEM_PROMPT_PATH)
+        default_prompt_path = self.kb_path / "Документация" / "Системный промпт.md"
+        if default_prompt_path.exists():
+            logger.info(f"Загружен промпт БЗ из канона vault: {default_prompt_path}")
+            return default_prompt_path.read_text(encoding="utf-8")
+
         logger.debug("Промпт базы знаний не найден (это нормально, если БЗ не имеет системного промпта)")
         return ""
     
@@ -743,6 +811,7 @@ class CursorCLIService:
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
         on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
         cancel_event: Optional[asyncio.Event] = None,
+        channel: Optional[str] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -757,6 +826,10 @@ class CursorCLIService:
             on_chunk: Async callback для стриминга чанков stdout (опционально)
             on_activity: Async callback для прогресса stream-json (tool_call и т.д.)
             cancel_event: при set() процесс cursor-agent принудительно завершается (отмена пользователем)
+            channel: Client channel for capability prompt (\"telegram\" | \"app\").
+                Written to `.cursor/rules/channel-prompt.md` every turn; prefixed
+                into the user query only when ``cursor_chat_id`` is missing
+                (new Cursor session / resume fallback).
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -767,6 +840,15 @@ class CursorCLIService:
             error_msg = "API ключ не установлен. Установите CURSOR_API_KEY или OPENAI_API_KEY"
             logger.error(error_msg)
             return f"❌ Ошибка: {error_msg}", []
+
+        if channel:
+            # Always refresh channel-prompt.md so Cursor rules match this client.
+            self._ensure_channel_prompt(channel)
+            # Prefix into the user text only when starting a new Cursor chat
+            # (no --resume). With resume the first turn already carried channel
+            # context in history; repeating it every message is wasteful.
+            if not cursor_chat_id:
+                query = self._wrap_query_with_channel(query, channel)
         
         # Логировать прикрепленные файлы
         if attached_files:

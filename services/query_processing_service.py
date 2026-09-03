@@ -303,6 +303,7 @@ class QueryProcessingService:
                 on_chunk=on_chunk_cb,
                 on_activity=on_activity_cb,
                 cancel_event=cancel_event,
+                channel="telegram",
             )
             
             # Если --resume вернул ошибку, пробуем fallback без cursor_chat_id
@@ -338,6 +339,7 @@ class QueryProcessingService:
                     on_chunk=on_chunk_cb,
                     on_activity=on_activity_cb,
                     cancel_event=cancel_event,
+                    channel="telegram",
                 )
             
             cursor_time = time.time() - cursor_start
@@ -574,6 +576,7 @@ class QueryProcessingService:
                 on_chunk=on_chunk_cb,
                 on_activity=on_activity,
                 cancel_event=cancel_event,
+                channel="app",
             )
 
             if cursor_chat_id and response.startswith("❌") and "код: 1" in response:
@@ -589,6 +592,7 @@ class QueryProcessingService:
                     on_chunk=on_chunk_fb,
                     on_activity=on_activity,
                     cancel_event=cancel_event,
+                    channel="app",
                 )
 
             logger.info("KB App API: Cursor CLI за %.2fс", time.time() - cursor_start)
