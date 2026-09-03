@@ -1,38 +1,42 @@
-# Системный промпт для Telegram Knowledge Base Bot
+# Системный промпт для репозитория knowledge-base-bot
 
-Этот проект - Telegram-бот для работы с базой знаний через AI-ассистента.
+Этот проект — бэкенд персональной базы знаний: **Telegram-бот** и **KB App API** (для iOS-приложения). Агент пользователя запускается через Cursor CLI по vault.
 
 ## О проекте
 
-- **Название**: Telegram Knowledge Base Bot
-- **Назначение**: Интерфейс между пользователем и базой знаний через Telegram
-- **Технологии**: Python, aiogram, Cursor CLI, PostgreSQL/SQLite, NextCloud
+- **Название**: Knowledge Base Bot (+ KB App API)
+- **Назначение**: приём запросов из Telegram и из iOS-приложения, сессии, медиа/голос, синк Nextcloud, вызов Cursor CLI по локальной копии vault
+- **Технологии**: Python, aiogram, FastAPI (KB App API), Cursor CLI, PostgreSQL/SQLite, Nextcloud
 
-## Архитектура
+## Архитектура (упрощённо)
 
-Бот работает следующим образом:
-1. Пользователь отправляет запрос в Telegram бота
-2. Бот передает запрос в Cursor CLI с контекстом базы знаний
-3. Cursor CLI обрабатывает запрос через OpenAI API
-4. AI может читать, искать и изменять файлы базы знаний
-5. Изменения синхронизируются с NextCloud и видны пользователю в Obsidian
+1. Клиент (Telegram или iOS) отправляет сообщение в сессию
+2. Сервис обрабатывает запрос, при необходимости синкает vault с Nextcloud
+3. Cursor CLI (`cursor-agent`) работает в директории vault:
+   - `agent/system_prompt.md` — общее OSS-окружение агента
+   - `agent/channel_telegram_prompt.md` / `agent/channel_app_prompt.md` — возможности канала (подмешиваются по каналу)
+   - vault domain prompt — только из `KB_SYSTEM_PROMPT_PATH` / опционального файла в vault оператора (не хардкодить личное в репозитории)
+4. Ответ и изменения файлов возвращаются клиенту; для API — стриминг, push, Structured UI и т.д. по возможностям канала
 
-## Структура проекта
 
-- `bot.py` - точка входа
-- `config.py` - конфигурация
-- `database/` - работа с БД (PostgreSQL/SQLite)
-- `services/` - бизнес-логика (Cursor CLI, OpenAI, NextCloud)
-- `handlers/` - обработчики Telegram
-- `utils/` - утилиты
+## Структура
+
+- `bot.py` — точка входа Telegram
+- `kb_app_api/` — HTTP API для приложения
+- `config.py` — конфигурация
+- `database/` — PostgreSQL/SQLite
+- `services/` — Cursor CLI, sync, обработка запросов
+- `handlers/` — Telegram
+- `agent/` — runtime-промпты агента (`system_prompt.md`, Structured UI и др.)
+- `utils/` — утилиты
 
 ## Принципы разработки
 
-1. **Универсальность**: код не привязан к конкретной базе знаний
-2. **Открытость**: публичный репозиторий с полной документацией
-3. **Локальная разработка**: поддержка SQLite и локальной БЗ
+1. Универсальность относительно конкретной БЗ
+2. Открытость: публичный репозиторий и `docs/`
+3. Локальная разработка: SQLite и локальный путь к vault
+4. Канал-специфичные фичи (например Structured UI) — только в API/приложении, не ломать Telegram-путь
 
 ## Документация
 
-Полная документация находится в папке `docs/`.
-
+Полная документация — в `docs/`. Задачи — в `docs/tasks/`.

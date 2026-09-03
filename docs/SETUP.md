@@ -47,7 +47,15 @@ cp .env.example .env
 
 **Для локальной копии базы знаний:**
 - `LOCAL_KB_PATH` - путь к локальной копии базы знаний
-- `ENABLE_SYNC` - включить/выключить синхронизацию с NextCloud
+- `ENABLE_SYNC` - включить/выключить синхронизацию с Nextcloud
+
+**Промпты агента (Cursor CLI):**
+- `agent/system_prompt.md` — общее OSS-окружение (не привязано к конкретной БЗ)
+- `agent/channel_telegram_prompt.md` / `agent/channel_app_prompt.md` — возможности канала; при каждом запросе обновляется `.cursor/rules/channel-prompt.md`, а текст канала **префиксуется к user query только при старте Cursor-сессии** (нет `cursor_chat_id` / fallback без `--resume`)
+- `KB_SYSTEM_PROMPT_PATH` — путь к **доменному** промпту конкретного vault (опционально). Если не задан, пробуется файл `Документация/Системный промпт.md` внутри vault, если он есть
+- Переопределения: `BOT_SYSTEM_PROMPT_PATH`, `CHANNEL_TELEGRAM_PROMPT_PATH`, `CHANNEL_APP_PROMPT_PATH`
+
+Личные правила vault (структура папок, бэклог задач) живут **только** в доменном промпте оператора, не в репозитории бота.
 
 **Для управления доступом:**
 - `ACCESS_MODE` - режим доступа: `open` (открытый, все имеют доступ) или `restricted` (ограниченный, только whitelist). По умолчанию: `restricted`
