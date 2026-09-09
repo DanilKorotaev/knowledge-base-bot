@@ -130,6 +130,43 @@ def _safe_filename(name: str | None) -> str:
     return (clean[:200] or "upload.bin")
 
 
+_HEIC_BRANDS = {b"heic", b"heif", b"mif1", b"msf1", b"heim", b"heis", b"hevx", b"hevc"}
+
+
+def _sniff_image_mime(data: bytes) -> str | None:
+    """Detect image MIME from magic bytes when the filename has no/wrong extension."""
+    if len(data) < 12:
+        return None
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp" and data[8:12] in _HEIC_BRANDS:
+        return "image/heic"
+    return None
+
+
+def _file_type_for_upload(
+    safe_filename: str,
+    data: bytes,
+    content_type: str | None = None,
+) -> str:
+    mime, _ = mimetypes.guess_type(safe_filename)
+    if mime and mime.startswith("image/"):
+        return "photo"
+    if content_type:
+        ct = content_type.split(";", 1)[0].strip().lower()
+        if ct.startswith("image/"):
+            return "photo"
+    if _sniff_image_mime(data):
+        return "photo"
+    return "document"
+
+
 def _parse_use_kb(value: str) -> bool:
     return str(value).lower() in ("1", "true", "yes", "on")
 
@@ -148,12 +185,14 @@ async def _attach_file_to_message(
     dest: Path,
     safe_filename: str,
     file_size: int,
+    data: bytes | None = None,
+    content_type: str | None = None,
 ) -> None:
     from utils.db_helpers import get_db
 
     db = await get_db()
-    mime, _ = mimetypes.guess_type(safe_filename)
-    ftype = "photo" if mime and mime.startswith("image/") else "document"
+    payload = data if data is not None else dest.read_bytes()
+    ftype = _file_type_for_upload(safe_filename, payload, content_type)
     try:
         await db.add_attachment(
             session_id=session_id,
@@ -229,7 +268,15 @@ async def _persist_compose_uploads(
         dest = upload_root / f"{uuid.uuid4().hex[:10]}_{safe}"
         dest.write_bytes(data)
         file_paths.append(dest)
-        await _attach_file_to_message(session_id, message_id, dest, safe, len(data))
+        await _attach_file_to_message(
+            session_id,
+            message_id,
+            dest,
+            safe,
+            len(data),
+            data=data,
+            content_type=upload.content_type,
+        )
 
     for index, upload in enumerate(audio_uploads):
         data = await upload.read()
@@ -481,7 +528,15 @@ async def post_attachment(
     db = await get_db()
     user_msg = await db.add_message(sid, "user", query_text)
     message_id = int(user_msg["id"])
-    await _attach_file_to_message(sid, message_id, dest, safe, len(data))
+    await _attach_file_to_message(
+        sid,
+        message_id,
+        dest,
+        safe,
+        len(data),
+        data=data,
+        content_type=file.content_type,
+    )
 
     try:
         qps = QueryProcessingService()

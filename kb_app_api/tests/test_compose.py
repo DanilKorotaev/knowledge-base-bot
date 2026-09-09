@@ -139,6 +139,43 @@ class TestComposeMessage(unittest.TestCase):
         mock_process.assert_awaited_once()
 
 
+    @patch("kb_app_api.routes.messages.QueryProcessingService.process_query_for_api", new_callable=AsyncMock)
+    def test_compose_classifies_jpeg_without_image_extension_as_photo(self, mock_process: AsyncMock) -> None:
+        mock_process.return_value = ("ok", [])
+        sid = self._create_session()
+        jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+        response = self.client.post(
+            f"/api/sessions/{sid}/messages/compose",
+            headers=self.headers,
+            data={"content": "screenshot"},
+            files=[
+                (
+                    "files",
+                    (
+                        "Снимок_экрана_2026_09_07_в_9.21.57_PM",
+                        jpeg,
+                        "application/octet-stream",
+                    ),
+                ),
+            ],
+        )
+        self.assertEqual(response.status_code, 201)
+        user = next(message for message in response.json()["messages"] if message["role"] == "user")
+        self.assertEqual(len(user["attachments"]), 1)
+        self.assertEqual(user["attachments"][0]["file_type"], "photo")
+
+    def test_file_type_for_upload_sniffs_png_and_rejects_plain(self) -> None:
+        from kb_app_api.routes.messages import _file_type_for_upload
+
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+        self.assertEqual(_file_type_for_upload("shot.57_PM", png), "photo")
+        self.assertEqual(
+            _file_type_for_upload("x.bin", b"hello", content_type="image/png"),
+            "photo",
+        )
+        self.assertEqual(_file_type_for_upload("note.txt", b"hello"), "document")
+
+
 if __name__ == "__main__":
     smoke.setUpModule()
     unittest.main()
