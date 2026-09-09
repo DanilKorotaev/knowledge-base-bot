@@ -14,16 +14,33 @@ if [[ ! -d .venv ]]; then
 fi
 
 if ! lsof -nP -iTCP:1080 -sTCP:LISTEN 2>/dev/null | grep -q ss-local; then
-  "${HOME}/VPN/start-kb-vpn.sh" || true
+  "${HOME}/VPN/start-kb-vpn.sh" --once || true
+fi
+if ! lsof -nP -iTCP:8118 -sTCP:LISTEN >/dev/null 2>&1; then
+  "${HOME}/VPN/vpn-http.sh" on || true
 fi
 
 export DB_HOST="${DB_HOST:-127.0.0.1}"
 export DB_PORT="${DB_PORT:-5432}"
 export TELEGRAM_PROXY="${TELEGRAM_PROXY:-socks5://127.0.0.1:1080}"
 export OPENAI_PROXY="${OPENAI_PROXY:-socks5://127.0.0.1:1080}"
-export CURSOR_CLI_PROXY="${CURSOR_CLI_PROXY:-$OPENAI_PROXY}"
+# CRITICAL: cursor-agent (Node) cannot use SOCKS. Always HTTP CONNECT :8118.
+# Do not default to $OPENAI_PROXY (socks) — that strips HTTPS_PROXY and breaks auth
+# ("The provided API key is invalid" from RU / no egress).
+if [[ -n "${CURSOR_CLI_PROXY:-}" ]]; then
+  case "${CURSOR_CLI_PROXY}" in
+    socks5://*|socks://*|socks5h://*)
+      echo "WARN: CURSOR_CLI_PROXY is SOCKS (${CURSOR_CLI_PROXY}); forcing http://127.0.0.1:8118" >&2
+      export CURSOR_CLI_PROXY="http://127.0.0.1:8118"
+      ;;
+  esac
+else
+  export CURSOR_CLI_PROXY="http://127.0.0.1:8118"
+fi
+export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
+export AGENT_CLI_CREDENTIAL_STORE="${AGENT_CLI_CREDENTIAL_STORE:-file}"
 export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
-export PYTHONPATH="${API_DIR}/packages/health_linking:${API_DIR}/packages/health_aggregate:${PYTHONPATH:-}"
+export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {

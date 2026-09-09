@@ -7,17 +7,21 @@ alwaysApply: true
 
 This repo (`knowledge-base-bot`) deploys on push. The Cursor agent often runs **inside** that same process on the Mac mini. A `git push` to `develop`/`main` can **kill the agent mid-reply**.
 
+Also never hard-restart the host API mid-reply — see `no-host-api-restart-mid-query.mdc`.
+
 ## Required workflow
 
 1. Finish **all** code, tests, and the user-facing answer **first**.
 2. Only then: `git commit` + `git push` (last actions in the turn).
 3. After a backend push, **do not continue** with more tool calls or long follow-up work in the same turn — the session may die. Tell the user the push landed and that a **new chat** may be needed if the agent disconnects.
+4. Remember: CI redeploy can also kill **other** in-flight KB App sessions (e.g. user chatting in «Тренировки» while you finish «Sharing»). Prefer push only when the user is not waiting on another session; CI uses `safe-restart` wait, but a race remains.
 
 ## Do NOT
 
 - Push “early” to “kick CI” while still implementing features
 - Push backend and then keep editing / running long commands in the same turn
 - Assume the agent will survive redeploy
+- Bypass with `launchctl kickstart -k …kb-app-api-host` mid-reply (same kill)
 
 ## OK without delay
 

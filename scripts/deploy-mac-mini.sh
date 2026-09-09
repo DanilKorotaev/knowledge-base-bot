@@ -64,26 +64,17 @@ fi
 docker compose "${COMPOSE_FILES[@]}" up "${UP_FLAGS[@]}" "${SERVICES[@]}"
 
 UID_NUM="$(id -u)"
-for label in com.coredan.kb-bot-host com.coredan.kb-app-api-host; do
-  launchctl kickstart -k "gui/${UID_NUM}/${label}" 2>/dev/null \
-    || launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/${label}.plist" 2>/dev/null \
-    || true
-done
+# Bot can always restart; API must not kill an in-flight cursor-agent reply (KB App).
+launchctl kickstart -k "gui/${UID_NUM}/com.coredan.kb-bot-host" 2>/dev/null \
+  || launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/com.coredan.kb-bot-host.plist" 2>/dev/null \
+  || true
 
-# API на хосте: после kickstart uvicorn + DB init могут занять >2 с
-API_PORT="$(grep -E '^KB_APP_API_PORT=' .env 2>/dev/null | cut -d= -f2 || true)"
-API_PORT="${API_PORT:-8091}"
-API_HEALTH="http://127.0.0.1:${API_PORT}/health"
-for i in $(seq 1 30); do
-  if curl -sf "${API_HEALTH}" >/dev/null; then
-    break
-  fi
-  if [[ "${i}" -eq 30 ]]; then
-    echo "WARN: kb-app-api health check failed after 60s (${API_HEALTH})" >&2
-    tail -20 "${HOME}/Library/Logs/kb-app-api-host.log" 2>/dev/null >&2 || true
-    exit 1
-  fi
-  sleep 2
-done
+chmod +x scripts/safe-restart-kb-app-api-host.sh 2>/dev/null || true
+# CI: wait for idle agent (up to 10m) instead of blind kickstart -k.
+if ! KB_API_RESTART_WAIT=1 KB_API_RESTART_WAIT_SEC="${KB_API_RESTART_WAIT_SEC:-600}" \
+  bash scripts/safe-restart-kb-app-api-host.sh; then
+  echo "ERROR: safe restart of kb-app-api-host failed" >&2
+  exit 1
+fi
 
 echo "Deploy OK: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"

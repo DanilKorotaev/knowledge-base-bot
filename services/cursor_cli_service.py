@@ -86,19 +86,30 @@ class CursorCLIService:
         env["CURSOR_API_KEY"] = self.api_key
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
-        # cursor-agent (Node / global-agent): HTTP_PROXY и HTTPS_PROXY должны быть http:,
-        # иначе «Unsupported ... URL protocol must be http:"» для socks5://.
-        # Для SOCKS5 достаточно ALL_PROXY; HTTP(S)_PROXY не дублируем.
+        # cursor-agent — Node fetch: HTTP_PROXY только с схемой http://.
+        # socks5:// в HTTPS_PROXY даёт «Unsupported URL protocol».
+        # ALL_PROXY=socks5:// новый CLI (Node 22+) игнорирует; нужен HTTP CONNECT
+        # (vpn-http.sh → :8118) и NODE_USE_ENV_PROXY=1.
+        # If misconfigured as SOCKS (legacy start script / OPENAI_PROXY default),
+        # force HTTP CONNECT — bare/RU egress often surfaces as "API key is invalid".
         proxy = config.CURSOR_CLI_PROXY or config.OPENAI_PROXY
         if proxy:
             pl = proxy.strip().lower()
+            if pl.startswith("socks5://") or pl.startswith("socks://") or pl.startswith("socks5h://"):
+                logger.warning(
+                    "CURSOR_CLI_PROXY is SOCKS (%s); using http://127.0.0.1:8118 for cursor-agent",
+                    proxy,
+                )
+                proxy = "http://127.0.0.1:8118"
+                pl = proxy
             env["ALL_PROXY"] = proxy
-            if pl.startswith("socks5://") or pl.startswith("socks://"):
-                env.pop("HTTP_PROXY", None)
-                env.pop("HTTPS_PROXY", None)
-            else:
-                env["HTTPS_PROXY"] = proxy
-                env["HTTP_PROXY"] = proxy
+            env["HTTPS_PROXY"] = proxy
+            env["HTTP_PROXY"] = proxy
+            env["https_proxy"] = proxy
+            env["http_proxy"] = proxy
+            env["NODE_USE_ENV_PROXY"] = "1"
+        # Headless / SSH: login keychain часто locked — не ходим в него.
+        env.setdefault("AGENT_CLI_CREDENTIAL_STORE", "file")
         return env
 
     def _cmd_with_optional_stdbuf(self, cmd: list[str]) -> list[str]:
