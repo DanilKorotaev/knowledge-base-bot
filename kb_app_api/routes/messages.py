@@ -22,7 +22,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
-from kb_app_api.voice_attachments import attach_voice_to_message, attach_voice_to_last_user_message, voice_upload_path
+from kb_app_api.voice_attachments import attach_voice_to_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
 
 logger = logging.getLogger(__name__)
@@ -452,6 +452,9 @@ async def post_attachment(
 ) -> JSONResponse:
     """
     multipart: `file`, `use_knowledge_base`, опционально `message` — текст запроса вместо текста по умолчанию.
+
+    User message + attachment are persisted *before* Cursor runs, so a concurrent
+    compose/voice cannot steal the file onto a newer last-user message.
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
@@ -473,6 +476,13 @@ async def post_attachment(
 
     query_text = (message or "").strip() or _DEFAULT_ATTACH_PROMPT
 
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    user_msg = await db.add_message(sid, "user", query_text)
+    message_id = int(user_msg["id"])
+    await _attach_file_to_message(sid, message_id, dest, safe, len(data))
+
     try:
         qps = QueryProcessingService()
         await qps.process_query_for_api(
@@ -481,36 +491,12 @@ async def post_attachment(
             tid,
             use_knowledge_base=use_kb,
             attached_files=[dest],
+            save_user_message=False,
             allow_structured_ui=allow_sui,
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
         raise APIError("processing_error", str(e), status_code=500) from e
-
-    from utils.db_helpers import get_db
-
-    db = await get_db()
-    all_msgs = await db.get_session_messages(sid)
-    last_user = None
-    for m in reversed(all_msgs):
-        if m.get("role") == "user":
-            last_user = m
-            break
-    if last_user:
-        mime, _ = mimetypes.guess_type(safe)
-        ftype = "photo" if mime and mime.startswith("image/") else "document"
-        try:
-            await db.add_attachment(
-                session_id=sid,
-                message_id=last_user["id"],
-                file_type=ftype,
-                file_id=f"kb_app_api:{uuid.uuid4().hex}",
-                file_path=str(dest),
-                file_name=safe,
-                file_size=len(data),
-            )
-        except Exception as e:
-            logger.warning("Не удалось сохранить метаданные вложения: %s", e)
 
     payload = {"messages": await enrich_session_messages(sid, await db.get_session_messages(sid))}
     return JSONResponse(content=payload, status_code=201)
@@ -527,8 +513,10 @@ async def post_voice_message(
     accept: Annotated[str | None, Header()] = None,
 ) -> Response:
     """
-    Отредактированная транскрипция (`content`) + файл `audio` → пайплайн как у текста,
-    затем voice attachment и transcription в БД (как в Telegram-боте).
+    Отредактированная транскрипция (`content`) + файл `audio` → пайплайн как у текста.
+
+    User message + voice attachment are persisted *before* Cursor runs (same as compose),
+    so a later photo/compose cannot become the “last user” and steal this voice clip.
     """
     text = (content or "").strip()
     if not text:
@@ -555,8 +543,12 @@ async def post_voice_message(
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
-    async def persist_voice() -> None:
-        await attach_voice_to_last_user_message(sid, dest, safe, file_size, text)
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    user_msg = await db.add_message(sid, "user", text)
+    message_id = int(user_msg["id"])
+    await attach_voice_to_message(sid, message_id, dest, safe, file_size, text)
 
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -576,11 +568,11 @@ async def post_voice_message(
                     sid,
                     tid,
                     use_knowledge_base=use_kb,
+                    save_user_message=False,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
                 )
-                await persist_voice()
             except BaseException as e:
                 err_holder[0] = e
                 dest.unlink(missing_ok=True)
@@ -605,9 +597,9 @@ async def post_voice_message(
             sid,
             tid,
             use_knowledge_base=use_kb,
+            save_user_message=False,
             allow_structured_ui=allow_sui,
         )
-        await persist_voice()
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -615,9 +607,6 @@ async def post_voice_message(
         dest.unlink(missing_ok=True)
         raise
 
-    from utils.db_helpers import get_db
-
-    db = await get_db()
     all_msgs = await db.get_session_messages(sid)
     payload = {"messages": await enrich_session_messages(sid, all_msgs)}
     return JSONResponse(content=payload, status_code=201)
