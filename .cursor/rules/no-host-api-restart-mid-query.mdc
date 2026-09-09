@@ -1,0 +1,39 @@
+---
+description: Never restart kb-app-api / launchd while a KB App reply is still running
+alwaysApply: true
+---
+
+# No host API restart mid-query
+
+On Mac mini the Cursor agent for the iOS KB App runs **inside** `com.coredan.kb-app-api-host` (uvicorn → `cursor-agent`).  
+`launchctl kickstart -k …/com.coredan.kb-app-api-host` (and any hard restart of that job) **kills the in-flight reply**. The user sees a partial stream, then silence; often no assistant row is saved.
+
+Related: `deferred-backend-push.mdc` (push → CI → same kill).
+
+## Do NOT (while still answering)
+
+- `launchctl kickstart -k gui/$(id -u)/com.coredan.kb-app-api-host`
+- `launchctl kill` / `bootout` / `unload` that label
+- `pkill -f uvicorn` / `pkill -f kb_app_api` on the host API
+- Copy into `~/Projects/knowledge-base-bot` and restart “to pick up the fix” before the user-facing answer is finished
+- Call `scripts/deploy-mac-mini.sh` mid-reply
+
+## Required workflow
+
+1. Edit in the **vault** clone: `…/kb/knowledge-base-bot/` (not only runtime).
+2. Finish code, tests, and the **full chat reply**.
+3. Only then, if a host restart is needed:
+   - Prefer: commit + push `develop` and stop (CI deploys) — see deferred push rule.
+   - Or: `bash scripts/safe-restart-kb-app-api-host.sh` **after** the reply (script refuses if another `cursor-agent` is still running).
+4. Do not continue long tool work after a restart/push in the same turn.
+
+## OK
+
+- Editing vault/runtime files without restart (API already loaded old code until next restart — say so)
+- Restarting **staging** Docker API only (`kb-staging-kb-app-api`), not the host prod job
+- `safe-restart-kb-app-api-host.sh` when no `cursor-agent` is running
+- `KB_API_RESTART_FORCE=1` only if the user explicitly asked to force-restart now
+
+## Symptom if you broke this
+
+Session ends with consecutive `user` messages and no `assistant`; API log shows `Shutting down` right after `cursor_cli` started.
