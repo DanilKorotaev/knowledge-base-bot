@@ -94,6 +94,15 @@ class SQLiteDatabase(DatabaseInterface):
             message_columns = {row[1] for row in await cursor.fetchall()}
             if "structured_ui" not in message_columns:
                 await db.execute("ALTER TABLE messages ADD COLUMN structured_ui TEXT")
+            if "client_message_id" not in message_columns:
+                await db.execute(
+                    "ALTER TABLE messages ADD COLUMN client_message_id TEXT"
+                )
+            await db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_session_client_msg
+                ON messages (session_id, client_message_id)
+                WHERE client_message_id IS NOT NULL
+            """)
             
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS attachments (
@@ -370,14 +379,15 @@ class SQLiteDatabase(DatabaseInterface):
         self,
         session_id: int,
         role: str,
-        content: str
+        content: str,
+        client_message_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Добавить сообщение в сессию"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO messages (session_id, role, content)
-                VALUES (?, ?, ?)
-            """, (session_id, role, content))
+                INSERT INTO messages (session_id, role, content, client_message_id)
+                VALUES (?, ?, ?, ?)
+            """, (session_id, role, content, client_message_id))
             message_id = cursor.lastrowid
             await db.execute(
                 "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -385,11 +395,29 @@ class SQLiteDatabase(DatabaseInterface):
             )
             await db.commit()
             cursor = await db.execute("""
-                SELECT id, session_id, role, content, created_at
+                SELECT id, session_id, role, content, created_at, structured_ui, client_message_id
                 FROM messages WHERE id = ?
             """, (message_id,))
             row = await cursor.fetchone()
             return self._message_row_to_dict(row)
+
+    async def get_message_by_client_id(
+        self,
+        session_id: int,
+        client_message_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, session_id, role, content, created_at, structured_ui, client_message_id
+                FROM messages
+                WHERE session_id = ? AND client_message_id = ?
+                LIMIT 1
+                """,
+                (session_id, client_message_id),
+            )
+            row = await cursor.fetchone()
+            return self._message_row_to_dict(row) if row else None
     
     async def set_message_structured_ui(
         self,
@@ -432,6 +460,8 @@ class SQLiteDatabase(DatabaseInterface):
                 payload["structured_ui"] = json.loads(row[5])
             except (TypeError, json.JSONDecodeError):
                 payload["structured_ui"] = row[5]
+        if len(row) > 6 and row[6]:
+            payload["client_message_id"] = row[6]
         return payload
 
     async def get_session_messages_window(

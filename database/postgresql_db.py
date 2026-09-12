@@ -124,6 +124,21 @@ class PostgreSQLDatabase(DatabaseInterface):
                 await conn.execute("""
                     ALTER TABLE messages ADD COLUMN structured_ui TEXT
                 """)
+
+            client_msg_column = await conn.fetch("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='messages' AND column_name = 'client_message_id'
+            """)
+            if not client_msg_column:
+                await conn.execute("""
+                    ALTER TABLE messages ADD COLUMN client_message_id VARCHAR(64)
+                """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_session_client_msg
+                ON messages (session_id, client_message_id)
+                WHERE client_message_id IS NOT NULL
+            """)
             
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS attachments (
@@ -315,20 +330,38 @@ class PostgreSQLDatabase(DatabaseInterface):
         self,
         session_id: int,
         role: str,
-        content: str
+        content: str,
+        client_message_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Добавить сообщение в сессию"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                INSERT INTO messages (session_id, role, content)
-                VALUES ($1, $2, $3)
-                RETURNING id, session_id, role, content, created_at
-            """, session_id, role, content)
+                INSERT INTO messages (session_id, role, content, client_message_id)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, session_id, role, content, created_at, structured_ui, client_message_id
+            """, session_id, role, content, client_message_id)
             await conn.execute(
                 "UPDATE sessions SET updated_at = NOW() WHERE id = $1",
                 session_id,
             )
             return self._message_row_to_dict(row)
+
+    async def get_message_by_client_id(
+        self,
+        session_id: int,
+        client_message_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM messages
+                WHERE session_id = $1 AND client_message_id = $2
+                LIMIT 1
+                """,
+                session_id,
+                client_message_id,
+            )
+            return self._message_row_to_dict(row) if row else None
     
     async def set_message_structured_ui(
         self,
