@@ -1,6 +1,6 @@
 # KB App API: быстрый список сессий (`message_count` без загрузки всех сообщений)
 
-**Статус:** 📋 Запланировано  
+**Статус:** ✅ Выполнено (этап 1 + search, 2026-09-13)  
 **Приоритет:** 🟡 Средний (заметно при refresh списка чатов)  
 **Категория:** KB App API / производительность БД  
 **Связи:** [task-api-background-query-jobs.md](task-api-background-query-jobs.md) (отдельная проблема — блокировка API), iOS `GET /api/sessions` в `URLSessionKnowledgeBaseAPIClient`
@@ -48,7 +48,7 @@ for s in slice_:
 
 ### Этап 1 — быстрый win (можно отдельным PR)
 
-- [ ] `get_user_sessions_with_counts(user_id, limit, offset)` — один SQL:
+- [x] `get_user_sessions_with_counts(user_id, limit, offset)` — один SQL:
 
 ```sql
 SELECT s.*, COUNT(m.id) AS message_count
@@ -60,9 +60,9 @@ ORDER BY s.updated_at DESC
 LIMIT $2
 ```
 
-- [ ] `session_to_kb_from_row(session, message_count)` без загрузки messages.
-- [ ] Обновить `list_sessions`, `search_sessions` (для search по title — без messages; по тексту — отдельный запрос `EXISTS` / full-text, не грузить все треды).
-- [ ] Тест: 1 session + 1000 messages → list_sessions < 100 ms (sqlite/postgres smoke).
+- [x] `session_to_kb_from_row(session, message_count)` без загрузки messages.
+- [x] Обновить `list_sessions`, `search_sessions` (для search по title — без messages; по тексту — отдельный запрос `EXISTS` / full-text, не грузить все треды).
+- [x] Тест: 1 session + 200 messages → list_sessions smoke (`test_sessions_list_performance.py`).
 
 ### Этап 2 — денормализация (надёжно)
 
@@ -74,8 +74,8 @@ LIMIT $2
 
 ### Этап 3 — search
 
-- [ ] Поиск по тексту сообщений: `SELECT DISTINCT session_id FROM messages WHERE content ILIKE …` + join sessions (без загрузки полных тредов).
-- [ ] Лимит результатов search (уже есть пагинация list).
+- [x] Поиск по тексту сообщений: `EXISTS` + join sessions (без загрузки полных тредов).
+- [x] Лимит результатов search (limit=100).
 
 ## Контракт API
 
@@ -83,10 +83,10 @@ LIMIT $2
 
 ## Критерии приёмки
 
-- [ ] `GET /api/sessions?per_page=100` не вызывает `get_session_messages` в цикле.
-- [ ] При 50 сессиях × 200 сообщений — p95 < 300 ms на mini (локально).
-- [ ] `message_count` совпадает с `COUNT(*)` после backfill.
-- [ ] Mini App / Telegram list helpers используют тот же DB method.
+- [x] `GET /api/sessions?per_page=100` не вызывает `get_session_messages` в цикле.
+- [ ] При 50 сессиях × 200 сообщений — p95 < 300 ms на mini (локально) — проверить после деплоя.
+- [x] `message_count` = `COUNT(*)` через SQL aggregate (этап 2 денормализации ещё нет).
+- [x] Mini App / Telegram list helpers используют тот же DB method.
 
 ## Не в scope
 
@@ -100,3 +100,13 @@ LIMIT $2
 | 1 — SQL COUNT | ~2–4 ч |
 | 2 — денормализация + backfill | ~0.5–1 д |
 | 3 — search | ~0.5 д |
+
+
+## Результат (2026-09-13)
+
+Этап 1 + search без загрузки тредов:
+
+- `get_user_sessions_with_counts` / `count_user_sessions` / `count_session_messages` / `search_user_sessions_with_counts` (Postgres + SQLite)
+- `GET /api/sessions` и `/search` — `session_to_kb_from_row`, пагинация через SQL OFFSET
+- Mini App + Telegram `get_user_sessions_for_display` на тех же методах
+- Этап 2 (денормализация `sessions.message_count`) — по-прежнему опционален

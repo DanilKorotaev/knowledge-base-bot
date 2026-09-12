@@ -507,7 +507,7 @@ async def switch_session_handler(message: Message, state: FSMContext):
     await db.update_session(session_id, status="active")
     await state.update_data(session_id=session_id)
     
-    messages_count = len(await db.get_session_messages(session_id))
+    messages_count = await db.count_session_messages(session_id)
     session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
     
     await message.answer(

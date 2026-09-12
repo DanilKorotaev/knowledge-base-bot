@@ -49,6 +49,42 @@ class DatabaseInterface(ABC):
     ) -> List[Dict[str, Any]]:
         """Получить список сессий пользователя"""
         pass
+
+    async def count_user_sessions(
+        self,
+        user_id: int,
+        *,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> int:
+        """Количество сессий пользователя (для пагинации списка)."""
+        raise NotImplementedError
+
+    async def get_user_sessions_with_counts(
+        self,
+        user_id: int,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Сессии с ``message_count`` одним SQL (без загрузки content сообщений)."""
+        raise NotImplementedError
+
+    async def count_session_messages(self, session_id: int) -> int:
+        """COUNT(*) сообщений сессии без загрузки content."""
+        raise NotImplementedError
+
+    async def search_user_sessions_with_counts(
+        self,
+        user_id: int,
+        query: str,
+        *,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Поиск сессий по title/ID/тексту сообщений с ``message_count`` (без полных тредов)."""
+        raise NotImplementedError
     
     @abstractmethod
     async def update_session(

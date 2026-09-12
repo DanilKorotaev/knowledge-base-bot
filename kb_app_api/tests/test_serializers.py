@@ -9,6 +9,8 @@ from kb_app_api.serializers import (
     infer_content_format,
     message_to_kb,
     messages_to_kb,
+    session_to_kb,
+    session_to_kb_from_row,
 )
 
 
@@ -60,7 +62,27 @@ class TestMessageSerializers(unittest.TestCase):
         out = messages_to_kb(2, msgs, {1: []}, {})
         self.assertEqual(out[0]["content_format"], "markdown")
 
-    def test_changed_file_to_kb(self) -> None:
+    def test_session_to_kb_from_row_and_compat(self) -> None:
+        session = {
+            "id": 9,
+            "display_title": "Hello",
+            "session_type": "empty_chat",
+            "updated_at": "2026-07-01T10:00:00Z",
+            "created_at": "2026-06-01T10:00:00Z",
+        }
+        from_row = session_to_kb_from_row(session, 3)
+        self.assertEqual(from_row["message_count"], 3)
+        self.assertFalse(from_row["use_knowledge_base"])
+        compat = session_to_kb(session, message_count=3)
+        self.assertEqual(compat["message_count"], 3)
+        with_messages = session_to_kb(
+            session,
+            [{"id": 1, "created_at": "2026-08-01T10:00:00Z"}],
+        )
+        self.assertEqual(with_messages["message_count"], 1)
+        # Prefer sessions.updated_at over max(message.created_at)
+        self.assertIn("2026-07-01", with_messages["updated_at"])
+
         row = {
             "id": 7,
             "file_path": "docs/guide.md",
