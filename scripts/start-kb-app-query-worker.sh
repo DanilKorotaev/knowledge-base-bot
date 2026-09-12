@@ -20,14 +20,8 @@ if ! lsof -nP -iTCP:8118 -sTCP:LISTEN >/dev/null 2>&1; then
   "${HOME}/VPN/vpn-http.sh" on || true
 fi
 
-# Load .env without clobbering already-exported overrides
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-fi
-
+# Do NOT `source .env` here: values with spaces/Cyrillic break bash and can wipe DB_HOST.
+# Python config.load_dotenv() reads .env safely inside the worker process.
 export DB_HOST="${DB_HOST:-127.0.0.1}"
 export DB_PORT="${DB_PORT:-5432}"
 export TELEGRAM_PROXY="${TELEGRAM_PROXY:-socks5://127.0.0.1:1080}"
