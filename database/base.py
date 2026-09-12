@@ -67,10 +67,19 @@ class DatabaseInterface(ABC):
         self,
         session_id: int,
         role: str,
-        content: str
+        content: str,
+        client_message_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Добавить сообщение в сессию"""
         pass
+
+    async def get_message_by_client_id(
+        self,
+        session_id: int,
+        client_message_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """User/assistant message by client-supplied idempotency key, if any."""
+        raise NotImplementedError
     
     @abstractmethod
     async def get_session_messages(

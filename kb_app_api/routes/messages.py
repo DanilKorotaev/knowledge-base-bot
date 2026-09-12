@@ -82,6 +82,7 @@ async def _stream_assistant_sse(
     queue: asyncio.Queue[SSEQueueItem],
     err_holder: list[BaseException | None],
     run_pipeline: Callable[[], Awaitable[None]],
+    bootstrap_events: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     """
     Stream assistant deltas to the client.
@@ -89,6 +90,8 @@ async def _stream_assistant_sse(
     If the HTTP/SSE client disconnects (app backgrounded, chat closed), the pipeline
     task keeps running so Cursor can finish and the reply is persisted for later GET.
     """
+    for event in bootstrap_events or []:
+        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     yield f"data: {json.dumps({'status': 'processing'}, ensure_ascii=False)}\n\n"
     task = asyncio.create_task(run_pipeline())
     try:
@@ -116,6 +119,52 @@ async def _stream_assistant_sse(
                 session_id,
             )
         raise
+
+
+_CLIENT_MESSAGE_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    r"|^[0-9a-zA-Z_-]{8,64}$"
+)
+
+
+def _normalize_client_message_id(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if len(value) > 64 or not _CLIENT_MESSAGE_ID_RE.match(value):
+        raise APIError(
+            "validation_error",
+            "Некорректный client_message_id",
+            detail="client_message_id",
+        )
+    return value
+
+
+def _user_message_ack_payload(
+    *,
+    message_id: int,
+    client_message_id: str | None,
+) -> dict[str, Any]:
+    ack: dict[str, Any] = {"message_id": message_id}
+    if client_message_id:
+        ack["client_message_id"] = client_message_id
+    return {"user_message_acked": ack}
+
+
+async def _session_has_assistant_after(session_id: int, message_id: int) -> bool:
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    messages = await db.get_session_messages(session_id)
+    seen_user = False
+    for row in messages:
+        rid = int(row["id"])
+        if rid == message_id:
+            seen_user = True
+            continue
+        if seen_user and str(row.get("role")) == "assistant":
+            return True
+    return False
 
 _DEFAULT_ATTACH_PROMPT = (
     "Пользователь прикрепил файл. Проанализируй его в контексте базы знаний и ответь."
@@ -309,10 +358,13 @@ async def _run_compose_pipeline(
     attached_files: list[Path],
     wants_sse: bool,
     allow_structured_ui: bool = False,
+    user_message_ack: dict[str, Any] | None = None,
+    skip_pipeline: bool = False,
 ) -> Response:
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
         err_holder: list[BaseException | None] = [None]
+        bootstrap = [user_message_ack] if user_message_ack else None
 
         async def on_chunk(chunk: str) -> None:
             await queue.put(("delta", chunk))
@@ -322,6 +374,8 @@ async def _run_compose_pipeline(
 
         async def run_pipeline() -> None:
             try:
+                if skip_pipeline:
+                    return
                 qps = QueryProcessingService()
                 await qps.process_query_for_api(
                     query_text,
@@ -345,30 +399,36 @@ async def _run_compose_pipeline(
                 queue=queue,
                 err_holder=err_holder,
                 run_pipeline=run_pipeline,
+                bootstrap_events=bootstrap,
             ),
             media_type="text/event-stream",
             headers=SSE_STREAM_HEADERS,
         )
 
-    try:
-        qps = QueryProcessingService()
-        await qps.process_query_for_api(
-            query_text,
-            sid,
-            tid,
-            use_knowledge_base=use_kb,
-            attached_files=attached_files or None,
-            save_user_message=False,
-            allow_structured_ui=allow_structured_ui,
-        )
-    except RuntimeError as e:
-        raise APIError("processing_error", str(e), status_code=500) from e
+    if not skip_pipeline:
+        try:
+            qps = QueryProcessingService()
+            await qps.process_query_for_api(
+                query_text,
+                sid,
+                tid,
+                use_knowledge_base=use_kb,
+                attached_files=attached_files or None,
+                save_user_message=False,
+                allow_structured_ui=allow_structured_ui,
+            )
+        except RuntimeError as e:
+            raise APIError("processing_error", str(e), status_code=500) from e
 
     from utils.db_helpers import get_db
 
     db = await get_db()
     all_msgs = await db.get_session_messages(sid)
-    payload = {"messages": await enrich_session_messages(sid, all_msgs)}
+    payload: dict[str, Any] = {
+        "messages": await enrich_session_messages(sid, all_msgs),
+    }
+    if user_message_ack:
+        payload.update(user_message_ack)
     return JSONResponse(content=payload, status_code=201)
 
 
@@ -675,6 +735,7 @@ async def post_compose_message(
     content: str = Form(default=""),
     use_knowledge_base: str = Form(default="true"),
     audio_transcriptions: str | None = Form(default=None),
+    client_message_id: str | None = Form(default=None),
     files: list[UploadFile] = File(default=[]),
     audio: list[UploadFile] = File(default=[]),
     accept: Annotated[str | None, Header()] = None,
@@ -682,6 +743,7 @@ async def post_compose_message(
     """
     Одно user-сообщение: опциональный текст, несколько files[] и audio[] + audio_transcriptions (JSON-массив).
     SSE — как у POST …/messages при Accept: text/event-stream.
+    Optional ``client_message_id`` makes the user turn idempotent and enables an early SSE ack.
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
@@ -689,6 +751,7 @@ async def post_compose_message(
     use_kb = _parse_use_kb(use_knowledge_base)
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
+    normalized_client_id = _normalize_client_message_id(client_message_id)
 
     file_uploads = [item for item in files if item.filename]
     audio_uploads = [item for item in audio if item.filename]
@@ -713,38 +776,70 @@ async def post_compose_message(
     from utils.db_helpers import get_db
 
     db = await get_db()
-    user_msg = await db.add_message(sid, "user", query_text)
-    message_id = int(user_msg["id"])
-
+    reused = False
+    existing = None
+    file_paths: list[Path] = []
     saved_paths: list[Path] = []
-    try:
-        file_paths, audio_paths = await _persist_compose_uploads(
+    if normalized_client_id:
+        existing = await db.get_message_by_client_id(sid, normalized_client_id)
+
+    if existing is not None:
+        reused = True
+        message_id = int(existing["id"])
+        skip_pipeline = await _session_has_assistant_after(sid, message_id)
+        logger.info(
+            "compose idempotent replay session_id=%s message_id=%s client_message_id=%s skip_pipeline=%s",
             sid,
             message_id,
-            file_uploads,
-            audio_uploads,
-            transcriptions,
+            normalized_client_id,
+            skip_pipeline,
         )
-        saved_paths = file_paths + audio_paths
-    except APIError:
-        _cleanup_paths(saved_paths)
-        raise
-    except Exception:
-        _cleanup_paths(saved_paths)
-        raise
+    else:
+        user_msg = await db.add_message(
+            sid,
+            "user",
+            query_text,
+            client_message_id=normalized_client_id,
+        )
+        message_id = int(user_msg["id"])
+        skip_pipeline = False
+
+        try:
+            file_paths, audio_paths = await _persist_compose_uploads(
+                sid,
+                message_id,
+                file_uploads,
+                audio_uploads,
+                transcriptions,
+            )
+            saved_paths = file_paths + audio_paths
+        except APIError:
+            _cleanup_paths(saved_paths)
+            raise
+        except Exception:
+            _cleanup_paths(saved_paths)
+            raise
+
+    ack = _user_message_ack_payload(
+        message_id=message_id,
+        client_message_id=normalized_client_id,
+    )
 
     try:
         return await _run_compose_pipeline(
             sid=sid,
             tid=tid,
-            query_text=query_text,
+            query_text=query_text if not reused else str(existing.get("content") or query_text),
             use_kb=use_kb,
             attached_files=file_paths,
             wants_sse=bool(wants_sse),
             allow_structured_ui=allow_sui,
+            user_message_ack=ack,
+            skip_pipeline=skip_pipeline,
         )
     except APIError:
         raise
     except Exception:
-        _cleanup_paths(saved_paths)
+        if not reused:
+            _cleanup_paths(saved_paths)
         raise

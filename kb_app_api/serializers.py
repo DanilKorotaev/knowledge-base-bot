@@ -113,6 +113,9 @@ def message_to_kb(
         payload["related_changed_files_source"] = changed_files_source or "reply"
     if structured_ui is not None:
         payload["structured_ui"] = structured_ui
+    client_message_id = m.get("client_message_id")
+    if client_message_id:
+        payload["client_message_id"] = str(client_message_id)
     return payload
 
 
