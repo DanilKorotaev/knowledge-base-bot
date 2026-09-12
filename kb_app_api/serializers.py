@@ -149,18 +149,36 @@ def messages_to_kb(
     return out
 
 
-def session_to_kb(session: dict[str, Any], messages: list[dict[str, Any]]) -> dict[str, Any]:
+def session_to_kb(
+    session: dict[str, Any],
+    messages: list[dict[str, Any]] | None = None,
+    *,
+    message_count: int | None = None,
+) -> dict[str, Any]:
+    """Serialize session list/detail card.
+
+    Prefer ``message_count`` (or ``session['message_count']``) — do not load all
+    messages just to compute ``len(messages)``. ``updated_at`` comes from the
+    sessions row (maintained by ``add_message`` / ``update_session``).
+    """
+    return session_to_kb_from_row(
+        session,
+        message_count if message_count is not None else (
+            int(session["message_count"]) if session.get("message_count") is not None
+            else len(messages or [])
+        ),
+    )
+
+
+def session_to_kb_from_row(session: dict[str, Any], message_count: int) -> dict[str, Any]:
     title = session.get("display_title") or f"Session {session['id']}"
-    if messages:
-        last_ts = max(m["created_at"] for m in messages)
-    else:
-        last_ts = session.get("updated_at") or session.get("created_at")
+    last_ts = session.get("updated_at") or session.get("created_at")
     session_type = str(session.get("session_type") or "")
     use_knowledge_base = session_type != "empty_chat"
     return {
         "id": str(session["id"]),
         "title": title,
-        "message_count": len(messages),
+        "message_count": int(message_count),
         "updated_at": to_iso_z(last_ts),
         "use_knowledge_base": use_knowledge_base,
     }

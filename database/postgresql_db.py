@@ -210,45 +210,6 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
                 ON user_devices(user_id)
             """)
-
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS query_jobs (
-                    id UUID PRIMARY KEY,
-                    session_id INTEGER NOT NULL REFERENCES sessions(id),
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    telegram_user_id BIGINT NOT NULL,
-                    status VARCHAR(20) NOT NULL,
-                    query_text TEXT NOT NULL,
-                    use_knowledge_base BOOLEAN NOT NULL DEFAULT TRUE,
-                    allow_structured_ui BOOLEAN NOT NULL DEFAULT FALSE,
-                    attached_files_json TEXT,
-                    error_message TEXT,
-                    assistant_message_id INTEGER REFERENCES messages(id),
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    started_at TIMESTAMPTZ,
-                    finished_at TIMESTAMPTZ,
-                    heartbeat_at TIMESTAMPTZ
-                )
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
-                ON query_jobs(status, created_at)
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS query_job_events (
-                    id BIGSERIAL PRIMARY KEY,
-                    job_id UUID NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
-                    seq INTEGER NOT NULL,
-                    kind VARCHAR(20) NOT NULL,
-                    payload TEXT NOT NULL DEFAULT '',
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    UNIQUE (job_id, seq)
-                )
-            """)
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_query_job_events_job_seq
-                ON query_job_events(job_id, seq)
-            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
@@ -319,6 +280,134 @@ class PostgreSQLDatabase(DatabaseInterface):
                 query += f" LIMIT {limit}"
             
             rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+
+    async def count_user_sessions(
+        self,
+        user_id: int,
+        *,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> int:
+        async with self.pool.acquire() as conn:
+            clauses = ["user_id = $1"]
+            params: List[Any] = [user_id]
+            if status:
+                clauses.append(f"status = ${len(params) + 1}")
+                params.append(status)
+            elif exclude_deleted:
+                clauses.append("status != 'deleted'")
+            row = await conn.fetchrow(
+                f"SELECT COUNT(*)::int AS cnt FROM sessions WHERE {' AND '.join(clauses)}",
+                *params,
+            )
+            return int(row["cnt"]) if row else 0
+
+    async def get_user_sessions_with_counts(
+        self,
+        user_id: int,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> List[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            clauses = ["s.user_id = $1"]
+            params: List[Any] = [user_id]
+            if status:
+                clauses.append(f"s.status = ${len(params) + 1}")
+                params.append(status)
+            elif exclude_deleted:
+                clauses.append("s.status != 'deleted'")
+            query = f"""
+                SELECT s.*, COALESCE(c.cnt, 0)::int AS message_count
+                FROM sessions s
+                LEFT JOIN (
+                    SELECT session_id, COUNT(*)::int AS cnt
+                    FROM messages
+                    GROUP BY session_id
+                ) c ON c.session_id = s.id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY s.updated_at DESC NULLS LAST, s.created_at DESC
+            """
+            if limit is not None:
+                query += f" LIMIT ${len(params) + 1}"
+                params.append(int(limit))
+                query += f" OFFSET ${len(params) + 1}"
+                params.append(max(0, int(offset)))
+            elif offset:
+                query += f" OFFSET ${len(params) + 1}"
+                params.append(max(0, int(offset)))
+            rows = await conn.fetch(query, *params)
+            return [dict(row) for row in rows]
+
+    async def count_session_messages(self, session_id: int) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS cnt FROM messages WHERE session_id = $1",
+                session_id,
+            )
+            return int(row["cnt"]) if row else 0
+
+    async def search_user_sessions_with_counts(
+        self,
+        user_id: int,
+        query: str,
+        *,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        needle = (query or "").strip()
+        if not needle:
+            return []
+        async with self.pool.acquire() as conn:
+            try:
+                search_id = int(needle.lstrip("#"))
+            except ValueError:
+                search_id = None
+            if search_id is not None:
+                row = await conn.fetchrow(
+                    """
+                    SELECT s.*, COALESCE(c.cnt, 0)::int AS message_count
+                    FROM sessions s
+                    LEFT JOIN (
+                        SELECT session_id, COUNT(*)::int AS cnt
+                        FROM messages
+                        GROUP BY session_id
+                    ) c ON c.session_id = s.id
+                    WHERE s.user_id = $1 AND s.id = $2 AND s.status != 'deleted'
+                    """,
+                    user_id,
+                    search_id,
+                )
+                return [dict(row)] if row else []
+
+            like = f"%{needle.lower()}%"
+            rows = await conn.fetch(
+                """
+                SELECT s.*, COALESCE(c.cnt, 0)::int AS message_count
+                FROM sessions s
+                LEFT JOIN (
+                    SELECT session_id, COUNT(*)::int AS cnt
+                    FROM messages
+                    GROUP BY session_id
+                ) c ON c.session_id = s.id
+                WHERE s.user_id = $1
+                  AND s.status != 'deleted'
+                  AND (
+                    LOWER(COALESCE(s.display_title, '')) LIKE $2
+                    OR EXISTS (
+                        SELECT 1 FROM messages m
+                        WHERE m.session_id = s.id AND LOWER(m.content) LIKE $2
+                    )
+                  )
+                ORDER BY s.updated_at DESC NULLS LAST, s.created_at DESC
+                LIMIT $3
+                """,
+                user_id,
+                like,
+                int(limit),
+            )
             return [dict(row) for row in rows]
     
     async def update_session(

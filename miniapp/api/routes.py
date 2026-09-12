@@ -58,23 +58,22 @@ async def get_sessions(
     """Получить список сессий пользователя"""
     db = await _get_db()
     user = await db.ensure_user(telegram_id)
-    
-    sessions = await db.get_user_sessions(user["id"], limit=limit, status=status)
-    
-    # Фильтруем удаленные по умолчанию (если не запрошен конкретный статус)
-    if status is None:
-        sessions = [s for s in sessions if s.get("status") != "deleted"]
-    
-    # Получаем активную сессию
+
+    exclude_deleted = status is None
+    sessions = await db.get_user_sessions_with_counts(
+        user["id"],
+        limit=limit,
+        status=status,
+        exclude_deleted=exclude_deleted,
+    )
+
     active_session = await db.get_active_session(user["id"])
     active_session_id = active_session["id"] if active_session else None
-    
-    # Добавляем количество сообщений для каждой сессии
+
     for session in sessions:
-        messages = await db.get_session_messages(session["id"])
-        session["messages_count"] = len(messages)
+        session["messages_count"] = int(session.get("message_count") or 0)
         session["is_active"] = session["id"] == active_session_id
-    
+
     return {
         "sessions": sessions,
         "active_session_id": active_session_id,
@@ -90,43 +89,15 @@ async def search_sessions(
     """Поиск среди сессий пользователя по ID или содержимому сообщений"""
     db = await _get_db()
     user = await db.ensure_user(telegram_id)
-    
-    # Получить все сессии пользователя
-    all_sessions = await db.get_user_sessions(user["id"], limit=100)
-    sessions = [s for s in all_sessions if s.get("status") != "deleted"]
-    
-    # Получаем активную сессию один раз
+
     active_session = await db.get_active_session(user["id"])
     active_session_id = active_session["id"] if active_session else None
-    
-    # Поиск по ID
-    try:
-        search_id = int(q.strip().lstrip("#"))
-        id_matches = [s for s in sessions if s["id"] == search_id]
-        if id_matches:
-            for s in id_matches:
-                messages = await db.get_session_messages(s["id"])
-                s["messages_count"] = len(messages)
-                s["is_active"] = s["id"] == active_session_id
-            return {"sessions": id_matches, "total": len(id_matches)}
-    except ValueError:
-        pass
-    
-    # Поиск по содержимому сообщений
-    matching_sessions = []
-    q_lower = q.lower()
-    
-    for session in sessions:
-        messages = await db.get_session_messages(session["id"])
-        session["messages_count"] = len(messages)
-        session["is_active"] = session["id"] == active_session_id
-        
-        # Поиск в сообщениях
-        for msg in messages:
-            if q_lower in msg["content"].lower():
-                matching_sessions.append(session)
-                break
-    
+
+    matching_sessions = await db.search_user_sessions_with_counts(user["id"], q, limit=100)
+    for s in matching_sessions:
+        s["messages_count"] = int(s.get("message_count") or 0)
+        s["is_active"] = s["id"] == active_session_id
+
     return {"sessions": matching_sessions, "total": len(matching_sessions)}
 
 
@@ -145,8 +116,7 @@ async def get_session(
     session["is_active"] = active_session and active_session["id"] == session_id
     
     # Добавляем количество сообщений
-    messages = await db.get_session_messages(session_id)
-    session["messages_count"] = len(messages)
+    session["messages_count"] = await db.count_session_messages(session_id)
     
     return session
 

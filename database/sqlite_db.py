@@ -174,45 +174,6 @@ class SQLiteDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
                 ON user_devices(user_id)
             """)
-
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS query_jobs (
-                    id TEXT PRIMARY KEY,
-                    session_id INTEGER NOT NULL REFERENCES sessions(id),
-                    user_id INTEGER NOT NULL REFERENCES users(id),
-                    telegram_user_id INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    query_text TEXT NOT NULL,
-                    use_knowledge_base INTEGER NOT NULL DEFAULT 1,
-                    allow_structured_ui INTEGER NOT NULL DEFAULT 0,
-                    attached_files_json TEXT,
-                    error_message TEXT,
-                    assistant_message_id INTEGER REFERENCES messages(id),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    started_at TIMESTAMP,
-                    finished_at TIMESTAMP,
-                    heartbeat_at TIMESTAMP
-                )
-            """)
-            await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
-                ON query_jobs(status, created_at)
-            """)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS query_job_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
-                    seq INTEGER NOT NULL,
-                    kind TEXT NOT NULL,
-                    payload TEXT NOT NULL DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (job_id, seq)
-                )
-            """)
-            await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_query_job_events_job_seq
-                ON query_job_events(job_id, seq)
-            """)
             
             await db.commit()
     
@@ -372,6 +333,165 @@ class SQLiteDatabase(DatabaseInterface):
                 })
             
             return sessions
+
+    def _session_row_to_dict(self, row: tuple, *, message_count: Optional[int] = None) -> Dict[str, Any]:
+        import json
+        out = {
+            "id": row[0],
+            "user_id": row[1],
+            "session_type": row[2],
+            "status": row[3],
+            "context_files": json.loads(row[4]) if row[4] else [],
+            "cursor_chat_id": row[5],
+            "display_title": row[6],
+            "created_at": row[7],
+            "updated_at": row[8],
+        }
+        if message_count is not None:
+            out["message_count"] = int(message_count)
+        return out
+
+    async def count_user_sessions(
+        self,
+        user_id: int,
+        *,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            clauses = ["user_id = ?"]
+            params: List[Any] = [user_id]
+            if status:
+                clauses.append("status = ?")
+                params.append(status)
+            elif exclude_deleted:
+                clauses.append("status != 'deleted'")
+            cursor = await db.execute(
+                f"SELECT COUNT(*) FROM sessions WHERE {' AND '.join(clauses)}",
+                tuple(params),
+            )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+    async def get_user_sessions_with_counts(
+        self,
+        user_id: int,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        status: Optional[str] = None,
+        exclude_deleted: bool = True,
+    ) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            clauses = ["s.user_id = ?"]
+            params: List[Any] = [user_id]
+            if status:
+                clauses.append("s.status = ?")
+                params.append(status)
+            elif exclude_deleted:
+                clauses.append("s.status != 'deleted'")
+            query = f"""
+                SELECT s.id, s.user_id, s.session_type, s.status, s.context_files,
+                       s.cursor_chat_id, s.display_title, s.created_at, s.updated_at,
+                       COALESCE(c.cnt, 0) AS message_count
+                FROM sessions s
+                LEFT JOIN (
+                    SELECT session_id, COUNT(*) AS cnt
+                    FROM messages
+                    GROUP BY session_id
+                ) c ON c.session_id = s.id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY s.updated_at DESC, s.created_at DESC
+            """
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(int(limit))
+                query += " OFFSET ?"
+                params.append(max(0, int(offset)))
+            elif offset:
+                query += " OFFSET ?"
+                params.append(max(0, int(offset)))
+            cursor = await db.execute(query, tuple(params))
+            rows = await cursor.fetchall()
+            return [
+                self._session_row_to_dict(row[:9], message_count=row[9])
+                for row in rows
+            ]
+
+    async def count_session_messages(self, session_id: int) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
+
+    async def search_user_sessions_with_counts(
+        self,
+        user_id: int,
+        query: str,
+        *,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        needle = (query or "").strip()
+        if not needle:
+            return []
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                search_id = int(needle.lstrip("#"))
+            except ValueError:
+                search_id = None
+            if search_id is not None:
+                cursor = await db.execute(
+                    """
+                    SELECT s.id, s.user_id, s.session_type, s.status, s.context_files,
+                           s.cursor_chat_id, s.display_title, s.created_at, s.updated_at,
+                           COALESCE(c.cnt, 0) AS message_count
+                    FROM sessions s
+                    LEFT JOIN (
+                        SELECT session_id, COUNT(*) AS cnt
+                        FROM messages
+                        GROUP BY session_id
+                    ) c ON c.session_id = s.id
+                    WHERE s.user_id = ? AND s.id = ? AND s.status != 'deleted'
+                    """,
+                    (user_id, search_id),
+                )
+                row = await cursor.fetchone()
+                return [self._session_row_to_dict(row[:9], message_count=row[9])] if row else []
+
+            like = f"%{needle.lower()}%"
+            cursor = await db.execute(
+                """
+                SELECT s.id, s.user_id, s.session_type, s.status, s.context_files,
+                       s.cursor_chat_id, s.display_title, s.created_at, s.updated_at,
+                       COALESCE(c.cnt, 0) AS message_count
+                FROM sessions s
+                LEFT JOIN (
+                    SELECT session_id, COUNT(*) AS cnt
+                    FROM messages
+                    GROUP BY session_id
+                ) c ON c.session_id = s.id
+                WHERE s.user_id = ?
+                  AND s.status != 'deleted'
+                  AND (
+                    LOWER(COALESCE(s.display_title, '')) LIKE ?
+                    OR EXISTS (
+                        SELECT 1 FROM messages m
+                        WHERE m.session_id = s.id AND LOWER(m.content) LIKE ?
+                    )
+                  )
+                ORDER BY s.updated_at DESC, s.created_at DESC
+                LIMIT ?
+                """,
+                (user_id, like, like, int(limit)),
+            )
+            rows = await cursor.fetchall()
+            return [
+                self._session_row_to_dict(row[:9], message_count=row[9])
+                for row in rows
+            ]
     
     async def update_session(
         self,

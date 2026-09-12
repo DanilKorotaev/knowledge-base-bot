@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
-from kb_app_api.serializers import session_to_kb
+from kb_app_api.serializers import session_to_kb_from_row
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from utils.constants import SessionStatus, SessionType
 
@@ -37,18 +37,16 @@ async def list_sessions(
     from utils.db_helpers import get_db
 
     db = await get_db()
-    raw = await db.get_user_sessions(user["id"], limit=500, status=None)
-    sessions = [s for s in raw if s.get("status") != "deleted"]
-
-    start = (page - 1) * per_page
-    slice_ = sessions[start : start + per_page]
-
-    items: list[dict[str, Any]] = []
-    for s in slice_:
-        messages = await db.get_session_messages(s["id"])
-        items.append(session_to_kb(s, messages))
-
-    return {"sessions": items, "total": len(sessions), "page": page, "per_page": per_page}
+    total = await db.count_user_sessions(user["id"], exclude_deleted=True)
+    offset = (page - 1) * per_page
+    rows = await db.get_user_sessions_with_counts(
+        user["id"],
+        limit=per_page,
+        offset=offset,
+        exclude_deleted=True,
+    )
+    items = [session_to_kb_from_row(s, int(s.get("message_count") or 0)) for s in rows]
+    return {"sessions": items, "total": total, "page": page, "per_page": per_page}
 
 
 @router.get("/search")
@@ -60,37 +58,9 @@ async def search_sessions(
     from utils.db_helpers import get_db
 
     db = await get_db()
-    raw = await db.get_user_sessions(user["id"], limit=500, status=None)
-    sessions = [s for s in raw if s.get("status") != "deleted"]
-
-    query = q.strip()
-    try:
-        search_id = int(query.lstrip("#"))
-        id_matches = [s for s in sessions if s["id"] == search_id]
-        if id_matches:
-            items = []
-            for s in id_matches:
-                messages = await db.get_session_messages(s["id"])
-                items.append(session_to_kb(s, messages))
-            return {"sessions": items, "total": len(items)}
-    except ValueError:
-        pass
-
-    q_lower = query.lower()
-    matching: list[dict[str, Any]] = []
-    for session in sessions:
-        title = (session.get("display_title") or f"Session {session['id']}").lower()
-        if q_lower in title:
-            messages = await db.get_session_messages(session["id"])
-            matching.append(session_to_kb(session, messages))
-            continue
-        messages = await db.get_session_messages(session["id"])
-        for msg in messages:
-            if q_lower in (msg.get("content") or "").lower():
-                matching.append(session_to_kb(session, messages))
-                break
-
-    return {"sessions": matching, "total": len(matching)}
+    rows = await db.search_user_sessions_with_counts(user["id"], q, limit=100)
+    items = [session_to_kb_from_row(s, int(s.get("message_count") or 0)) for s in rows]
+    return {"sessions": items, "total": len(items)}
 
 
 @router.post("", status_code=201)
@@ -111,8 +81,7 @@ async def create_session(
         context_files=None,
         display_title=body.title.strip() or None,
     )
-    messages = await db.get_session_messages(session["id"])
-    return {"session": session_to_kb(session, messages)}
+    return {"session": session_to_kb_from_row(session, 0)}
 
 
 @router.patch("/{session_id}")
@@ -135,8 +104,8 @@ async def patch_session(
     session = await db.get_session(sid)
     if not session:
         raise APIError("not_found", "Сессия не найдена", status_code=404)
-    messages = await db.get_session_messages(sid)
-    return {"session": session_to_kb(session, messages)}
+    count = await db.count_session_messages(sid)
+    return {"session": session_to_kb_from_row(session, count)}
 
 
 @router.delete("/{session_id}")

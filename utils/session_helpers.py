@@ -25,28 +25,29 @@ async def get_user_sessions_for_display(
         Tuple[List[Dict], Optional[int], int]: (сессии для страницы, ID активной сессии, общее количество сессий)
     """
     db = await get_db()
-    
-    # Получить все сессии пользователя
-    all_sessions = await db.get_user_sessions(user_id, limit=limit)
-    
-    # Исключить удаленные сессии
-    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
-    
-    # Найти активную сессию
+
+    total_count = await db.count_user_sessions(user_id, exclude_deleted=True)
+    # Keep historical cap used by Telegram UI (limit), then paginate within it.
+    capped_total = min(total_count, limit)
+    start_idx = page * per_page
+    page_sessions = await db.get_user_sessions_with_counts(
+        user_id,
+        limit=per_page,
+        offset=start_idx,
+        exclude_deleted=True,
+    )
+    # If caller asked for a historical window smaller than DB total, trim last page.
+    if start_idx + len(page_sessions) > capped_total:
+        page_sessions = page_sessions[: max(0, capped_total - start_idx)]
+
+    for session in page_sessions:
+        session["messages_count"] = int(session.get("message_count") or 0)
+
     active_session = await db.get_active_session(user_id)
     active_session_id = active_session["id"] if active_session else None
-    
-    # Добавить количество сообщений для каждой сессии
-    for session in sessions:
-        messages = await db.get_session_messages(session["id"])
-        session["messages_count"] = len(messages)
-    
-    # Получить сессии для текущей страницы
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_sessions = sessions[start_idx:end_idx]
-    
-    return page_sessions, active_session_id, len(sessions)
+
+    return page_sessions, active_session_id, capped_total
+
 
 
 def format_sessions_list(
