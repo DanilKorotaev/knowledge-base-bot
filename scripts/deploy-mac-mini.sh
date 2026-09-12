@@ -5,6 +5,10 @@ set -euo pipefail
 
 RUNTIME_DIR="${KB_RUNTIME_DIR:-${HOME}/Projects/knowledge-base-bot}"
 VAULT_MAC_MINI="${HOME}/Nextcloud/Документация/Инфраструктура/mac-mini"
+# Nextcloud client may not sync; runtime vault clone lives under var/
+if [[ ! -d "${VAULT_MAC_MINI}" ]]; then
+  VAULT_MAC_MINI="${HOME}/var/knowledge-base-bot/kb/Документация/Инфраструктура/mac-mini"
+fi
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:${PATH}"
 
