@@ -21,6 +21,7 @@ from kb_app_api.client_metadata import structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
+from kb_app_api.query_jobs.sse_bridge import enqueue_and_bridge_pipeline, run_query_inline_or_job
 from kb_app_api.session_access import parse_session_id, require_session_for_user
 from kb_app_api.voice_attachments import attach_voice_to_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
@@ -353,6 +354,7 @@ async def _run_compose_pipeline(
     *,
     sid: int,
     tid: int,
+    user_id: int,
     query_text: str,
     use_kb: bool,
     attached_files: list[Path],
@@ -373,8 +375,24 @@ async def _run_compose_pipeline(
             await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
+            bridged = False
             try:
                 if skip_pipeline:
+                    return
+                if config.KB_APP_QUERY_JOBS_ENABLED:
+                    await enqueue_and_bridge_pipeline(
+                        session_id=sid,
+                        user_id=user_id,
+                        telegram_user_id=tid,
+                        query_text=query_text,
+                        use_kb=use_kb,
+                        attached_files=attached_files or None,
+                        allow_structured_ui=allow_structured_ui,
+                        queue=queue,
+                        err_holder=err_holder,
+                        skip_pipeline=False,
+                    )
+                    bridged = True
                     return
                 qps = QueryProcessingService()
                 await qps.process_query_for_api(
@@ -391,7 +409,8 @@ async def _run_compose_pipeline(
             except BaseException as e:
                 err_holder[0] = e
             finally:
-                await queue.put(None)
+                if not bridged:
+                    await queue.put(None)
 
         return StreamingResponse(
             _stream_assistant_sse(
@@ -407,15 +426,17 @@ async def _run_compose_pipeline(
 
     if not skip_pipeline:
         try:
-            qps = QueryProcessingService()
-            await qps.process_query_for_api(
-                query_text,
-                sid,
-                tid,
-                use_knowledge_base=use_kb,
+            await run_query_inline_or_job(
+                session_id=sid,
+                user_id=user_id,
+                telegram_user_id=tid,
+                query_text=query_text,
+                use_kb=use_kb,
                 attached_files=attached_files or None,
-                save_user_message=False,
                 allow_structured_ui=allow_structured_ui,
+                on_chunk=None,
+                on_activity=None,
+                skip_pipeline=False,
             )
         except RuntimeError as e:
             raise APIError("processing_error", str(e), status_code=500) from e
@@ -501,7 +522,22 @@ async def post_message(
             await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
+            bridged = False
             try:
+                if config.KB_APP_QUERY_JOBS_ENABLED:
+                    await enqueue_and_bridge_pipeline(
+                        session_id=sid,
+                        user_id=int(user["id"]),
+                        telegram_user_id=tid,
+                        query_text=body.content,
+                        use_kb=body.use_knowledge_base,
+                        attached_files=None,
+                        allow_structured_ui=allow_sui,
+                        queue=queue,
+                        err_holder=err_holder,
+                    )
+                    bridged = True
+                    return
                 qps = QueryProcessingService()
                 await qps.process_query_for_api(
                     body.content,
@@ -515,7 +551,8 @@ async def post_message(
             except BaseException as e:
                 err_holder[0] = e
             finally:
-                await queue.put(None)
+                if not bridged:
+                    await queue.put(None)
 
         return StreamingResponse(
             _stream_assistant_sse(
@@ -529,13 +566,16 @@ async def post_message(
         )
 
     try:
-        qps = QueryProcessingService()
-        await qps.process_query_for_api(
-            body.content,
-            sid,
-            tid,
-            use_knowledge_base=body.use_knowledge_base,
+        await run_query_inline_or_job(
+            session_id=sid,
+            user_id=int(user["id"]),
+            telegram_user_id=tid,
+            query_text=body.content,
+            use_kb=body.use_knowledge_base,
+            attached_files=None,
             allow_structured_ui=allow_sui,
+            on_chunk=None,
+            on_activity=None,
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -676,7 +716,22 @@ async def post_voice_message(
             await queue.put(("activity", label))
 
         async def run_pipeline() -> None:
+            bridged = False
             try:
+                if config.KB_APP_QUERY_JOBS_ENABLED:
+                    await enqueue_and_bridge_pipeline(
+                        session_id=sid,
+                        user_id=int(user["id"]),
+                        telegram_user_id=tid,
+                        query_text=text,
+                        use_kb=use_kb,
+                        attached_files=None,
+                        allow_structured_ui=allow_sui,
+                        queue=queue,
+                        err_holder=err_holder,
+                    )
+                    bridged = True
+                    return
                 qps = QueryProcessingService()
                 await qps.process_query_for_api(
                     text,
@@ -692,7 +747,8 @@ async def post_voice_message(
                 err_holder[0] = e
                 dest.unlink(missing_ok=True)
             finally:
-                await queue.put(None)
+                if not bridged:
+                    await queue.put(None)
 
         return StreamingResponse(
             _stream_assistant_sse(
@@ -706,14 +762,16 @@ async def post_voice_message(
         )
 
     try:
-        qps = QueryProcessingService()
-        await qps.process_query_for_api(
-            text,
-            sid,
-            tid,
-            use_knowledge_base=use_kb,
-            save_user_message=False,
+        await run_query_inline_or_job(
+            session_id=sid,
+            user_id=int(user["id"]),
+            telegram_user_id=tid,
+            query_text=text,
+            use_kb=use_kb,
+            attached_files=None,
             allow_structured_ui=allow_sui,
+            on_chunk=None,
+            on_activity=None,
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -829,6 +887,7 @@ async def post_compose_message(
         return await _run_compose_pipeline(
             sid=sid,
             tid=tid,
+            user_id=int(user["id"]),
             query_text=query_text if not reused else str(existing.get("content") or query_text),
             use_kb=use_kb,
             attached_files=file_paths,

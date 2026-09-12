@@ -210,6 +210,45 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
                 ON user_devices(user_id)
             """)
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS query_jobs (
+                    id UUID PRIMARY KEY,
+                    session_id INTEGER NOT NULL REFERENCES sessions(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    telegram_user_id BIGINT NOT NULL,
+                    status VARCHAR(20) NOT NULL,
+                    query_text TEXT NOT NULL,
+                    use_knowledge_base BOOLEAN NOT NULL DEFAULT TRUE,
+                    allow_structured_ui BOOLEAN NOT NULL DEFAULT FALSE,
+                    attached_files_json TEXT,
+                    error_message TEXT,
+                    assistant_message_id INTEGER REFERENCES messages(id),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    started_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ,
+                    heartbeat_at TIMESTAMPTZ
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
+                ON query_jobs(status, created_at)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS query_job_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    job_id UUID NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
+                    seq INTEGER NOT NULL,
+                    kind VARCHAR(20) NOT NULL,
+                    payload TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    UNIQUE (job_id, seq)
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query_job_events_job_seq
+                ON query_job_events(job_id, seq)
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""

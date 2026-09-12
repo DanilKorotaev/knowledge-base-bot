@@ -174,6 +174,45 @@ class SQLiteDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
                 ON user_devices(user_id)
             """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS query_jobs (
+                    id TEXT PRIMARY KEY,
+                    session_id INTEGER NOT NULL REFERENCES sessions(id),
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    telegram_user_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    query_text TEXT NOT NULL,
+                    use_knowledge_base INTEGER NOT NULL DEFAULT 1,
+                    allow_structured_ui INTEGER NOT NULL DEFAULT 0,
+                    attached_files_json TEXT,
+                    error_message TEXT,
+                    assistant_message_id INTEGER REFERENCES messages(id),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
+                    heartbeat_at TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
+                ON query_jobs(status, created_at)
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS query_job_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
+                    seq INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (job_id, seq)
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query_job_events_job_seq
+                ON query_job_events(job_id, seq)
+            """)
             
             await db.commit()
     

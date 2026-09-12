@@ -42,6 +42,8 @@ class TestComposeMessage(unittest.TestCase):
         config.DB_TYPE = "sqlite"
         config.DB_FILE = os.environ["DB_FILE"]
         config.LOCAL_KB_PATH = Path(os.environ["LOCAL_KB_PATH"])
+        # Compose unit tests mock QPS in-process; jobs path needs a worker.
+        config.KB_APP_QUERY_JOBS_ENABLED = False
 
         import utils.db_helpers as db_helpers
 

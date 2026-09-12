@@ -29,9 +29,14 @@ if [[ -d "${VAULT_MAC_MINI}" ]]; then
     cp "${VAULT_MAC_MINI}/com.coredan.kb-app-api-host.plist" \
       "${HOME}/Library/LaunchAgents/com.coredan.kb-app-api-host.plist"
   fi
+  if [[ -f "${VAULT_MAC_MINI}/com.coredan.kb-app-query-worker.plist" ]]; then
+    cp "${VAULT_MAC_MINI}/com.coredan.kb-app-query-worker.plist" \
+      "${HOME}/Library/LaunchAgents/com.coredan.kb-app-query-worker.plist"
+  fi
 fi
 
 chmod +x scripts/start-kb-app-api-host.sh 2>/dev/null || true
+chmod +x scripts/start-kb-app-query-worker.sh 2>/dev/null || true
 
 COMPOSE_FILES=(
   -f docker-compose.yml
@@ -70,6 +75,10 @@ launchctl kickstart -k "gui/${UID_NUM}/com.coredan.kb-bot-host" 2>/dev/null \
   || true
 
 chmod +x scripts/safe-restart-kb-app-api-host.sh 2>/dev/null || true
+# Ensure query worker is loaded (do NOT kickstart -k — that would kill Cursor mid-job).
+launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/com.coredan.kb-app-query-worker.plist" 2>/dev/null \
+  || launchctl kickstart "gui/${UID_NUM}/com.coredan.kb-app-query-worker" 2>/dev/null \
+  || true
 # CI: wait for idle agent (up to 10m) instead of blind kickstart -k.
 if ! KB_API_RESTART_WAIT=1 KB_API_RESTART_WAIT_SEC="${KB_API_RESTART_WAIT_SEC:-600}" \
   bash scripts/safe-restart-kb-app-api-host.sh; then
