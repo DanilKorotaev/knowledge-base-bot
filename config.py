@@ -126,6 +126,14 @@ class Config:
         os.getenv("STRUCTURED_UI_REPLY_SUGGEST_TIMEOUT", "45")
     )
 
+    # Background Cursor jobs (separate process from uvicorn; SSE proxies job events)
+    KB_APP_QUERY_JOBS_ENABLED: bool = os.getenv(
+        "KB_APP_QUERY_JOBS_ENABLED", "false"
+    ).lower() in ("true", "1", "yes")
+    MAX_CONCURRENT_QUERY_JOBS: int = int(os.getenv("MAX_CONCURRENT_QUERY_JOBS", "2"))
+    QUERY_JOB_EVENT_POLL_MS: int = int(os.getenv("QUERY_JOB_EVENT_POLL_MS", "100"))
+    QUERY_JOB_STALE_RUNNING_SEC: int = int(os.getenv("QUERY_JOB_STALE_RUNNING_SEC", "1800"))
+
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
     APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "66C9VGAZR5")

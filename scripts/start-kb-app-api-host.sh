@@ -41,6 +41,8 @@ export NODE_USE_ENV_PROXY="${NODE_USE_ENV_PROXY:-1}"
 export AGENT_CLI_CREDENTIAL_STORE="${AGENT_CLI_CREDENTIAL_STORE:-file}"
 export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
 export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
+# Prefer background query worker for Cursor (survives API redeploy; SSE still streams via job events).
+export KB_APP_QUERY_JOBS_ENABLED="${KB_APP_QUERY_JOBS_ENABLED:-true}"
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {
