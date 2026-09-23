@@ -31,6 +31,7 @@ def setUpModule() -> None:
     os.environ["KB_APP_API_TOKEN"] = "boards-test-bearer"
     os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000003"
     os.environ["ACCESS_MODE"] = "open"
+    os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
     Path(_kb_dir).mkdir(parents=True, exist_ok=True)
 
@@ -48,9 +49,13 @@ class BoardsCatalogTests(unittest.TestCase):
         from kb_app_api.boards_catalog import list_boards
 
         boards = list_boards()
-        self.assertEqual(len(boards), 2)
-        self.assertEqual(boards[0]["id"], "demo-kpi")
-        self.assertLessEqual(boards[0]["sort_order"], boards[1]["sort_order"])
+        self.assertGreaterEqual(len(boards), 2)
+        ids = [b["id"] for b in boards]
+        self.assertIn("demo-kpi", ids)
+        # Static demos keep relative order by sort_order.
+        demo_idx = ids.index("demo-kpi")
+        jobs_idx = ids.index("demo-active-jobs")
+        self.assertLess(demo_idx, jobs_idx)
 
     def test_detail_has_metric_and_table(self) -> None:
         from kb_app_api.boards_catalog import get_board_detail
@@ -75,6 +80,22 @@ class BoardsCatalogTests(unittest.TestCase):
 class BoardsRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        import config as config_mod
+
+        os.environ["ACCESS_MODE"] = "open"
+        os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
+        config_mod.config.KB_APP_API_TOKEN = "boards-test-bearer"
+        config_mod.config.KB_APP_API_TELEGRAM_ID = 9000000009000003
+        config_mod.config.DB_TYPE = "sqlite"
+        if hasattr(config_mod.config, "ACCESS_MODE"):
+            config_mod.config.ACCESS_MODE = "open"
+        if hasattr(config_mod.config, "KB_APP_API_BYPASS_ACCESS_CHECK"):
+            config_mod.config.KB_APP_API_BYPASS_ACCESS_CHECK = True
+        if _db_file:
+            config_mod.config.DB_FILE = _db_file
+        if _kb_dir:
+            config_mod.config.LOCAL_KB_PATH = Path(_kb_dir)
+
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
@@ -85,7 +106,9 @@ class BoardsRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertGreaterEqual(payload["total"], 2)
-        self.assertEqual(payload["boards"][0]["id"], "demo-kpi")
+        ids = [b["id"] for b in payload["boards"]]
+        self.assertIn("demo-kpi", ids)
+        self.assertIn("car-fuel", ids)
 
     def test_get_board_detail(self) -> None:
         response = self.client.get("/api/boards/demo-kpi", headers=self.headers)

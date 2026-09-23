@@ -38,7 +38,7 @@ async def refresh_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    """Force recompute / remote refetch — v1 returns the same seed document."""
+    """Recompute live boards (vault read-only) or return static seed detail."""
     _ = user
     detail = get_board_detail(board_id)
     if detail is None:
