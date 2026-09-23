@@ -12,8 +12,9 @@ Expose `GET /api/boards`, `GET /api/boards/{id}`, `POST /api/boards/{id}/refresh
 - [x] Seed catalog (`boards_catalog.py`) with demo KPI + jobs boards (Structured UI `metric`/`table`)
 - [x] Auth via existing Bearer (`get_api_user`)
 - [x] Unit + route tests
-- [ ] DB tables / vault compute DSL / remote proxy / agent tools (later)
+- [x] **Live board** `car-fuel`: read-only scan of `Документы/Тачки/Соляра/Расходы/Топливо` (`type: fuel`) — no vault writes
+- [ ] DB tables / full DSL / remote proxy / agent tools (later)
 
 ## Notes
 
-Refresh is a no-op recompute for seed data. Real cache invalidation comes with vault compute.
+Refresh re-reads vault for `car-fuel`. Path override: `BOARDS_CAR_FUEL_RELATIVE` (under `LOCAL_KB_PATH`).

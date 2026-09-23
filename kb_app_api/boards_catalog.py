@@ -1,23 +1,28 @@
-"""Seed / demo boards catalog (v1). Later: DB rows + vault compute.
+"""Boards catalog: static demos + live vault-backed boards.
 
-Mirrors iOS `DemoBoardsCatalog` so TestFlight and API stay in sync until CRUD lands.
+Live boards only **read** vault files; they never write notes.
 """
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
+
+from config import config
+from kb_app_api.boards.car_expenses import BOARD_ID as CAR_FUEL_ID
+from kb_app_api.boards.car_expenses import compute_car_fuel_board
 
 _DEMO_KPI_ID = "demo-kpi"
 _DEMO_JOBS_ID = "demo-active-jobs"
 
-_BOARDS: list[dict[str, Any]] = [
+_STATIC_BOARDS: list[dict[str, Any]] = [
     {
         "id": _DEMO_KPI_ID,
         "title": "Demo: summary",
         "subtitle": "Sample metrics and table",
         "icon": "chart.bar",
         "kind": "cached_view",
-        "sort_order": 10,
+        "sort_order": 100,
         "enabled": True,
         "list_cell": {
             "kind": "metrics",
@@ -36,7 +41,7 @@ _BOARDS: list[dict[str, Any]] = [
         "subtitle": "System board preview",
         "icon": "bolt.horizontal.circle",
         "kind": "system",
-        "sort_order": 20,
+        "sort_order": 110,
         "enabled": True,
         "list_cell": {
             "kind": "status",
@@ -49,7 +54,7 @@ _BOARDS: list[dict[str, Any]] = [
     },
 ]
 
-_DOCUMENTS: dict[str, dict[str, Any]] = {
+_STATIC_DOCUMENTS: dict[str, dict[str, Any]] = {
     _DEMO_KPI_ID: {
         "schema_version": 1,
         "screen": {
@@ -124,17 +129,40 @@ _DOCUMENTS: dict[str, dict[str, Any]] = {
 }
 
 
+def _kb_root() -> Path:
+    return Path(config.LOCAL_KB_PATH)
+
+
+def _live_car_fuel() -> dict[str, Any]:
+    return compute_car_fuel_board(_kb_root())
+
+
 def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]:
-    boards = [deepcopy(b) for b in _BOARDS if include_disabled or b.get("enabled", True)]
+    boards: list[dict[str, Any]] = []
+    try:
+        live = _live_car_fuel()
+        boards.append(deepcopy(live["board"]))
+    except Exception:  # noqa: BLE001 — board list must not 500 if vault missing
+        pass
+
+    for board in _STATIC_BOARDS:
+        if include_disabled or board.get("enabled", True):
+            boards.append(deepcopy(board))
     boards.sort(key=lambda b: int(b.get("sort_order") or 0))
     return boards
 
 
 def get_board_detail(board_id: str) -> dict[str, Any] | None:
-    board = next((deepcopy(b) for b in _BOARDS if b["id"] == board_id), None)
+    if board_id == CAR_FUEL_ID:
+        try:
+            return _live_car_fuel()
+        except Exception:  # noqa: BLE001
+            return None
+
+    board = next((deepcopy(b) for b in _STATIC_BOARDS if b["id"] == board_id), None)
     if board is None:
         return None
-    document = _DOCUMENTS.get(board_id)
+    document = _STATIC_DOCUMENTS.get(board_id)
     if document is None:
         return None
     return {
