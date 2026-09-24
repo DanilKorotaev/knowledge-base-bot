@@ -119,6 +119,7 @@ class BoardsRouteTests(unittest.TestCase):
         ids = [b["id"] for b in payload["boards"]]
         self.assertIn("demo-kpi", ids)
         self.assertIn("car-fuel", ids)
+        self.assertIn("workouts", ids)
 
     def test_get_board_detail(self) -> None:
         response = self.client.get("/api/boards/demo-kpi", headers=self.headers)

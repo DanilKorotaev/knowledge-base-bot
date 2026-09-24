@@ -84,6 +84,16 @@ def _format_qty(qty: float | None) -> str:
     return f"{qty:.2f}".rstrip("0").rstrip(".")
 
 
+def _meta_get(meta: dict[str, Any], dotted: str) -> Any:
+    """Read ``a.b.c`` from nested frontmatter dicts; flat keys work too."""
+    current: Any = meta
+    for part in dotted.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
 def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
     """Read matching notes under ``definition.path``. Never writes."""
     relative = str(definition.get("path") or "").strip()
@@ -120,11 +130,11 @@ def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
             note_type = str(meta.get("type") or "").strip().lower()
             if note_type != filter_type:
                 continue
-        note_date = _parse_date(meta.get(date_field))
-        amount = _parse_float(meta.get(amount_field))
+        note_date = _parse_date(_meta_get(meta, date_field))
+        amount = _parse_float(_meta_get(meta, amount_field))
         if note_date is None or amount is None:
             continue
-        quantity = _parse_float(meta.get(quantity_field))
+        quantity = _parse_float(_meta_get(meta, quantity_field))
         try:
             rel = str(path.resolve().relative_to(root))
         except ValueError:
@@ -134,7 +144,7 @@ def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
                 date=note_date,
                 amount=amount,
                 quantity=quantity,
-                label=_clean_wikilink(meta.get(label_field)),
+                label=_clean_wikilink(_meta_get(meta, label_field)),
                 path=rel,
             )
         )
