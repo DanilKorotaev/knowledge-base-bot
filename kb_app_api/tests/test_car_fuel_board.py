@@ -105,6 +105,59 @@ class VaultFrontmatterAggTests(unittest.TestCase):
         self.assertEqual(note.read_bytes(), before)
         self.assertEqual(note.stat().st_mtime_ns, mtime)
 
+    def test_sidecar_active_trainer_block(self) -> None:
+        blocks = self.root / "Тренировки" / "Блоки"
+        blocks.mkdir(parents=True)
+        (blocks / "old.md").write_text(
+            "---\ntype: trainer_block\nid: 2026-01-01\ntitle: Старый\n"
+            "started: 2026-01-01\ntotal: 20\ndone: 20\nremaining: 0\nstatus: completed\n---\n",
+            encoding="utf-8",
+        )
+        (blocks / "active.md").write_text(
+            "---\ntype: trainer_block\nid: 2026-09-16\ntitle: Блок 20 тренировок\n"
+            "started: 2026-09-16\ntotal: 20\ndone: 2\nremaining: 18\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        workouts = self.root / "Тренировки" / "2026"
+        workouts.mkdir(parents=True)
+        (workouts / "one.md").write_text(
+            "---\ntype: workout\ndate: 2026-09-23\nfocus: грудь\n"
+            "computed:\n  total_volume_kg: 100\n  total_sets: 5\n---\n",
+            encoding="utf-8",
+        )
+        definition = {
+            "provider": "vault_frontmatter_agg",
+            "path": "Тренировки",
+            "filter": {"type": "workout"},
+            "fields": {
+                "date": "date",
+                "amount": "computed.total_volume_kg",
+                "quantity": "computed.total_sets",
+                "label": "focus",
+            },
+            "sidecar": {
+                "path": "Тренировки/Блоки",
+                "filter": {"type": "trainer_block", "status": "active"},
+                "fields": {
+                    "date": "started",
+                    "done": "done",
+                    "remaining": "remaining",
+                    "total": "total",
+                    "label": "title",
+                },
+            },
+            "labels": {"title": "Тренировки", "currency": "кг", "metric_block": "Блок"},
+        }
+        payload = agg.compute(
+            self.root,
+            {"id": "workouts", "title": "Тренировки", "kind": "cached_view", "sort_order": 10},
+            definition,
+        )
+        metrics = payload["board"]["list_cell"]["metrics"]
+        self.assertTrue(any(m.get("value") == "2/20" for m in metrics))
+        callouts = [n for n in payload["document"]["screen"]["children"] if n.get("type") == "callout"]
+        self.assertTrue(any("2 / 20" in (c.get("text") or "") and "осталось 18" in (c.get("text") or "") for c in callouts))
+
     def test_path_required_from_definition(self) -> None:
         entries = agg.load_entries(self.root, {"path": "", "filter": {"type": "fuel"}})
         self.assertEqual(entries, [])
