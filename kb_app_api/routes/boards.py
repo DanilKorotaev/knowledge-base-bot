@@ -1,4 +1,4 @@
-"""Overview / Boards API — list + detail + refresh (v1 seed catalog)."""
+"""Overview / Boards API — list + detail + refresh (DB definitions + providers)."""
 from __future__ import annotations
 
 from typing import Annotated, Any
@@ -17,7 +17,7 @@ async def get_boards(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     _ = user
-    boards = list_boards()
+    boards = await list_boards()
     return {"boards": boards, "total": len(boards)}
 
 
@@ -27,7 +27,7 @@ async def get_board(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     _ = user
-    detail = get_board_detail(board_id)
+    detail = await get_board_detail(board_id)
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail
@@ -38,9 +38,9 @@ async def refresh_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    """Recompute live boards (vault read-only) or return static seed detail."""
+    """Recompute live providers (vault read-only) or return static document."""
     _ = user
-    detail = get_board_detail(board_id)
+    detail = await get_board_detail(board_id)
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail

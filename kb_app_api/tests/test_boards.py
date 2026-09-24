@@ -1,4 +1,4 @@
-"""Boards catalog + HTTP routes."""
+"""Boards HTTP routes + catalog."""
 from __future__ import annotations
 
 import os
@@ -44,23 +44,33 @@ def tearDownModule() -> None:
             pass
 
 
-class BoardsCatalogTests(unittest.TestCase):
-    def test_list_sorted_enabled(self) -> None:
+class BoardsCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        import config as config_mod
+        import kb_app_api.boards.repository as repo
+        from utils.db_helpers import close_db
+
+        config_mod.config.DB_TYPE = "sqlite"
+        config_mod.config.DB_FILE = _db_file
+        config_mod.config.LOCAL_KB_PATH = Path(_kb_dir or ".")
+        repo._SCHEMA_READY = False  # noqa: SLF001
+        await close_db()
+
+    async def test_list_sorted_enabled(self) -> None:
         from kb_app_api.boards_catalog import list_boards
 
-        boards = list_boards()
+        boards = await list_boards()
         self.assertGreaterEqual(len(boards), 2)
         ids = [b["id"] for b in boards]
         self.assertIn("demo-kpi", ids)
-        # Static demos keep relative order by sort_order.
         demo_idx = ids.index("demo-kpi")
         jobs_idx = ids.index("demo-active-jobs")
         self.assertLess(demo_idx, jobs_idx)
 
-    def test_detail_has_metric_and_table(self) -> None:
+    async def test_detail_has_metric_and_table(self) -> None:
         from kb_app_api.boards_catalog import get_board_detail
 
-        detail = get_board_detail("demo-kpi")
+        detail = await get_board_detail("demo-kpi")
         assert detail is not None
         screen = detail["document"]["screen"]
         flat_types: list[str] = []
@@ -73,7 +83,7 @@ class BoardsCatalogTests(unittest.TestCase):
         walk(screen)
         self.assertIn("metric", flat_types)
         self.assertIn("table", flat_types)
-        self.assertIsNone(get_board_detail("missing"))
+        self.assertIsNone(await get_board_detail("missing"))
 
 
 @unittest.skipUnless(TestClient is not None, "Нужен fastapi (requirements.txt бота)")
@@ -81,20 +91,20 @@ class BoardsRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         import config as config_mod
+        import kb_app_api.boards.repository as repo
 
         os.environ["ACCESS_MODE"] = "open"
         os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
         config_mod.config.KB_APP_API_TOKEN = "boards-test-bearer"
         config_mod.config.KB_APP_API_TELEGRAM_ID = 9000000009000003
         config_mod.config.DB_TYPE = "sqlite"
-        if hasattr(config_mod.config, "ACCESS_MODE"):
-            config_mod.config.ACCESS_MODE = "open"
-        if hasattr(config_mod.config, "KB_APP_API_BYPASS_ACCESS_CHECK"):
-            config_mod.config.KB_APP_API_BYPASS_ACCESS_CHECK = True
+        config_mod.config.ACCESS_MODE = "open"
+        config_mod.config.KB_APP_API_BYPASS_ACCESS_CHECK = True
         if _db_file:
             config_mod.config.DB_FILE = _db_file
         if _kb_dir:
             config_mod.config.LOCAL_KB_PATH = Path(_kb_dir)
+        repo._SCHEMA_READY = False  # noqa: SLF001
 
         from kb_app_api.main import app
 
