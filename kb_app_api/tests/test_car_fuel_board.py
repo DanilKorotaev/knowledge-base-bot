@@ -156,9 +156,32 @@ class VaultFrontmatterAggTests(unittest.TestCase):
         metrics = payload["board"]["list_cell"]["metrics"]
         self.assertTrue(any(m.get("value") == "2/20" for m in metrics))
         callouts = [n for n in payload["document"]["screen"]["children"] if n.get("type") == "callout"]
-        self.assertTrue(any("2 / 20" in (c.get("text") or "") and "осталось 18" in (c.get("text") or "") for c in callouts))
+        self.assertTrue(
+            any("2 / 20" in (c.get("text") or "") and "remaining 18" in (c.get("text") or "") for c in callouts)
+        )
 
-    def test_path_required_from_definition(self) -> None:
+    def test_period_filters_month(self) -> None:
+        fuel = self.root / "Документы" / "Тачки" / "Соляра" / "Расходы" / "Топливо"
+        definition = {
+            "provider": "vault_frontmatter_agg",
+            "path": "Документы/Тачки/Соляра/Расходы/Топливо",
+            "filter": {"type": "fuel"},
+            "fields": {"date": "date", "amount": "cost", "quantity": "liters", "label": "station"},
+            "labels": {"title": "Fuel", "currency": "₽"},
+        }
+        meta = {"id": "x", "title": "Fuel", "kind": "cached_view", "sort_order": 1}
+        all_payload = agg.compute(self.root, meta, definition, period="all")
+        sep = agg.compute(self.root, meta, definition, period="2026-09")
+        aug = agg.compute(self.root, meta, definition, period="2026-08")
+        self.assertEqual(all_payload["period"], "all")
+        self.assertEqual(sep["period"], "2026-09")
+        # setUp has Sep 2996 + Aug 1500
+        sep_table = next(n for n in sep["document"]["screen"]["children"] if n.get("type") == "table")
+        aug_table = next(n for n in aug["document"]["screen"]["children"] if n.get("type") == "table")
+        self.assertEqual(len(sep_table["rows"]), 1)
+        self.assertEqual(len(aug_table["rows"]), 1)
+        _ = fuel
+        _ = all_payload
         entries = agg.load_entries(self.root, {"path": "", "filter": {"type": "fuel"}})
         self.assertEqual(entries, [])
 

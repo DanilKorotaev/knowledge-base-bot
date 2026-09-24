@@ -23,8 +23,8 @@ async def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]
     return await runtime.list_boards(include_disabled=include_disabled)
 
 
-async def get_board_detail(board_id: str) -> dict[str, Any] | None:
-    return await runtime.get_board_detail(board_id)
+async def get_board_detail(board_id: str, *, period: str | None = None) -> dict[str, Any] | None:
+    return await runtime.get_board_detail(board_id, period=period)
 
 
 async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
@@ -47,7 +47,6 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
     await repository.upsert_board_row(row)
     detail = await runtime.get_board_detail(board_id)
     if detail is None:
-        # Disabled or unknown provider — still return stored meta.
         stored = await repository.get_board_row(board_id)
         assert stored is not None
         return {
@@ -62,7 +61,8 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
                 "list_cell": stored.get("list_cell"),
                 "rendered_at": stored.get("rendered_at"),
             },
-            "document": stored.get("rendered_document") or {"schema_version": 1, "screen": {"type": "vstack", "id": "root", "children": []}},
+            "document": stored.get("rendered_document")
+            or {"schema_version": 1, "screen": {"type": "vstack", "id": "root", "children": []}},
             "rendered_at": stored.get("rendered_at"),
         }
     return detail
