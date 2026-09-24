@@ -9,12 +9,14 @@ Expose `GET /api/boards`, `GET /api/boards/{id}`, `POST /api/boards/{id}/refresh
 
 ## Scope (v1)
 
-- [x] Seed catalog (`boards_catalog.py`) with demo KPI + jobs boards (Structured UI `metric`/`table`)
+- [x] Seed catalog with demo KPI + jobs + car-fuel
 - [x] Auth via existing Bearer (`get_api_user`)
 - [x] Unit + route tests
-- [x] **Live board** `car-fuel`: read-only scan of `Документы/Тачки/Соляра/Расходы/Топливо` (`type: fuel`) — no vault writes
-- [ ] DB tables / full DSL / remote proxy / agent tools (later)
+- [x] **DB table** `kb_app_boards` — definition JSON (paths live in DB seed, not provider code)
+- [x] Provider `vault_frontmatter_agg` — read-only vault scan from definition
+- [ ] Agent tools create/update board
+- [ ] vault_script / system / remote / device providers
 
 ## Notes
 
-Refresh re-reads vault for `car-fuel`. Path override: `BOARDS_CAR_FUEL_RELATIVE` (under `LOCAL_KB_PATH`).
+Refresh re-runs the provider. Car-fuel path is only in seeded `definition.path` (editable in DB later without redeploying provider logic).
