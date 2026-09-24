@@ -94,12 +94,27 @@ def _meta_get(meta: dict[str, Any], dotted: str) -> Any:
     return current
 
 
+def _filter_matches(meta: dict[str, Any], filt: dict[str, Any]) -> bool:
+    """Equality filters on frontmatter; ``type`` compared case-insensitively."""
+    for key, expected in filt.items():
+        raw = meta.get(key)
+        if key == "type":
+            if str(raw or "").strip().lower() != str(expected or "").strip().lower():
+                return False
+            continue
+        if str(raw if raw is not None else "").strip().lower() != str(expected).strip().lower():
+            return False
+    return True
+
+
 def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
     """Read matching notes under ``definition.path``. Never writes."""
     relative = str(definition.get("path") or "").strip()
     if not relative:
         return []
-    filter_type = str((definition.get("filter") or {}).get("type") or "").strip().lower()
+    filt = definition.get("filter") or {}
+    if not isinstance(filt, dict):
+        filt = {}
     fields = definition.get("fields") or {}
     date_field = str(fields.get("date") or "date")
     amount_field = str(fields.get("amount") or "cost")
@@ -126,10 +141,8 @@ def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
             continue
 
         meta = post.metadata or {}
-        if filter_type:
-            note_type = str(meta.get("type") or "").strip().lower()
-            if note_type != filter_type:
-                continue
+        if filt and not _filter_matches(meta, filt):
+            continue
         note_date = _parse_date(_meta_get(meta, date_field))
         amount = _parse_float(_meta_get(meta, amount_field))
         if note_date is None or amount is None:
@@ -153,6 +166,64 @@ def load_entries(kb_root: Path, definition: dict[str, Any]) -> list[AggEntry]:
     return entries
 
 
+def load_sidecar(kb_root: Path, sidecar: dict[str, Any]) -> dict[str, Any] | None:
+    """Load one note (e.g. active trainer_block) for a progress callout. Read-only."""
+    relative = str(sidecar.get("path") or "").strip()
+    if not relative:
+        return None
+    filt = sidecar.get("filter") or {}
+    if not isinstance(filt, dict):
+        filt = {}
+    fields = sidecar.get("fields") or {}
+    date_field = str(fields.get("date") or "started")
+    done_field = str(fields.get("done") or "done")
+    remaining_field = str(fields.get("remaining") or "remaining")
+    total_field = str(fields.get("total") or "total")
+    label_field = str(fields.get("label") or "title")
+
+    try:
+        files = iter_markdown_files(kb_root, relative)
+    except VaultReadError:
+        return None
+
+    root = kb_root.resolve()
+    best: dict[str, Any] | None = None
+    best_date: date | None = None
+    for path in files:
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                post = frontmatter.load(handle)
+        except Exception:  # noqa: BLE001
+            continue
+        meta = post.metadata or {}
+        if filt and not _filter_matches(meta, filt):
+            continue
+        note_date = _parse_date(_meta_get(meta, date_field))
+        done = _parse_float(_meta_get(meta, done_field))
+        total = _parse_float(_meta_get(meta, total_field))
+        if done is None or total is None:
+            continue
+        remaining = _parse_float(_meta_get(meta, remaining_field))
+        if remaining is None:
+            remaining = max(total - done, 0.0)
+        try:
+            rel = str(path.resolve().relative_to(root))
+        except ValueError:
+            rel = path.name
+        candidate = {
+            "date": note_date,
+            "done": int(round(done)),
+            "remaining": int(round(remaining)),
+            "total": int(round(total)),
+            "label": _clean_wikilink(_meta_get(meta, label_field)) or "Блок",
+            "path": rel,
+        }
+        if best is None or (note_date and (best_date is None or note_date >= best_date)):
+            best = candidate
+            best_date = note_date
+    return best
+
+
 def _month_total(entries: list[AggEntry], today: date) -> float:
     return sum(e.amount for e in entries if e.date.year == today.year and e.date.month == today.month)
 
@@ -162,6 +233,7 @@ def build_document(
     definition: dict[str, Any],
     *,
     today: date | None = None,
+    sidecar: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     today = today or date.today()
     recent_limit = int(definition.get("recent_limit") or 10)
@@ -214,6 +286,13 @@ def build_document(
         {"type": "callout", "id": "readonly", "text": readonly, "variant": "info"},
         {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metrics_children},
     ]
+    if sidecar:
+        block_name = str(sidecar.get("label") or "Блок")
+        done = sidecar.get("done")
+        total_n = sidecar.get("total")
+        remaining = sidecar.get("remaining")
+        tip = f"{block_name}: {done} / {total_n}, осталось {remaining}"
+        children.append({"type": "callout", "id": "block_progress", "text": tip, "variant": "tip"})
     if last:
         tip = f"{metric_last}: {last.date.isoformat()}"
         if last.label:
@@ -240,23 +319,37 @@ def build_document(
     return {"schema_version": 1, "screen": {"type": "vstack", "id": "root", "children": children}}
 
 
-def build_list_cell(entries: list[AggEntry], definition: dict[str, Any], *, today: date | None = None) -> dict[str, Any]:
+def build_list_cell(
+    entries: list[AggEntry],
+    definition: dict[str, Any],
+    *,
+    today: date | None = None,
+    sidecar: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     today = today or date.today()
     labels = definition.get("labels") or {}
     currency = str(labels.get("currency") or "₽")
     month = _month_total(entries, today)
     last = entries[0] if entries else None
+    metrics = [
+        {"label": str(labels.get("metric_month") or "Месяц"), "value": f"{_format_money(month)} {currency}"},
+        {
+            "label": str(labels.get("metric_last") or "Последняя"),
+            "value": f"{_format_money(last.amount)} {currency}" if last else "—",
+        },
+    ]
+    if sidecar and sidecar.get("total") is not None:
+        metrics.append(
+            {
+                "label": str(labels.get("metric_block") or "Блок"),
+                "value": f"{sidecar.get('done')}/{sidecar.get('total')}",
+            }
+        )
     return {
         "kind": "metrics",
         "title": str(labels.get("list_title") or labels.get("title") or "Сводка"),
         "subtitle": str(labels.get("list_subtitle") or ""),
-        "metrics": [
-            {"label": str(labels.get("metric_month") or "Месяц"), "value": f"{_format_money(month)} {currency}"},
-            {
-                "label": str(labels.get("metric_last") or "Последняя"),
-                "value": f"{_format_money(last.amount)} {currency}" if last else "—",
-            },
-        ],
+        "metrics": metrics,
     }
 
 
@@ -274,8 +367,18 @@ def compute(kb_root: Path, board_meta: dict[str, Any], definition: dict[str, Any
     else:
         entries = []
 
+    sidecar_meta: dict[str, Any] | None = None
+    sidecar_def = definition.get("sidecar")
+    if isinstance(sidecar_def, dict) and sidecar_def.get("path"):
+        try:
+            resolve_under_root(kb_root, str(sidecar_def["path"]))
+        except VaultReadError as exc:
+            logger.error("invalid sidecar path: %s", exc)
+        else:
+            sidecar_meta = load_sidecar(kb_root, sidecar_def)
+
     rendered_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    list_cell = build_list_cell(entries, definition)
+    list_cell = build_list_cell(entries, definition, sidecar=sidecar_meta)
     board = {
         "id": board_meta["id"],
         "title": board_meta.get("title") or list_cell.get("title") or board_meta["id"],
@@ -289,6 +392,6 @@ def compute(kb_root: Path, board_meta: dict[str, Any], definition: dict[str, Any
     }
     return {
         "board": board,
-        "document": build_document(entries, definition),
+        "document": build_document(entries, definition, sidecar=sidecar_meta),
         "rendered_at": rendered_at,
     }
