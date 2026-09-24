@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from kb_app_api.boards_catalog import delete_board, get_board_detail, list_boards, upsert_board
@@ -39,9 +39,10 @@ async def get_boards(
 async def get_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
+    period: Annotated[str | None, Query(description="YYYY-MM or all")] = None,
 ) -> dict[str, Any]:
     _ = user
-    detail = await get_board_detail(board_id)
+    detail = await get_board_detail(board_id, period=period)
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail
@@ -79,10 +80,11 @@ async def remove_board(
 async def refresh_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
+    period: Annotated[str | None, Query(description="YYYY-MM or all")] = None,
 ) -> dict[str, Any]:
     """Recompute live providers (vault read-only) or return static document."""
     _ = user
-    detail = await get_board_detail(board_id)
+    detail = await get_board_detail(board_id, period=period)
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail

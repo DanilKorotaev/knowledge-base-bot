@@ -215,7 +215,7 @@ def load_sidecar(kb_root: Path, sidecar: dict[str, Any]) -> dict[str, Any] | Non
             "done": int(round(done)),
             "remaining": int(round(remaining)),
             "total": int(round(total)),
-            "label": _clean_wikilink(_meta_get(meta, label_field)) or "Блок",
+            "label": _clean_wikilink(_meta_get(meta, label_field)) or "Progress",
             "path": rel,
         }
         if best is None or (note_date and (best_date is None or note_date >= best_date)):
@@ -287,12 +287,14 @@ def build_document(
         {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metrics_children},
     ]
     if sidecar:
-        block_name = str(sidecar.get("label") or "Блок")
+        labels = definition.get("labels") or {}
+        block_name = str(sidecar.get("label") or "Progress")
         done = sidecar.get("done")
         total_n = sidecar.get("total")
         remaining = sidecar.get("remaining")
-        tip = f"{block_name}: {done} / {total_n}, осталось {remaining}"
-        children.append({"type": "callout", "id": "block_progress", "text": tip, "variant": "tip"})
+        tip_tpl = str(labels.get("sidecar_tip") or "{label}: {done} / {total}, remaining {remaining}")
+        tip = tip_tpl.format(label=block_name, done=done, total=total_n, remaining=remaining)
+        children.append({"type": "callout", "id": "sidecar_progress", "text": tip, "variant": "tip"})
     if last:
         tip = f"{metric_last}: {last.date.isoformat()}"
         if last.label:
@@ -341,7 +343,7 @@ def build_list_cell(
     if sidecar and sidecar.get("total") is not None:
         metrics.append(
             {
-                "label": str(labels.get("metric_block") or "Блок"),
+                "label": str(labels.get("metric_sidecar") or labels.get("metric_block") or "Progress"),
                 "value": f"{sidecar.get('done')}/{sidecar.get('total')}",
             }
         )
@@ -353,8 +355,41 @@ def build_list_cell(
     }
 
 
-def compute(kb_root: Path, board_meta: dict[str, Any], definition: dict[str, Any]) -> dict[str, Any]:
-    """Render board list_cell + document from definition. Read-only."""
+def _parse_period(period: str | None) -> tuple[int, int] | None:
+    """Return (year, month) for ``YYYY-MM``, or None for all / invalid."""
+    if not period or str(period).strip().lower() in ("", "all", "*"):
+        return None
+    text = str(period).strip()
+    try:
+        year_s, month_s = text.split("-", 1)
+        year, month = int(year_s), int(month_s)
+        if month < 1 or month > 12:
+            return None
+        return year, month
+    except ValueError:
+        return None
+
+
+def _filter_entries_by_period(entries: list[AggEntry], period: str | None) -> list[AggEntry]:
+    bounds = _parse_period(period)
+    if bounds is None:
+        return entries
+    year, month = bounds
+    return [e for e in entries if e.date.year == year and e.date.month == month]
+
+
+def compute(
+    kb_root: Path,
+    board_meta: dict[str, Any],
+    definition: dict[str, Any],
+    *,
+    period: str | None = None,
+) -> dict[str, Any]:
+    """Render board list_cell + document from definition. Read-only.
+
+    ``period``: ``YYYY-MM`` limits main entries to that month; omit / ``all`` = full history.
+    Optional ``definition.sidecar`` (related note) is not period-filtered.
+    """
     path = str(definition.get("path") or "").strip()
     if path:
         try:
@@ -366,6 +401,8 @@ def compute(kb_root: Path, board_meta: dict[str, Any], definition: dict[str, Any
             entries = load_entries(kb_root, definition)
     else:
         entries = []
+
+    entries = _filter_entries_by_period(entries, period)
 
     sidecar_meta: dict[str, Any] | None = None
     sidecar_def = definition.get("sidecar")
@@ -394,4 +431,5 @@ def compute(kb_root: Path, board_meta: dict[str, Any], definition: dict[str, Any
         "board": board,
         "document": build_document(entries, definition, sidecar=sidecar_meta),
         "rendered_at": rendered_at,
+        "period": period or "all",
     }

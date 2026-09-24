@@ -18,7 +18,12 @@ def _kb_root() -> Path:
     return Path(config.LOCAL_KB_PATH)
 
 
-def _public_board(row: dict[str, Any], *, list_cell: dict[str, Any] | None = None, rendered_at: str | None = None) -> dict[str, Any]:
+def _public_board(
+    row: dict[str, Any],
+    *,
+    list_cell: dict[str, Any] | None = None,
+    rendered_at: str | None = None,
+) -> dict[str, Any]:
     return {
         "id": row["id"],
         "title": row["title"],
@@ -32,12 +37,12 @@ def _public_board(row: dict[str, Any], *, list_cell: dict[str, Any] | None = Non
     }
 
 
-def _render_row(row: dict[str, Any]) -> dict[str, Any] | None:
+def _render_row(row: dict[str, Any], *, period: str | None = None) -> dict[str, Any] | None:
     definition = row.get("definition") or {}
     provider = str(definition.get("provider") or "").strip()
 
     if provider == vault_frontmatter_agg.PROVIDER_ID:
-        return vault_frontmatter_agg.compute(_kb_root(), row, definition)
+        return vault_frontmatter_agg.compute(_kb_root(), row, definition, period=period)
 
     if provider == "static" or not provider:
         document = row.get("rendered_document")
@@ -47,6 +52,7 @@ def _render_row(row: dict[str, Any]) -> dict[str, Any] | None:
             "board": _public_board(row),
             "document": deepcopy(document),
             "rendered_at": row.get("rendered_at"),
+            "period": period or "all",
         }
 
     logger.warning("unknown board provider %r for %s", provider, row.get("id"))
@@ -68,11 +74,11 @@ async def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]
     return boards
 
 
-async def get_board_detail(board_id: str) -> dict[str, Any] | None:
+async def get_board_detail(board_id: str, *, period: str | None = None) -> dict[str, Any] | None:
     await repository.ensure_boards_schema()
     row = await repository.get_board_row(board_id)
     if row is None:
         return None
     if not row.get("enabled", True):
         return None
-    return _render_row(row)
+    return _render_row(row, period=period)
