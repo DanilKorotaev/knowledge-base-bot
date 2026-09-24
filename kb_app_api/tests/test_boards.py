@@ -44,6 +44,15 @@ def tearDownModule() -> None:
             pass
 
 
+async def _seed_examples() -> None:
+    from kb_app_api.boards import repository as repo
+    from kb_app_api.tests.fixtures.board_definitions import EXAMPLE_DEMO_JOBS, EXAMPLE_DEMO_KPI
+
+    await repo.ensure_boards_schema()
+    await repo.upsert_board_row(EXAMPLE_DEMO_KPI)
+    await repo.upsert_board_row(EXAMPLE_DEMO_JOBS)
+
+
 class BoardsCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         import config as config_mod
@@ -55,6 +64,7 @@ class BoardsCatalogTests(unittest.IsolatedAsyncioTestCase):
         config_mod.config.LOCAL_KB_PATH = Path(_kb_dir or ".")
         repo._SCHEMA_READY = False  # noqa: SLF001
         await close_db()
+        await _seed_examples()
 
     async def test_list_sorted_enabled(self) -> None:
         from kb_app_api.boards_catalog import list_boards
@@ -85,11 +95,18 @@ class BoardsCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("table", flat_types)
         self.assertIsNone(await get_board_detail("missing"))
 
+    async def test_empty_seed_has_no_builtin_domain_boards(self) -> None:
+        from kb_app_api.boards.seed import DEFAULT_BOARDS
+
+        self.assertEqual(DEFAULT_BOARDS, [])
+
 
 @unittest.skipUnless(TestClient is not None, "Нужен fastapi (requirements.txt бота)")
 class BoardsRouteTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        import asyncio
+
         import config as config_mod
         import kb_app_api.boards.repository as repo
 
@@ -106,6 +123,8 @@ class BoardsRouteTests(unittest.TestCase):
             config_mod.config.LOCAL_KB_PATH = Path(_kb_dir)
         repo._SCHEMA_READY = False  # noqa: SLF001
 
+        asyncio.run(_seed_examples())
+
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
@@ -118,8 +137,38 @@ class BoardsRouteTests(unittest.TestCase):
         self.assertGreaterEqual(payload["total"], 2)
         ids = [b["id"] for b in payload["boards"]]
         self.assertIn("demo-kpi", ids)
-        self.assertIn("car-fuel", ids)
-        self.assertIn("workouts", ids)
+        self.assertNotIn("car-fuel", ids)
+
+    def test_put_and_delete_board(self) -> None:
+        body = {
+            "title": "Temp board",
+            "subtitle": "api test",
+            "kind": "cached_view",
+            "sort_order": 50,
+            "enabled": True,
+            "definition": {"provider": "static"},
+            "list_cell": {
+                "kind": "metrics",
+                "title": "Temp board",
+                "subtitle": "api test",
+                "metrics": [{"label": "X", "value": "1"}],
+            },
+            "rendered_document": {
+                "schema_version": 1,
+                "screen": {
+                    "type": "vstack",
+                    "id": "root",
+                    "children": [{"type": "text", "id": "t", "text": "hi"}],
+                },
+            },
+        }
+        put = self.client.put("/api/boards/temp-board", headers=self.headers, json=body)
+        self.assertEqual(put.status_code, 200, put.text)
+        self.assertEqual(put.json()["board"]["id"], "temp-board")
+        deleted = self.client.delete("/api/boards/temp-board", headers=self.headers)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        missing = self.client.get("/api/boards/temp-board", headers=self.headers)
+        self.assertEqual(missing.status_code, 404)
 
     def test_get_board_detail(self) -> None:
         response = self.client.get("/api/boards/demo-kpi", headers=self.headers)
