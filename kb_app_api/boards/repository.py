@@ -254,3 +254,25 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
                 rendered_document_json,
                 rendered_at,
             )
+
+
+async def delete_board_row(board_id: str) -> bool:
+    """Remove a board row. Returns True if a row was deleted."""
+    db = await get_db()
+    if isinstance(db, SQLiteDatabase):
+        import aiosqlite
+
+        async with aiosqlite.connect(db.db_path) as conn:
+            cursor = await conn.execute("DELETE FROM kb_app_boards WHERE id = ?", (board_id,))
+            await conn.commit()
+            return cursor.rowcount > 0
+    if isinstance(db, PostgreSQLDatabase):
+        assert db.pool is not None
+        async with db.pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM kb_app_boards WHERE id = $1", board_id)
+            # asyncpg: "DELETE N"
+            try:
+                return int(str(result).split()[-1]) > 0
+            except (ValueError, IndexError):
+                return False
+    return False

@@ -152,14 +152,20 @@ class BoardsRuntimeAsyncTests(unittest.IsolatedAsyncioTestCase):
         except OSError:
             pass
 
-    async def test_list_includes_seeded_car_fuel(self) -> None:
+    async def test_list_includes_upserted_car_fuel(self) -> None:
+        from kb_app_api.boards import repository as repo
         from kb_app_api.boards_catalog import get_board_detail, list_boards
+        from kb_app_api.tests.fixtures.board_definitions import EXAMPLE_CAR_FUEL, EXAMPLE_WORKOUTS
+
+        await repo.ensure_boards_schema()
+        await repo.upsert_board_row(EXAMPLE_CAR_FUEL)
+        await repo.upsert_board_row(EXAMPLE_WORKOUTS)
 
         boards = await list_boards()
         ids = [b["id"] for b in boards]
         self.assertIn("car-fuel", ids)
-        self.assertIn("demo-kpi", ids)
         self.assertIn("workouts", ids)
+        self.assertNotIn("demo-kpi", ids)
         detail = await get_board_detail("car-fuel")
         assert detail is not None
         self.assertEqual(detail["document"]["schema_version"], 1)

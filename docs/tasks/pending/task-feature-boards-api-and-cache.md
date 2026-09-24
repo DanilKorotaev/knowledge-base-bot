@@ -1,22 +1,26 @@
-# Feature: Boards API seed catalog (list / detail / refresh)
+# Feature: Boards API + DB definitions + MCP upsert
 
 **Status:** In progress  
-**Related:** `Документация/Задачи/task-kb-dashboards-platform.md` (этап B minimal), iOS `task-feature-boards-tab-renderer.md`
+**Related:** `Документация/Задачи/task-kb-dashboards-platform.md` (этап B/F), iOS `task-feature-boards-tab-renderer.md`
 
 ## Goal
 
-Expose `GET /api/boards`, `GET /api/boards/{id}`, `POST /api/boards/{id}/refresh` so the iOS Overview tab can leave the demo-404 fallback.
+Expose boards HTTP API for iOS Overview; definitions in DB; **no domain boards in open-source seed**. Agents create boards via **MCP** (`mcp-servers/kb-boards`) → `PUT /api/boards/{id}`.
 
-## Scope (v1)
+## Scope
 
-- [x] Seed catalog with demo KPI + jobs + car-fuel
+- [x] `GET /api/boards`, `GET /api/boards/{id}`, `POST …/refresh`
+- [x] `PUT /api/boards/{id}`, `DELETE /api/boards/{id}`
 - [x] Auth via existing Bearer (`get_api_user`)
-- [x] Unit + route tests
-- [x] **DB table** `kb_app_boards` — definition JSON (paths live in DB seed, not provider code)
-- [x] Provider `vault_frontmatter_agg` — read-only vault scan from definition
-- [ ] Agent tools create/update board
+- [x] DB table `kb_app_boards` — definition JSON
+- [x] Provider `vault_frontmatter_agg` — read-only vault scan from definition (dotted fields)
+- [x] `DEFAULT_BOARDS = []` — examples only in `tests/fixtures/board_definitions.py`
+- [x] MCP `kb-boards` + Cursor skill `.cursor/skills/kb-boards`
+- [ ] Period / month picker on board detail (deferred — refresh only for now)
+- [ ] In-app chat-agent tools (after MCP)
+- [ ] Settings toggle for Overview tab (like Health)
 - [ ] vault_script / system / remote / device providers
 
 ## Notes
 
-Refresh re-runs the provider. Car-fuel path is only in seeded `definition.path` (editable in DB later without redeploying provider logic).
+Existing installs keep rows already in DB (seed never deletes). Fresh OSS clones start with an empty Overview until MCP upsert.
