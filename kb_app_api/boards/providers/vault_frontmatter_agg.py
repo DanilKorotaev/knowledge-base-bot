@@ -228,54 +228,162 @@ def _month_total(entries: list[AggEntry], today: date) -> float:
     return sum(e.amount for e in entries if e.date.year == today.year and e.date.month == today.month)
 
 
+def _qty_sum(entries: list[AggEntry]) -> float | None:
+    vals = [e.quantity for e in entries if e.quantity is not None]
+    if not vals:
+        return None
+    return sum(vals)
+
+
+def _format_short_date(d: date, *, ref_year: int) -> str:
+    if d.year == ref_year:
+        return f"{d.day:02d}.{d.month:02d}"
+    return f"{d.day:02d}.{d.month:02d}.{d.year}"
+
+
+def _build_metrics(
+    entries: list[AggEntry],
+    labels: dict[str, Any],
+    *,
+    today: date,
+    period: str | None,
+    sidecar: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """KPI set depends on period mode. No redundant last-amount tile."""
+    currency = str(labels.get("currency") or "₽")
+    qty_unit = str(labels.get("qty_unit") or "").strip()
+    metric_month = str(labels.get("metric_month") or "This month")
+    metric_total = str(labels.get("metric_total") or "Total")
+    metric_period = str(labels.get("metric_period") or "Period")
+    metric_count = str(labels.get("metric_count") or "Count")
+    metric_qty = str(labels.get("metric_qty") or "Quantity")
+    metric_avg = str(labels.get("metric_avg") or "Average")
+
+    total = sum(e.amount for e in entries)
+    count = len(entries)
+    qty = _qty_sum(entries)
+    period_bounds = _parse_period(period)
+    metrics: list[dict[str, Any]] = []
+
+    if period_bounds is None:
+        # All-time: calendar this month + total + count + qty or avg
+        month = _month_total(entries, today)
+        metrics.append(
+            {"type": "metric", "id": "m_month", "label": metric_month, "text": f"{_format_money(month)} {currency}"}
+        )
+        metrics.append(
+            {"type": "metric", "id": "m_total", "label": metric_total, "text": f"{_format_money(total)} {currency}"}
+        )
+    else:
+        # Filtered month: period sum (not "this calendar month")
+        metrics.append(
+            {"type": "metric", "id": "m_period", "label": metric_period, "text": f"{_format_money(total)} {currency}"}
+        )
+
+    metrics.append({"type": "metric", "id": "m_count", "label": metric_count, "text": str(count)})
+
+    if qty is not None:
+        qty_text = _format_qty(qty)
+        if qty_unit:
+            qty_text = f"{qty_text} {qty_unit}"
+        metrics.append({"type": "metric", "id": "m_qty", "label": metric_qty, "text": qty_text})
+        if qty > 0:
+            avg = total / qty
+            avg_unit = f"{currency}/{qty_unit}" if qty_unit else currency
+            metrics.append(
+                {"type": "metric", "id": "m_avg", "label": metric_avg, "text": f"{_format_money(avg)} {avg_unit}"}
+            )
+    elif count > 0:
+        avg = total / count
+        metrics.append(
+            {"type": "metric", "id": "m_avg", "label": metric_avg, "text": f"{_format_money(avg)} {currency}"}
+        )
+
+    if sidecar and sidecar.get("total") is not None:
+        metrics.append(
+            {
+                "type": "metric",
+                "id": "m_sidecar",
+                "label": str(labels.get("metric_sidecar") or labels.get("metric_block") or "Progress"),
+                "text": f"{sidecar.get('done')}/{sidecar.get('total')}",
+            }
+        )
+
+    return metrics
+
+
+def _last_tip_text(
+    last: AggEntry,
+    labels: dict[str, Any],
+    *,
+    ref_year: int,
+) -> str:
+    currency = str(labels.get("currency") or "₽")
+    qty_unit = str(labels.get("qty_unit") or "").strip()
+    date_s = _format_short_date(last.date, ref_year=ref_year)
+    qty_s = ""
+    if last.quantity is not None:
+        qty_s = _format_qty(last.quantity)
+        if qty_unit:
+            qty_s = f"{qty_s} {qty_unit}"
+    amount_s = f"{_format_money(last.amount)} {currency}"
+    tpl = str(
+        labels.get("last_tip")
+        or "Last: {date}, {label}, {qty}, {amount}"
+    )
+    try:
+        return tpl.format(
+            date=date_s,
+            label=last.label or "—",
+            qty=qty_s or "—",
+            amount=amount_s,
+            currency=currency,
+        )
+    except (KeyError, ValueError):
+        parts = [f"Last: {date_s}"]
+        if last.label:
+            parts.append(last.label)
+        if qty_s:
+            parts.append(qty_s)
+        parts.append(amount_s)
+        return ", ".join(parts)
+
+
 def build_document(
     entries: list[AggEntry],
     definition: dict[str, Any],
     *,
     today: date | None = None,
     sidecar: dict[str, Any] | None = None,
+    period: str | None = None,
 ) -> dict[str, Any]:
     today = today or date.today()
     recent_limit = int(definition.get("recent_limit") or 10)
     labels = definition.get("labels") or {}
-    title = str(labels.get("title") or "Сводка")
+    title = str(labels.get("title") or "Summary")
     readonly = str(
         labels.get("readonly")
-        or "Сводка только читает заметки из vault. Файлы не изменяются."
+        or "Read-only summary from vault notes. Files are not modified."
     )
-    metric_month = str(labels.get("metric_month") or "Этот месяц")
-    metric_total = str(labels.get("metric_total") or "Всего")
-    metric_last = str(labels.get("metric_last") or "Последняя")
-    metric_count = str(labels.get("metric_count") or "Записей")
-    table_label = str(labels.get("table") or "Последние записи")
-    col_date = str(labels.get("col_date") or "Дата")
-    col_label = str(labels.get("col_label") or "Название")
-    col_qty = str(labels.get("col_qty") or "Кол-во")
-    col_amount = str(labels.get("col_amount") or "Сумма")
+    table_label = str(labels.get("table") or "Recent")
+    col_date = str(labels.get("col_date") or "Date")
+    col_label = str(labels.get("col_label") or "Label")
+    col_qty = str(labels.get("col_qty") or "Qty")
+    col_amount = str(labels.get("col_amount") or "Amount")
     currency = str(labels.get("currency") or "₽")
+    qty_unit = str(labels.get("qty_unit") or "").strip()
 
-    total = sum(e.amount for e in entries)
-    month = _month_total(entries, today)
     last = entries[0] if entries else None
     recent = entries[:recent_limit]
-
-    metrics_children = [
-        {"type": "metric", "id": "m_month", "label": metric_month, "text": f"{_format_money(month)} {currency}"},
-        {"type": "metric", "id": "m_total", "label": metric_total, "text": f"{_format_money(total)} {currency}"},
-        {
-            "type": "metric",
-            "id": "m_last",
-            "label": metric_last,
-            "text": f"{_format_money(last.amount)} {currency}" if last else "—",
-        },
-        {"type": "metric", "id": "m_count", "label": metric_count, "text": str(len(entries))},
-    ]
+    metrics_children = _build_metrics(entries, labels, today=today, period=period, sidecar=sidecar)
 
     rows = [
         [
             e.date.isoformat(),
             e.label or "—",
-            _format_qty(e.quantity),
+            (_format_qty(e.quantity) + (f" {qty_unit}" if qty_unit and e.quantity is not None else ""))
+            if e.quantity is not None
+            else "—",
             f"{_format_money(e.amount)} {currency}",
         ]
         for e in recent
@@ -287,21 +395,26 @@ def build_document(
         {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metrics_children},
     ]
     if sidecar:
-        labels = definition.get("labels") or {}
         block_name = str(sidecar.get("label") or "Progress")
-        done = sidecar.get("done")
-        total_n = sidecar.get("total")
-        remaining = sidecar.get("remaining")
         tip_tpl = str(labels.get("sidecar_tip") or "{label}: {done} / {total}, remaining {remaining}")
-        tip = tip_tpl.format(label=block_name, done=done, total=total_n, remaining=remaining)
+        tip = tip_tpl.format(
+            label=block_name,
+            done=sidecar.get("done"),
+            total=sidecar.get("total"),
+            remaining=sidecar.get("remaining"),
+        )
         children.append({"type": "callout", "id": "sidecar_progress", "text": tip, "variant": "tip"})
     if last:
-        tip = f"{metric_last}: {last.date.isoformat()}"
-        if last.label:
-            tip += f", {last.label}"
-        if last.quantity is not None:
-            tip += f", {_format_qty(last.quantity)}"
-        children.append({"type": "callout", "id": "last_detail", "text": tip, "variant": "tip"})
+        bounds = _parse_period(period)
+        ref_year = bounds[0] if bounds else today.year
+        children.append(
+            {
+                "type": "callout",
+                "id": "last_detail",
+                "text": _last_tip_text(last, labels, ref_year=ref_year),
+                "variant": "tip",
+            }
+        )
 
     children.append(
         {
@@ -327,19 +440,29 @@ def build_list_cell(
     *,
     today: date | None = None,
     sidecar: dict[str, Any] | None = None,
+    period: str | None = None,
 ) -> dict[str, Any]:
     today = today or date.today()
     labels = definition.get("labels") or {}
     currency = str(labels.get("currency") or "₽")
-    month = _month_total(entries, today)
-    last = entries[0] if entries else None
-    metrics = [
-        {"label": str(labels.get("metric_month") or "Месяц"), "value": f"{_format_money(month)} {currency}"},
-        {
-            "label": str(labels.get("metric_last") or "Последняя"),
-            "value": f"{_format_money(last.amount)} {currency}" if last else "—",
-        },
-    ]
+    period_bounds = _parse_period(period)
+    total = sum(e.amount for e in entries)
+    metrics: list[dict[str, str]] = []
+    if period_bounds is None:
+        month = _month_total(entries, today)
+        metrics.append(
+            {"label": str(labels.get("metric_month") or "Month"), "value": f"{_format_money(month)} {currency}"}
+        )
+        metrics.append(
+            {"label": str(labels.get("metric_total") or "Total"), "value": f"{_format_money(total)} {currency}"}
+        )
+    else:
+        metrics.append(
+            {"label": str(labels.get("metric_period") or "Period"), "value": f"{_format_money(total)} {currency}"}
+        )
+        metrics.append(
+            {"label": str(labels.get("metric_count") or "Count"), "value": str(len(entries))}
+        )
     if sidecar and sidecar.get("total") is not None:
         metrics.append(
             {
@@ -349,7 +472,7 @@ def build_list_cell(
         )
     return {
         "kind": "metrics",
-        "title": str(labels.get("list_title") or labels.get("title") or "Сводка"),
+        "title": str(labels.get("list_title") or labels.get("title") or "Summary"),
         "subtitle": str(labels.get("list_subtitle") or ""),
         "metrics": metrics,
     }
@@ -415,7 +538,7 @@ def compute(
             sidecar_meta = load_sidecar(kb_root, sidecar_def)
 
     rendered_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    list_cell = build_list_cell(entries, definition, sidecar=sidecar_meta)
+    list_cell = build_list_cell(entries, definition, sidecar=sidecar_meta, period=period)
     board = {
         "id": board_meta["id"],
         "title": board_meta.get("title") or list_cell.get("title") or board_meta["id"],
@@ -429,7 +552,7 @@ def compute(
     }
     return {
         "board": board,
-        "document": build_document(entries, definition, sidecar=sidecar_meta),
+        "document": build_document(entries, definition, sidecar=sidecar_meta, period=period),
         "rendered_at": rendered_at,
         "period": period or "all",
     }
