@@ -161,13 +161,18 @@ class VaultFrontmatterAggTests(unittest.TestCase):
         )
 
     def test_period_filters_month(self) -> None:
-        fuel = self.root / "Документы" / "Тачки" / "Соляра" / "Расходы" / "Топливо"
         definition = {
             "provider": "vault_frontmatter_agg",
             "path": "Документы/Тачки/Соляра/Расходы/Топливо",
             "filter": {"type": "fuel"},
             "fields": {"date": "date", "amount": "cost", "quantity": "liters", "label": "station"},
-            "labels": {"title": "Fuel", "currency": "₽"},
+            "labels": {
+                "title": "Fuel",
+                "currency": "₽",
+                "qty_unit": "л",
+                "metric_period": "Period",
+                "last_tip": "Last: {date}, {label}, {qty}, {amount}",
+            },
         }
         meta = {"id": "x", "title": "Fuel", "kind": "cached_view", "sort_order": 1}
         all_payload = agg.compute(self.root, meta, definition, period="all")
@@ -175,13 +180,21 @@ class VaultFrontmatterAggTests(unittest.TestCase):
         aug = agg.compute(self.root, meta, definition, period="2026-08")
         self.assertEqual(all_payload["period"], "all")
         self.assertEqual(sep["period"], "2026-09")
-        # setUp has Sep 2996 + Aug 1500
         sep_table = next(n for n in sep["document"]["screen"]["children"] if n.get("type") == "table")
         aug_table = next(n for n in aug["document"]["screen"]["children"] if n.get("type") == "table")
         self.assertEqual(len(sep_table["rows"]), 1)
         self.assertEqual(len(aug_table["rows"]), 1)
-        _ = fuel
-        _ = all_payload
+        sep_metrics = next(n for n in sep["document"]["screen"]["children"] if n.get("id") == "metrics_row")
+        sep_ids = [c.get("id") for c in sep_metrics.get("children") or []]
+        self.assertIn("m_period", sep_ids)
+        self.assertNotIn("m_month", sep_ids)
+        self.assertNotIn("m_last", sep_ids)
+        tip = next(n for n in sep["document"]["screen"]["children"] if n.get("id") == "last_detail")
+        self.assertIn("л", tip.get("text") or "")
+        all_metrics = next(n for n in all_payload["document"]["screen"]["children"] if n.get("id") == "metrics_row")
+        all_ids = [c.get("id") for c in all_metrics.get("children") or []]
+        self.assertIn("m_month", all_ids)
+        self.assertNotIn("m_last", all_ids)
         entries = agg.load_entries(self.root, {"path": "", "filter": {"type": "fuel"}})
         self.assertEqual(entries, [])
 
