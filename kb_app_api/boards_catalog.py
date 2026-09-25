@@ -23,8 +23,16 @@ async def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]
     return await runtime.list_boards(include_disabled=include_disabled)
 
 
-async def get_board_detail(board_id: str, *, period: str | None = None) -> dict[str, Any] | None:
-    return await runtime.get_board_detail(board_id, period=period)
+async def get_board_detail(
+    board_id: str,
+    *,
+    period: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any] | None:
+    return await runtime.get_board_detail(
+        board_id, period=period, date_from=date_from, date_to=date_to
+    )
 
 
 async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:

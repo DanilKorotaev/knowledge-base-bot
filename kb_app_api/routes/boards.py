@@ -40,9 +40,17 @@ async def get_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     period: Annotated[str | None, Query(description="YYYY-MM or all")] = None,
+    date_from: Annotated[
+        str | None, Query(alias="from", description="Inclusive ISO date YYYY-MM-DD")
+    ] = None,
+    date_to: Annotated[
+        str | None, Query(alias="to", description="Inclusive ISO date YYYY-MM-DD")
+    ] = None,
 ) -> dict[str, Any]:
     _ = user
-    detail = await get_board_detail(board_id, period=period)
+    detail = await get_board_detail(
+        board_id, period=period, date_from=date_from, date_to=date_to
+    )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail
@@ -81,10 +89,18 @@ async def refresh_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     period: Annotated[str | None, Query(description="YYYY-MM or all")] = None,
+    date_from: Annotated[
+        str | None, Query(alias="from", description="Inclusive ISO date YYYY-MM-DD")
+    ] = None,
+    date_to: Annotated[
+        str | None, Query(alias="to", description="Inclusive ISO date YYYY-MM-DD")
+    ] = None,
 ) -> dict[str, Any]:
     """Recompute live providers (vault read-only) or return static document."""
     _ = user
-    detail = await get_board_detail(board_id, period=period)
+    detail = await get_board_detail(
+        board_id, period=period, date_from=date_from, date_to=date_to
+    )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
     return detail

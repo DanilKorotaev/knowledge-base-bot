@@ -26,10 +26,9 @@ EXAMPLE_CAR_FUEL: dict[str, Any] = {
             "title": "Соляра — топливо",
             "list_title": "Авторасходы — топливо",
             "list_subtitle": "Соляра · только чтение",
-            "readonly": "Сводка только читает заметки из vault. Файлы не изменяются.",
             "metric_month": "Этот месяц",
             "metric_total": "Всего топливо",
-            "metric_last": "Последняя",
+            "metric_period": "Период",
             "metric_count": "Заправок",
             "table": "Последние заправки",
             "col_date": "Дата",
@@ -37,7 +36,10 @@ EXAMPLE_CAR_FUEL: dict[str, Any] = {
             "col_qty": "Л",
             "col_amount": "Сумма",
             "currency": "₽",
+            "qty_unit": "л",
+            "last_tip": "Последняя: {date}, {label}, {qty}, {amount}",
         },
+        "period_ui": "range",
     },
 }
 
@@ -64,10 +66,9 @@ EXAMPLE_WORKOUTS: dict[str, Any] = {
             "title": "Тренировки — объём",
             "list_title": "Тренировки",
             "list_subtitle": "Объём · только чтение",
-            "readonly": "Сводка только читает заметки из vault. Файлы не изменяются.",
             "metric_month": "Этот месяц",
             "metric_total": "Всего объём",
-            "metric_last": "Последняя",
+            "metric_period": "Период",
             "metric_count": "Тренировок",
             "table": "Последние тренировки",
             "col_date": "Дата",
@@ -76,6 +77,7 @@ EXAMPLE_WORKOUTS: dict[str, Any] = {
             "col_amount": "Объём",
             "currency": "кг",
         },
+        "period_ui": "month",
     },
 }
 
