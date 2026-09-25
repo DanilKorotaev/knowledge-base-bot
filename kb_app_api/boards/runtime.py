@@ -37,22 +37,43 @@ def _public_board(
     }
 
 
-def _render_row(row: dict[str, Any], *, period: str | None = None) -> dict[str, Any] | None:
+def _render_row(
+    row: dict[str, Any],
+    *,
+    period: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any] | None:
     definition = row.get("definition") or {}
     provider = str(definition.get("provider") or "").strip()
 
     if provider == vault_frontmatter_agg.PROVIDER_ID:
-        return vault_frontmatter_agg.compute(_kb_root(), row, definition, period=period)
+        return vault_frontmatter_agg.compute(
+            _kb_root(),
+            row,
+            definition,
+            period=period,
+            date_from=date_from,
+            date_to=date_to,
+        )
 
     if provider == "static" or not provider:
         document = row.get("rendered_document")
         if not isinstance(document, dict):
             return None
+        period_ui = str(definition.get("period_ui") or "none").strip().lower()
+        if period_ui not in ("none", "month", "range"):
+            period_ui = "none"
+        board = _public_board(row)
+        board["period_ui"] = period_ui
+        scoped = bool(date_from or date_to)
         return {
-            "board": _public_board(row),
+            "board": board,
             "document": deepcopy(document),
             "rendered_at": row.get("rendered_at"),
-            "period": period or "all",
+            "period": period or ("range" if scoped else "all"),
+            "from": date_from,
+            "to": date_to,
         }
 
     logger.warning("unknown board provider %r for %s", provider, row.get("id"))
@@ -74,11 +95,17 @@ async def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]
     return boards
 
 
-async def get_board_detail(board_id: str, *, period: str | None = None) -> dict[str, Any] | None:
+async def get_board_detail(
+    board_id: str,
+    *,
+    period: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict[str, Any] | None:
     await repository.ensure_boards_schema()
     row = await repository.get_board_row(board_id)
     if row is None:
         return None
     if not row.get("enabled", True):
         return None
-    return _render_row(row, period=period)
+    return _render_row(row, period=period, date_from=date_from, date_to=date_to)

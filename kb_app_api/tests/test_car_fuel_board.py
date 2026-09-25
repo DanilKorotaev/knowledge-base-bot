@@ -195,6 +195,32 @@ class VaultFrontmatterAggTests(unittest.TestCase):
         all_ids = [c.get("id") for c in all_metrics.get("children") or []]
         self.assertIn("m_month", all_ids)
         self.assertNotIn("m_last", all_ids)
+        # Empty readonly label → no plaque
+        callout_ids = [
+            n.get("id")
+            for n in all_payload["document"]["screen"]["children"]
+            if n.get("type") == "callout"
+        ]
+        self.assertNotIn("readonly", callout_ids)
+
+        ranged = agg.compute(
+            self.root,
+            meta,
+            definition,
+            date_from="2026-08-01",
+            date_to="2026-08-31",
+        )
+        self.assertEqual(ranged["period"], "range")
+        self.assertEqual(ranged["from"], "2026-08-01")
+        self.assertEqual(ranged["to"], "2026-08-31")
+        self.assertEqual(ranged["board"]["period_ui"], "month")
+        range_table = next(n for n in ranged["document"]["screen"]["children"] if n.get("type") == "table")
+        self.assertEqual(len(range_table["rows"]), 1)
+        range_metrics = next(n for n in ranged["document"]["screen"]["children"] if n.get("id") == "metrics_row")
+        range_ids = [c.get("id") for c in range_metrics.get("children") or []]
+        self.assertIn("m_period", range_ids)
+        self.assertNotIn("m_month", range_ids)
+
         entries = agg.load_entries(self.root, {"path": "", "filter": {"type": "fuel"}})
         self.assertEqual(entries, [])
 

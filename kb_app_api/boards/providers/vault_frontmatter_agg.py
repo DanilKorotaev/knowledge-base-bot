@@ -262,10 +262,9 @@ def _build_metrics(
     total = sum(e.amount for e in entries)
     count = len(entries)
     qty = _qty_sum(entries)
-    period_bounds = _parse_period(period)
     metrics: list[dict[str, Any]] = []
 
-    if period_bounds is None:
+    if not _is_scoped_period(period):
         # All-time: calendar this month + total + count + qty or avg
         month = _month_total(entries, today)
         metrics.append(
@@ -275,7 +274,7 @@ def _build_metrics(
             {"type": "metric", "id": "m_total", "label": metric_total, "text": f"{_format_money(total)} {currency}"}
         )
     else:
-        # Filtered month: period sum (not "this calendar month")
+        # Filtered month or custom date range: period sum (not "this calendar month")
         metrics.append(
             {"type": "metric", "id": "m_period", "label": metric_period, "text": f"{_format_money(total)} {currency}"}
         )
@@ -361,10 +360,6 @@ def build_document(
     recent_limit = int(definition.get("recent_limit") or 10)
     labels = definition.get("labels") or {}
     title = str(labels.get("title") or "Summary")
-    readonly = str(
-        labels.get("readonly")
-        or "Read-only summary from vault notes. Files are not modified."
-    )
     table_label = str(labels.get("table") or "Recent")
     col_date = str(labels.get("col_date") or "Date")
     col_label = str(labels.get("col_label") or "Label")
@@ -389,9 +384,9 @@ def build_document(
         for e in recent
     ]
 
+    # No readonly plaque — metrics + tips + table only.
     children: list[dict[str, Any]] = [
         {"type": "text", "id": "title", "text": title},
-        {"type": "callout", "id": "readonly", "text": readonly, "variant": "info"},
         {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metrics_children},
     ]
     if sidecar:
@@ -445,10 +440,9 @@ def build_list_cell(
     today = today or date.today()
     labels = definition.get("labels") or {}
     currency = str(labels.get("currency") or "₽")
-    period_bounds = _parse_period(period)
     total = sum(e.amount for e in entries)
     metrics: list[dict[str, str]] = []
-    if period_bounds is None:
+    if not _is_scoped_period(period):
         month = _month_total(entries, today)
         metrics.append(
             {"label": str(labels.get("metric_month") or "Month"), "value": f"{_format_money(month)} {currency}"}
@@ -479,8 +473,8 @@ def build_list_cell(
 
 
 def _parse_period(period: str | None) -> tuple[int, int] | None:
-    """Return (year, month) for ``YYYY-MM``, or None for all / invalid."""
-    if not period or str(period).strip().lower() in ("", "all", "*"):
+    """Return (year, month) for ``YYYY-MM``, or None for all / range / invalid."""
+    if not period or str(period).strip().lower() in ("", "all", "*", "range"):
         return None
     text = str(period).strip()
     try:
@@ -493,6 +487,18 @@ def _parse_period(period: str | None) -> tuple[int, int] | None:
         return None
 
 
+def _is_scoped_period(period: str | None) -> bool:
+    """True when KPIs should use period-sum mode (month filter or custom range)."""
+    if not period:
+        return False
+    text = str(period).strip().lower()
+    if text in ("", "all", "*"):
+        return False
+    if text == "range":
+        return True
+    return _parse_period(period) is not None
+
+
 def _filter_entries_by_period(entries: list[AggEntry], period: str | None) -> list[AggEntry]:
     bounds = _parse_period(period)
     if bounds is None:
@@ -501,17 +507,53 @@ def _filter_entries_by_period(entries: list[AggEntry], period: str | None) -> li
     return [e for e in entries if e.date.year == year and e.date.month == month]
 
 
+def _filter_entries(
+    entries: list[AggEntry],
+    *,
+    period: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[AggEntry]:
+    if date_from is not None or date_to is not None:
+        out: list[AggEntry] = []
+        for e in entries:
+            if date_from is not None and e.date < date_from:
+                continue
+            if date_to is not None and e.date > date_to:
+                continue
+            out.append(e)
+        return out
+    return _filter_entries_by_period(entries, period)
+
+
+def _parse_iso_date(raw: str | None) -> date | None:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
 def compute(
     kb_root: Path,
     board_meta: dict[str, Any],
     definition: dict[str, Any],
     *,
     period: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict[str, Any]:
     """Render board list_cell + document from definition. Read-only.
 
-    ``period``: ``YYYY-MM`` limits main entries to that month; omit / ``all`` = full history.
-    Optional ``definition.sidecar`` (related note) is not period-filtered.
+    Filter (main entries only; sidecar never filtered):
+    - ``date_from`` / ``date_to`` ISO dates (inclusive), or
+    - ``period`` ``YYYY-MM`` / ``all``.
+
+    ``definition.period_ui``: ``none`` | ``month`` | ``range`` (returned on board for clients).
     """
     path = str(definition.get("path") or "").strip()
     if path:
@@ -525,7 +567,12 @@ def compute(
     else:
         entries = []
 
-    entries = _filter_entries_by_period(entries, period)
+    from_d = _parse_iso_date(date_from)
+    to_d = _parse_iso_date(date_to)
+    entries = _filter_entries(entries, period=period, date_from=from_d, date_to=to_d)
+    scoped = from_d is not None or to_d is not None or _parse_period(period) is not None
+    # Reuse period string for metric mode: any scoped filter uses period-style KPIs.
+    metric_period = period if _parse_period(period) else ("range" if scoped else None)
 
     sidecar_meta: dict[str, Any] | None = None
     sidecar_def = definition.get("sidecar")
@@ -537,8 +584,14 @@ def compute(
         else:
             sidecar_meta = load_sidecar(kb_root, sidecar_def)
 
+    period_ui = str(definition.get("period_ui") or "month").strip().lower()
+    if period_ui not in ("none", "month", "range"):
+        period_ui = "month"
+
     rendered_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    list_cell = build_list_cell(entries, definition, sidecar=sidecar_meta, period=period)
+    list_cell = build_list_cell(
+        entries, definition, sidecar=sidecar_meta, period=metric_period
+    )
     board = {
         "id": board_meta["id"],
         "title": board_meta.get("title") or list_cell.get("title") or board_meta["id"],
@@ -549,10 +602,15 @@ def compute(
         "enabled": bool(board_meta.get("enabled", True)),
         "list_cell": list_cell,
         "rendered_at": rendered_at,
+        "period_ui": period_ui,
     }
     return {
         "board": board,
-        "document": build_document(entries, definition, sidecar=sidecar_meta, period=period),
+        "document": build_document(
+            entries, definition, sidecar=sidecar_meta, period=metric_period
+        ),
         "rendered_at": rendered_at,
-        "period": period or "all",
+        "period": period or ("range" if scoped else "all"),
+        "from": from_d.isoformat() if from_d else None,
+        "to": to_d.isoformat() if to_d else None,
     }
