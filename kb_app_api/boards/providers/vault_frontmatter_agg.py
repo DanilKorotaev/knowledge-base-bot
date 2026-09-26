@@ -228,11 +228,24 @@ def _month_total(entries: list[AggEntry], today: date) -> float:
     return sum(e.amount for e in entries if e.date.year == today.year and e.date.month == today.month)
 
 
-def _qty_sum(entries: list[AggEntry]) -> float | None:
+def _qty_value(entries: list[AggEntry], *, mode: str = "sum") -> float | None:
+    """Aggregate quantity: ``sum`` (default), ``last`` (newest entry), or ``max``."""
+    normalized = (mode or "sum").strip().lower()
+    if normalized == "last":
+        for e in entries:
+            if e.quantity is not None:
+                return float(e.quantity)
+        return None
     vals = [e.quantity for e in entries if e.quantity is not None]
     if not vals:
         return None
-    return sum(vals)
+    if normalized == "max":
+        return float(max(vals))
+    return float(sum(vals))
+
+
+def _qty_sum(entries: list[AggEntry]) -> float | None:
+    return _qty_value(entries, mode="sum")
 
 
 def _format_short_date(d: date, *, ref_year: int) -> str:
@@ -248,6 +261,7 @@ def _build_metrics(
     today: date,
     period: str | None,
     sidecar: dict[str, Any] | None,
+    quantity_agg: str = "sum",
 ) -> list[dict[str, Any]]:
     """KPI set depends on period mode. No redundant last-amount tile."""
     currency = str(labels.get("currency") or "₽")
@@ -261,7 +275,7 @@ def _build_metrics(
 
     total = sum(e.amount for e in entries)
     count = len(entries)
-    qty = _qty_sum(entries)
+    qty = _qty_value(entries, mode=quantity_agg)
     metrics: list[dict[str, Any]] = []
 
     if not _is_scoped_period(period):
@@ -286,7 +300,7 @@ def _build_metrics(
         if qty_unit:
             qty_text = f"{qty_text} {qty_unit}"
         metrics.append({"type": "metric", "id": "m_qty", "label": metric_qty, "text": qty_text})
-        if qty > 0:
+        if qty > 0 and quantity_agg.strip().lower() == "sum":
             avg = total / qty
             avg_unit = f"{currency}/{qty_unit}" if qty_unit else currency
             metrics.append(
@@ -370,7 +384,18 @@ def build_document(
 
     last = entries[0] if entries else None
     recent = entries[:recent_limit]
-    metrics_children = _build_metrics(entries, labels, today=today, period=period, sidecar=sidecar)
+    fields = definition.get("fields") or {}
+    quantity_agg = str(
+        fields.get("quantity_agg") or definition.get("quantity_agg") or "sum"
+    )
+    metrics_children = _build_metrics(
+        entries,
+        labels,
+        today=today,
+        period=period,
+        sidecar=sidecar,
+        quantity_agg=quantity_agg,
+    )
 
     rows = [
         [
