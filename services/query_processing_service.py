@@ -440,6 +440,14 @@ class QueryProcessingService:
         except Exception as e:
             logger.warning("Health link Path 2 (handle_file_changes): %s", e, exc_info=True)
 
+        try:
+            from kb_app_api.boards.invalidate import invalidate_boards_for_paths
+
+            paths = [str(c.get("path") or "") for c in changes]
+            await invalidate_boards_for_paths(paths)
+        except Exception as e:
+            logger.warning("Boards invalidate after file changes: %s", e, exc_info=True)
+
         sync_success = await sync_service.sync_changes(changes)
 
         file_urls: Optional[Dict[str, str]] = None
