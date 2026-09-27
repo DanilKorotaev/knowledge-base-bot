@@ -30,8 +30,7 @@ class BoardUpsertBody(BaseModel):
 async def get_boards(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    _ = user
-    boards = await list_boards()
+    boards = await list_boards(user_id=int(user["id"]))
     return {"boards": boards, "total": len(boards)}
 
 
@@ -47,9 +46,12 @@ async def get_board(
         str | None, Query(alias="to", description="Inclusive ISO date YYYY-MM-DD")
     ] = None,
 ) -> dict[str, Any]:
-    _ = user
     detail = await get_board_detail(
-        board_id, period=period, date_from=date_from, date_to=date_to
+        board_id,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=int(user["id"]),
     )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
@@ -97,9 +99,12 @@ async def refresh_board(
     ] = None,
 ) -> dict[str, Any]:
     """Recompute live providers (vault read-only) or return static document."""
-    _ = user
     detail = await get_board_detail(
-        board_id, period=period, date_from=date_from, date_to=date_to
+        board_id,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=int(user["id"]),
     )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)

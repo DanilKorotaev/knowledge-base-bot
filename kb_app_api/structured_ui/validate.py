@@ -37,8 +37,12 @@ ALLOWED_NODE_TYPES = frozenset(
         "stepper",
         "confirm",
         "markdown",
+        "metric",
+        "table",
+        "chart",
     }
 )
+MAX_CHART_POINTS = 120
 FORM_FIELD_TYPES = frozenset(
     {"checkbox", "radio_group", "select", "text_field", "date", "time", "slider", "stepper"}
 )
@@ -522,6 +526,62 @@ def validate_screen_document(document: dict[str, Any]) -> dict[str, Any]:
                 )
             if len(text) > MAX_TEXT_LENGTH:
                 raise StructuredUIValidationError("validation_error", "text is too long", detail="text")
+            return
+
+        if node_type == "metric":
+            label = node.get("label")
+            if label is not None and (not isinstance(label, str) or len(label) > MAX_LABEL_LENGTH):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "metric label too long",
+                    detail="label",
+                )
+            return
+
+        if node_type == "table":
+            columns = node.get("columns")
+            rows = node.get("rows")
+            if columns is not None and not isinstance(columns, list):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "table columns must be an array",
+                    detail="columns",
+                )
+            if rows is not None and not isinstance(rows, list):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "table rows must be an array",
+                    detail="rows",
+                )
+            return
+
+        if node_type == "chart":
+            series = node.get("series")
+            if not isinstance(series, list):
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "chart requires series array",
+                    detail="series",
+                )
+            if len(series) > MAX_CHART_POINTS:
+                raise StructuredUIValidationError(
+                    "validation_error",
+                    "chart series too long",
+                    detail="series",
+                )
+            for point in series:
+                if not isinstance(point, dict):
+                    raise StructuredUIValidationError(
+                        "validation_error",
+                        "chart series points must be objects",
+                        detail="series",
+                    )
+                if "y" not in point and "v" not in point:
+                    raise StructuredUIValidationError(
+                        "validation_error",
+                        "chart point requires y",
+                        detail="series",
+                    )
             return
 
         if node_type == "hstack":
