@@ -131,4 +131,11 @@ async def upload_health_sync_files(
     except Exception:
         logger.exception("Health post-sync pipeline failed")
 
+    try:
+        from kb_app_api.boards.invalidate import invalidate_boards_for_paths
+
+        await invalidate_boards_for_paths(vault_paths)
+    except Exception:
+        logger.exception("Boards invalidate after health sync failed")
+
     return SyncFilesResponse(written=written_relative, synced_to_nextcloud=synced)

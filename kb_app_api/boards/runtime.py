@@ -9,7 +9,7 @@ from typing import Any
 from config import config
 
 from kb_app_api.boards import repository
-from kb_app_api.boards.providers import vault_frontmatter_agg
+from kb_app_api.boards.providers import vault_frontmatter_agg, vault_json_daily_agg
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,16 @@ def _render_row(
 
     if provider == vault_frontmatter_agg.PROVIDER_ID:
         return vault_frontmatter_agg.compute(
+            _kb_root(),
+            row,
+            definition,
+            period=period,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    if provider == vault_json_daily_agg.PROVIDER_ID:
+        return vault_json_daily_agg.compute(
             _kb_root(),
             row,
             definition,
