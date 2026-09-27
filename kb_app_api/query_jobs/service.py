@@ -31,6 +31,8 @@ class QueryJob:
     attached_files: list[str]
     error_message: str | None = None
     assistant_message_id: int | None = None
+    created_at: str | None = None
+    started_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,18 @@ class QueryJobEvent:
     seq: int
     kind: str
     payload: str
+
+
+def _fmt_ts(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    if hasattr(raw, "isoformat"):
+        try:
+            return raw.isoformat().replace("+00:00", "Z")  # type: ignore[no-any-return]
+        except Exception:
+            pass
+    text = str(raw).strip()
+    return text or None
 
 
 def _row_to_job(row: dict[str, Any]) -> QueryJob:
@@ -66,7 +80,106 @@ def _row_to_job(row: dict[str, Any]) -> QueryJob:
         assistant_message_id=(
             int(row["assistant_message_id"]) if row.get("assistant_message_id") is not None else None
         ),
+        created_at=_fmt_ts(row.get("created_at")),
+        started_at=_fmt_ts(row.get("started_at")),
     )
+
+
+_SCHEMA_READY = False
+
+
+async def ensure_query_jobs_schema() -> None:
+    """Idempotent DDL for hosts that started before query_jobs landed in init_db."""
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+    db = await get_db()
+    if isinstance(db, PostgreSQLDatabase):
+        assert db.pool is not None
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS query_jobs (
+                    id UUID PRIMARY KEY,
+                    session_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    telegram_user_id BIGINT NOT NULL,
+                    status TEXT NOT NULL,
+                    query_text TEXT NOT NULL DEFAULT '',
+                    use_knowledge_base BOOLEAN NOT NULL DEFAULT TRUE,
+                    allow_structured_ui BOOLEAN NOT NULL DEFAULT FALSE,
+                    attached_files_json TEXT,
+                    error_message TEXT,
+                    assistant_message_id INTEGER,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    started_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ,
+                    heartbeat_at TIMESTAMPTZ
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
+                ON query_jobs(status, created_at)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS query_job_events (
+                    job_id UUID NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
+                    seq INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    PRIMARY KEY (job_id, seq)
+                )
+                """
+            )
+    else:
+        assert isinstance(db, SQLiteDatabase)
+        async with __import__("aiosqlite").connect(db.db_path) as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS query_jobs (
+                    id TEXT PRIMARY KEY,
+                    session_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    telegram_user_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    query_text TEXT NOT NULL DEFAULT '',
+                    use_knowledge_base INTEGER NOT NULL DEFAULT 1,
+                    allow_structured_ui INTEGER NOT NULL DEFAULT 0,
+                    attached_files_json TEXT,
+                    error_message TEXT,
+                    assistant_message_id INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    started_at TIMESTAMP,
+                    finished_at TIMESTAMP,
+                    heartbeat_at TIMESTAMP
+                )
+                """
+            )
+            await conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
+                ON query_jobs(status, created_at)
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS query_job_events (
+                    job_id TEXT NOT NULL,
+                    seq INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (job_id, seq)
+                )
+                """
+            )
+            await conn.commit()
+    _SCHEMA_READY = True
 
 
 class QueryJobService:
@@ -83,6 +196,7 @@ class QueryJobService:
         allow_structured_ui: bool = False,
         attached_files: list[Path] | None = None,
     ) -> QueryJob:
+        await ensure_query_jobs_schema()
         job_id = str(uuid.uuid4())
         files_json = json.dumps(
             [str(path) for path in (attached_files or [])],
@@ -148,6 +262,7 @@ class QueryJobService:
         return job
 
     async def get_job(self, job_id: str) -> QueryJob | None:
+        await ensure_query_jobs_schema()
         db = await get_db()
         if isinstance(db, PostgreSQLDatabase):
             assert db.pool is not None
@@ -163,7 +278,144 @@ class QueryJobService:
             cols = [item[0] for item in cursor.description]
             return _row_to_job(dict(zip(cols, row)))
 
+    async def list_active(
+        self,
+        *,
+        user_id: int | None = None,
+        limit: int = 50,
+    ) -> list[QueryJob]:
+        """Return queued + running jobs (newest first)."""
+        await ensure_query_jobs_schema()
+        capped = max(1, min(int(limit or 50), 200))
+        db = await get_db()
+        if isinstance(db, PostgreSQLDatabase):
+            assert db.pool is not None
+            async with db.pool.acquire() as conn:
+                if user_id is None:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM query_jobs
+                        WHERE status IN ('queued', 'running')
+                        ORDER BY created_at DESC
+                        LIMIT $1
+                        """,
+                        capped,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM query_jobs
+                        WHERE status IN ('queued', 'running') AND user_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                        """,
+                        user_id,
+                        capped,
+                    )
+                return [_row_to_job(dict(r)) for r in rows]
+        assert isinstance(db, SQLiteDatabase)
+        async with __import__("aiosqlite").connect(db.db_path) as conn:
+            if user_id is None:
+                cursor = await conn.execute(
+                    """
+                    SELECT * FROM query_jobs
+                    WHERE status IN ('queued', 'running')
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (capped,),
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    SELECT * FROM query_jobs
+                    WHERE status IN ('queued', 'running') AND user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (user_id, capped),
+                )
+            rows = await cursor.fetchall()
+            cols = [item[0] for item in cursor.description]
+            return [_row_to_job(dict(zip(cols, row))) for row in rows]
+
+    async def cancel(self, job_id: str, *, user_id: int | None = None) -> QueryJob | None:
+        """Mark queued/running job cancelled. Returns updated job or None."""
+        await ensure_query_jobs_schema()
+        db = await get_db()
+        if isinstance(db, PostgreSQLDatabase):
+            assert db.pool is not None
+            async with db.pool.acquire() as conn:
+                if user_id is None:
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE query_jobs
+                        SET status = 'cancelled',
+                            finished_at = NOW(),
+                            heartbeat_at = NOW()
+                        WHERE id = $1::uuid AND status IN ('queued', 'running')
+                        RETURNING *
+                        """,
+                        job_id,
+                    )
+                else:
+                    row = await conn.fetchrow(
+                        """
+                        UPDATE query_jobs
+                        SET status = 'cancelled',
+                            finished_at = NOW(),
+                            heartbeat_at = NOW()
+                        WHERE id = $1::uuid
+                          AND user_id = $2
+                          AND status IN ('queued', 'running')
+                        RETURNING *
+                        """,
+                        job_id,
+                        user_id,
+                    )
+                if not row:
+                    return None
+                job = _row_to_job(dict(row))
+        else:
+            assert isinstance(db, SQLiteDatabase)
+            async with __import__("aiosqlite").connect(db.db_path) as conn:
+                if user_id is None:
+                    cursor = await conn.execute(
+                        """
+                        UPDATE query_jobs
+                        SET status = 'cancelled',
+                            finished_at = CURRENT_TIMESTAMP,
+                            heartbeat_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND status IN ('queued', 'running')
+                        """,
+                        (job_id,),
+                    )
+                else:
+                    cursor = await conn.execute(
+                        """
+                        UPDATE query_jobs
+                        SET status = 'cancelled',
+                            finished_at = CURRENT_TIMESTAMP,
+                            heartbeat_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND user_id = ? AND status IN ('queued', 'running')
+                        """,
+                        (job_id, user_id),
+                    )
+                updated = int(cursor.rowcount or 0)
+                await conn.commit()
+                if updated <= 0:
+                    return None
+                cursor = await conn.execute("SELECT * FROM query_jobs WHERE id = ?", (job_id,))
+                row = await cursor.fetchone()
+                if not row:
+                    return None
+                cols = [item[0] for item in cursor.description]
+                job = _row_to_job(dict(zip(cols, row)))
+        await self.append_event(job_id, "cancelled", "")
+        return job
+
     async def claim_next(self, *, max_concurrent: int | None = None) -> QueryJob | None:
+        await ensure_query_jobs_schema()
         limit = max_concurrent if max_concurrent is not None else config.MAX_CONCURRENT_QUERY_JOBS
         db = await get_db()
         if isinstance(db, PostgreSQLDatabase):
@@ -336,10 +588,11 @@ class QueryJobService:
 
     async def complete(self, job_id: str, *, assistant_message_id: int | None) -> None:
         db = await get_db()
+        updated = False
         if isinstance(db, PostgreSQLDatabase):
             assert db.pool is not None
             async with db.pool.acquire() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     """
                     UPDATE query_jobs
                     SET status = 'done',
@@ -347,15 +600,19 @@ class QueryJobService:
                         finished_at = NOW(),
                         heartbeat_at = NOW(),
                         error_message = NULL
-                    WHERE id = $1::uuid
+                    WHERE id = $1::uuid AND status = 'running'
                     """,
                     job_id,
                     assistant_message_id,
                 )
+                try:
+                    updated = int(str(result).split()[-1]) > 0
+                except (ValueError, IndexError):
+                    updated = True
         else:
             assert isinstance(db, SQLiteDatabase)
             async with __import__("aiosqlite").connect(db.db_path) as conn:
-                await conn.execute(
+                cursor = await conn.execute(
                     """
                     UPDATE query_jobs
                     SET status = 'done',
@@ -363,47 +620,56 @@ class QueryJobService:
                         finished_at = CURRENT_TIMESTAMP,
                         heartbeat_at = CURRENT_TIMESTAMP,
                         error_message = NULL
-                    WHERE id = ?
+                    WHERE id = ? AND status = 'running'
                     """,
                     (assistant_message_id, job_id),
                 )
                 await conn.commit()
-        await self.append_event(job_id, "done", "")
+                updated = bool(cursor.rowcount)
+        if updated:
+            await self.append_event(job_id, "done", "")
 
     async def fail(self, job_id: str, error_message: str) -> None:
         db = await get_db()
         message = (error_message or "query failed")[:2000]
+        updated = False
         if isinstance(db, PostgreSQLDatabase):
             assert db.pool is not None
             async with db.pool.acquire() as conn:
-                await conn.execute(
+                result = await conn.execute(
                     """
                     UPDATE query_jobs
                     SET status = 'failed',
                         error_message = $2,
                         finished_at = NOW(),
                         heartbeat_at = NOW()
-                    WHERE id = $1::uuid
+                    WHERE id = $1::uuid AND status = 'running'
                     """,
                     job_id,
                     message,
                 )
+                try:
+                    updated = int(str(result).split()[-1]) > 0
+                except (ValueError, IndexError):
+                    updated = True
         else:
             assert isinstance(db, SQLiteDatabase)
             async with __import__("aiosqlite").connect(db.db_path) as conn:
-                await conn.execute(
+                cursor = await conn.execute(
                     """
                     UPDATE query_jobs
                     SET status = 'failed',
                         error_message = ?,
                         finished_at = CURRENT_TIMESTAMP,
                         heartbeat_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
+                    WHERE id = ? AND status = 'running'
                     """,
                     (message, job_id),
                 )
                 await conn.commit()
-        await self.append_event(job_id, "error", message)
+                updated = bool(cursor.rowcount)
+        if updated:
+            await self.append_event(job_id, "error", message)
 
     async def heartbeat(self, job_id: str) -> None:
         db = await get_db()
@@ -411,20 +677,27 @@ class QueryJobService:
             assert db.pool is not None
             async with db.pool.acquire() as conn:
                 await conn.execute(
-                    "UPDATE query_jobs SET heartbeat_at = NOW() WHERE id = $1::uuid",
+                    """
+                    UPDATE query_jobs SET heartbeat_at = NOW()
+                    WHERE id = $1::uuid AND status = 'running'
+                    """,
                     job_id,
                 )
         else:
             assert isinstance(db, SQLiteDatabase)
             async with __import__("aiosqlite").connect(db.db_path) as conn:
                 await conn.execute(
-                    "UPDATE query_jobs SET heartbeat_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    """
+                    UPDATE query_jobs SET heartbeat_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND status = 'running'
+                    """,
                     (job_id,),
                 )
                 await conn.commit()
 
     async def reclaim_stale_running(self, *, stale_after_sec: int | None = None) -> int:
         """Re-queue jobs stuck in running without heartbeat (worker crash)."""
+        await ensure_query_jobs_schema()
         stale = stale_after_sec if stale_after_sec is not None else config.QUERY_JOB_STALE_RUNNING_SEC
         db = await get_db()
         if isinstance(db, PostgreSQLDatabase):

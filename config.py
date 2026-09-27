@@ -134,6 +134,18 @@ class Config:
     QUERY_JOB_EVENT_POLL_MS: int = int(os.getenv("QUERY_JOB_EVENT_POLL_MS", "100"))
     QUERY_JOB_STALE_RUNNING_SEC: int = int(os.getenv("QUERY_JOB_STALE_RUNNING_SEC", "1800"))
 
+    # Remote boards: comma-separated hostnames allowed for remote_structured_ui provider
+    BOARDS_REMOTE_HOST_ALLOWLIST: List[str] = [
+        h.strip().lower()
+        for h in os.getenv("BOARDS_REMOTE_HOST_ALLOWLIST", "").split(",")
+        if h.strip()
+    ]
+    BOARDS_REMOTE_TIMEOUT_SEC: float = float(os.getenv("BOARDS_REMOTE_TIMEOUT_SEC", "8"))
+    # vault_script: max seconds for sandboxed build()
+    BOARDS_VAULT_SCRIPT_TIMEOUT_SEC: float = float(
+        os.getenv("BOARDS_VAULT_SCRIPT_TIMEOUT_SEC", "3")
+    )
+
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
     APNS_TEAM_ID: str = os.getenv("APNS_TEAM_ID", "66C9VGAZR5")

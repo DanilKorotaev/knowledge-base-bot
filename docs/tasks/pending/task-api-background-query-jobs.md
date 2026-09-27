@@ -25,8 +25,8 @@
 
 ## P1 (не в этом PR)
 
-- [ ] `DELETE /api/jobs/{id}` cancel.
-- [ ] `GET …/jobs/active`.
+- [x] `DELETE /api/jobs/{id}` cancel.
+- [x] `GET …/jobs/active`.
 - [ ] NOTIFY/LISTEN вместо poll.
 - [ ] Attachments route через jobs (сейчас text/voice/compose).
 - [ ] Fair queue per user.

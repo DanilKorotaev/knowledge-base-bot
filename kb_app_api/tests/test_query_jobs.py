@@ -94,6 +94,34 @@ class TestQueryJobService(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_list_active_and_cancel(self) -> None:
+        async def _run() -> None:
+            from utils.db_helpers import get_db
+            from kb_app_api.query_jobs.service import QueryJobService
+
+            db = await get_db()
+            user = await db.ensure_user(9000000009000099, "jobs-test")
+            session = await db.create_session(int(user["id"]), "empty_chat")
+            service = QueryJobService()
+            job = await service.enqueue(
+                session_id=int(session["id"]),
+                user_id=int(user["id"]),
+                telegram_user_id=9000000009000099,
+                query_text="cancel me please",
+                use_knowledge_base=False,
+            )
+            active = await service.list_active(user_id=int(user["id"]))
+            self.assertTrue(any(j.id == job.id for j in active))
+            cancelled = await service.cancel(job.id, user_id=int(user["id"]))
+            assert cancelled is not None
+            self.assertEqual(cancelled.status, "cancelled")
+            active_after = await service.list_active(user_id=int(user["id"]))
+            self.assertFalse(any(j.id == job.id for j in active_after))
+            again = await service.cancel(job.id, user_id=int(user["id"]))
+            self.assertIsNone(again)
+
+        asyncio.run(_run())
+
     def test_sse_bridge_reads_events(self) -> None:
         async def _run() -> None:
             from utils.db_helpers import get_db

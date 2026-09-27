@@ -64,7 +64,7 @@ async def invalidate_boards_for_paths(changed_paths: list[str]) -> list[str]:
         prefixes = _board_watch_prefixes(definition if isinstance(definition, dict) else {})
         if not any(_path_matches(p, prefixes) for p in cleaned):
             continue
-        rendered = runtime._render_row(row)  # noqa: SLF001 — shared render path
+        rendered = await runtime._render_row(row)  # noqa: SLF001 — shared render path
         if rendered is None:
             continue
         board = rendered.get("board") or {}

@@ -32,10 +32,16 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
     )
 
     async def on_chunk(chunk: str) -> None:
+        current = await service.get_job(job.id)
+        if current is None or current.status == "cancelled":
+            raise RuntimeError("query cancelled")
         if chunk:
             await service.append_event(job.id, "delta", chunk)
 
     async def on_activity(label: str) -> None:
+        current = await service.get_job(job.id)
+        if current is None or current.status == "cancelled":
+            raise RuntimeError("query cancelled")
         if label:
             await service.append_event(job.id, "activity", label)
 
@@ -53,6 +59,10 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             on_activity=on_activity,
             allow_structured_ui=job.allow_structured_ui,
         )
+        current = await service.get_job(job.id)
+        if current is None or current.status == "cancelled":
+            logger.info("query_job cancelled before complete job_id=%s", job.id)
+            return
         db = await get_db()
         messages = await db.get_session_messages(job.session_id)
         assistant_id = None
@@ -69,6 +79,13 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             len(reply or ""),
         )
     except BaseException as exc:
+        current = await service.get_job(job.id)
+        if current is not None and current.status == "cancelled":
+            logger.info("query_job cancelled job_id=%s", job.id)
+            return
+        if isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower():
+            logger.info("query_job cancelled mid-run job_id=%s", job.id)
+            return
         logger.exception("query_job failed job_id=%s", job.id)
         await service.fail(job.id, str(exc))
 

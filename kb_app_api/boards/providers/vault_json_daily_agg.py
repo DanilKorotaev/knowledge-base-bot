@@ -234,6 +234,41 @@ def compute(
             {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metric_nodes}
         )
 
+    charts_def = definition.get("charts") or []
+    if isinstance(charts_def, list):
+        for cidx, chart in enumerate(charts_def):
+            if not isinstance(chart, dict):
+                continue
+            cid = str(chart.get("id") or f"chart{cidx}")
+            clabel = str(chart.get("label") or cid)
+            src_id = str(chart.get("source") or "main").strip() or "main"
+            field = str(chart.get("field") or "").strip()
+            if not field:
+                continue
+            pool = source_records.get(src_id) or []
+            scale = _as_float(chart.get("scale"))
+            if scale is None:
+                scale = 1.0
+            series: list[dict[str, Any]] = []
+            for day, payload in pool:
+                num = _as_float(_meta_get(payload, field))
+                if num is None:
+                    continue
+                series.append({"x": day.isoformat(), "y": num * scale})
+            max_points = int(chart.get("max_points") or 90)
+            if max_points > 0 and len(series) > max_points:
+                step = max(1, len(series) // max_points)
+                series = series[::step][:max_points]
+            if series:
+                children.append(
+                    {
+                        "type": "chart",
+                        "id": cid,
+                        "label": clabel,
+                        "series": series,
+                    }
+                )
+
     tip = str(labels.get("tip") or "").strip()
     if tip:
         children.append({"type": "callout", "id": "tip", "text": tip, "variant": "tip"})

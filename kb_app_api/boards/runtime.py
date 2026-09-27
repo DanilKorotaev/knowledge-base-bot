@@ -9,7 +9,13 @@ from typing import Any
 from config import config
 
 from kb_app_api.boards import repository
-from kb_app_api.boards.providers import vault_frontmatter_agg, vault_json_daily_agg
+from kb_app_api.boards.providers import (
+    remote_structured_ui,
+    system_query_jobs,
+    vault_frontmatter_agg,
+    vault_json_daily_agg,
+    vault_script,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +43,13 @@ def _public_board(
     }
 
 
-def _render_row(
+async def _render_row(
     row: dict[str, Any],
     *,
     period: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any] | None:
     definition = row.get("definition") or {}
     provider = str(definition.get("provider") or "").strip()
@@ -59,6 +66,22 @@ def _render_row(
 
     if provider == vault_json_daily_agg.PROVIDER_ID:
         return vault_json_daily_agg.compute(
+            _kb_root(),
+            row,
+            definition,
+            period=period,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    if provider == system_query_jobs.PROVIDER_ID:
+        return await system_query_jobs.compute(row, definition, user_id=user_id)
+
+    if provider == remote_structured_ui.PROVIDER_ID:
+        return remote_structured_ui.compute(row, definition)
+
+    if provider == vault_script.PROVIDER_ID:
+        return vault_script.compute(
             _kb_root(),
             row,
             definition,
@@ -90,14 +113,18 @@ def _render_row(
     return None
 
 
-async def list_boards(*, include_disabled: bool = False) -> list[dict[str, Any]]:
+async def list_boards(
+    *,
+    include_disabled: bool = False,
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
     await repository.ensure_boards_schema()
     rows = await repository.list_board_rows(include_disabled=include_disabled)
     boards: list[dict[str, Any]] = []
     for row in rows:
         if not include_disabled and not row.get("enabled", True):
             continue
-        rendered = _render_row(row)
+        rendered = await _render_row(row, user_id=user_id)
         if rendered is None:
             continue
         boards.append(deepcopy(rendered["board"]))
@@ -111,6 +138,7 @@ async def get_board_detail(
     period: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any] | None:
     await repository.ensure_boards_schema()
     row = await repository.get_board_row(board_id)
@@ -118,4 +146,10 @@ async def get_board_detail(
         return None
     if not row.get("enabled", True):
         return None
-    return _render_row(row, period=period, date_from=date_from, date_to=date_to)
+    return await _render_row(
+        row,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        user_id=user_id,
+    )

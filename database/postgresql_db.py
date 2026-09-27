@@ -210,6 +210,40 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_user_devices_user_id
                 ON user_devices(user_id)
             """)
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS query_jobs (
+                    id UUID PRIMARY KEY,
+                    session_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    telegram_user_id BIGINT NOT NULL,
+                    status TEXT NOT NULL,
+                    query_text TEXT NOT NULL DEFAULT '',
+                    use_knowledge_base BOOLEAN NOT NULL DEFAULT TRUE,
+                    allow_structured_ui BOOLEAN NOT NULL DEFAULT FALSE,
+                    attached_files_json TEXT,
+                    error_message TEXT,
+                    assistant_message_id INTEGER,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    started_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ,
+                    heartbeat_at TIMESTAMPTZ
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_query_jobs_status_created
+                ON query_jobs(status, created_at)
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS query_job_events (
+                    job_id UUID NOT NULL REFERENCES query_jobs(id) ON DELETE CASCADE,
+                    seq INTEGER NOT NULL,
+                    kind TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    PRIMARY KEY (job_id, seq)
+                )
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""

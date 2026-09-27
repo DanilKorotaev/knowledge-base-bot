@@ -12,8 +12,12 @@
 
 ## Still open
 1. In-app chat-agent tools (optional — MCP on mini already covers Cursor)
-2. System board: query jobs + cancel
-3. Remote boards (VPN-monitor etc.)
-4. Charts / series widgets + `vault_script` provider
-5. Multi-user bearer for MCP (later)
-6. Web client / admin CRUD
+2. Multi-user bearer for MCP (later)
+3. Web client / admin CRUD
+
+## Done this slice
+- System board provider `system_query_jobs` + `GET /api/jobs/active` + `DELETE /api/jobs/{id}`
+- Charts: Structured UI `chart` node + `charts[]` on `vault_json_daily_agg`
+- `vault_script` (sandboxed `.board.py` under vault)
+- `remote_structured_ui` (HTTPS + `BOARDS_REMOTE_HOST_ALLOWLIST`)
+- iOS: chart rendering + cancel job from board buttons
