@@ -174,6 +174,55 @@ async def next_sort_order() -> int:
     return max(int(r.get("sort_order") or 0) for r in rows) + 10
 
 
+async def set_board_enabled(
+    board_id: str,
+    *,
+    enabled: bool,
+    sort_order: int | None = None,
+) -> dict[str, Any] | None:
+    """Toggle ``enabled`` (and optionally ``sort_order``). Returns updated row or None."""
+    await ensure_boards_schema()
+    existing = await get_board_row(board_id)
+    if existing is None:
+        return None
+
+    enabled_int = 1 if enabled else 0
+    new_sort = int(sort_order) if sort_order is not None else int(existing.get("sort_order") or 0)
+
+    db = await get_db()
+    if isinstance(db, SQLiteDatabase):
+        import aiosqlite
+
+        async with aiosqlite.connect(db.db_path) as conn:
+            await conn.execute(
+                """
+                UPDATE kb_app_boards
+                SET enabled = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (enabled_int, new_sort, board_id),
+            )
+            await conn.commit()
+        return await get_board_row(board_id)
+
+    if isinstance(db, PostgreSQLDatabase):
+        assert db.pool is not None
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE kb_app_boards
+                SET enabled = $1, sort_order = $2, updated_at = NOW()
+                WHERE id = $3
+                """,
+                bool(enabled),
+                new_sort,
+                board_id,
+            )
+        return await get_board_row(board_id)
+
+    raise RuntimeError(f"unsupported db type for boards: {type(db)}")
+
+
 async def set_board_sort_orders(ordered_ids: list[str]) -> None:
     """Assign sort_order = 10, 20, … in the given order (enabled boards only)."""
     await ensure_boards_schema()

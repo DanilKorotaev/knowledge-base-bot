@@ -105,6 +105,33 @@ async def reorder_boards(ordered_ids: list[str]) -> list[dict[str, Any]]:
     return await runtime.list_boards(include_disabled=False)
 
 
+async def list_archived_boards() -> list[dict[str, Any]]:
+    """Boards with ``enabled=false`` — metadata + last ``list_cell`` (no recompute)."""
+    return await runtime.list_archived_boards()
+
+
+async def archive_board(board_id: str) -> dict[str, Any] | None:
+    """Hide board from Overview (``enabled=false``). Keeps definition."""
+    board_id = validate_board_id(board_id)
+    row = await repository.set_board_enabled(board_id, enabled=False)
+    if row is None:
+        return None
+    return runtime.public_board_from_row(row)
+
+
+async def restore_board(board_id: str) -> dict[str, Any] | None:
+    """Bring board back to Overview at the end of the list."""
+    board_id = validate_board_id(board_id)
+    existing = await repository.get_board_row(board_id)
+    if existing is None:
+        return None
+    sort_order = await repository.next_sort_order()
+    row = await repository.set_board_enabled(board_id, enabled=True, sort_order=sort_order)
+    if row is None:
+        return None
+    return runtime.public_board_from_row(row)
+
+
 async def delete_board(board_id: str) -> bool:
     await repository.ensure_boards_schema()
     return await repository.delete_board_row(board_id)

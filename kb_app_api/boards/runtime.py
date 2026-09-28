@@ -43,6 +43,24 @@ def _public_board(
     }
 
 
+def public_board_from_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Board list payload from a DB row without re-running providers."""
+    return _public_board(row)
+
+
+async def list_archived_boards() -> list[dict[str, Any]]:
+    """Disabled boards for the Archive screen (cached list_cell only)."""
+    await repository.ensure_boards_schema()
+    rows = await repository.list_board_rows(include_disabled=True)
+    boards = [
+        _public_board(row)
+        for row in rows
+        if not row.get("enabled", True)
+    ]
+    boards.sort(key=lambda b: (str(b.get("title") or "").lower(), str(b.get("id") or "")))
+    return boards
+
+
 async def _render_row(
     row: dict[str, Any],
     *,
