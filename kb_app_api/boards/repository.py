@@ -166,6 +166,66 @@ async def get_board_row(board_id: str) -> dict[str, Any] | None:
     return None
 
 
+async def next_sort_order() -> int:
+    """Return sort_order for a newly appended board (after current max)."""
+    rows = await list_board_rows(include_disabled=True)
+    if not rows:
+        return 10
+    return max(int(r.get("sort_order") or 0) for r in rows) + 10
+
+
+async def set_board_sort_orders(ordered_ids: list[str]) -> None:
+    """Assign sort_order = 10, 20, … in the given order (enabled boards only)."""
+    await ensure_boards_schema()
+    enabled = [b for b in await list_board_rows(include_disabled=False) if b.get("enabled", True)]
+    enabled_ids = {str(b["id"]) for b in enabled}
+    cleaned = [str(i).strip() for i in ordered_ids if str(i).strip()]
+    if not cleaned:
+        raise ValueError("ordered_ids must not be empty")
+    if set(cleaned) != enabled_ids:
+        missing = sorted(enabled_ids - set(cleaned))
+        extra = sorted(set(cleaned) - enabled_ids)
+        raise ValueError(
+            "ordered_ids must list each enabled board exactly once"
+            + (f"; missing={missing}" if missing else "")
+            + (f"; unknown={extra}" if extra else "")
+        )
+
+    db = await get_db()
+    if isinstance(db, SQLiteDatabase):
+        import aiosqlite
+
+        async with aiosqlite.connect(db.db_path) as conn:
+            for index, board_id in enumerate(cleaned):
+                await conn.execute(
+                    """
+                    UPDATE kb_app_boards
+                    SET sort_order = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    ((index + 1) * 10, board_id),
+                )
+            await conn.commit()
+        return
+
+    if isinstance(db, PostgreSQLDatabase):
+        assert db.pool is not None
+        async with db.pool.acquire() as conn:
+            for index, board_id in enumerate(cleaned):
+                await conn.execute(
+                    """
+                    UPDATE kb_app_boards
+                    SET sort_order = $1, updated_at = NOW()
+                    WHERE id = $2
+                    """,
+                    (index + 1) * 10,
+                    board_id,
+                )
+        return
+
+    raise RuntimeError(f"unsupported db type for boards: {type(db)}")
+
+
 async def upsert_board_row(payload: dict[str, Any]) -> None:
     db = await get_db()
     board_id = str(payload["id"])
