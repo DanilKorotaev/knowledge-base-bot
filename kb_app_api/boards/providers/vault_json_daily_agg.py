@@ -150,6 +150,12 @@ def _metric_value(
         return None
     if agg == "avg":
         return sum(values) / len(values)
+    if agg == "median":
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2 == 1:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2.0
     if agg == "max":
         return max(values)
     if agg == "min":

@@ -160,6 +160,74 @@ class VaultFrontmatterAggTests(unittest.TestCase):
             any("2 / 20" in (c.get("text") or "") and "remaining 18" in (c.get("text") or "") for c in callouts)
         )
 
+    def test_sidecar_show_tip_false_hides_callout(self) -> None:
+        blocks = self.root / "Тренировки" / "Блоки"
+        blocks.mkdir(parents=True, exist_ok=True)
+        (blocks / "active.md").write_text(
+            "---\ntype: trainer_block\nid: 2026-09-16\ntitle: Блок 20 тренировок\n"
+            "started: 2026-09-16\ntotal: 20\ndone: 4\nremaining: 16\nstatus: active\n---\n",
+            encoding="utf-8",
+        )
+        workouts = self.root / "Тренировки" / "2026b"
+        workouts.mkdir(parents=True)
+        (workouts / "one.md").write_text(
+            "---\ntype: workout\ndate: 2026-09-23\nfocus: грудь\n"
+            "computed:\n  total_volume_kg: 100\n  total_sets: 5\n---\n",
+            encoding="utf-8",
+        )
+        definition = {
+            "provider": "vault_frontmatter_agg",
+            "path": "Тренировки/2026b",
+            "filter": {"type": "workout"},
+            "fields": {
+                "date": "date",
+                "amount": "computed.total_volume_kg",
+                "quantity": "computed.total_sets",
+                "label": "focus",
+            },
+            "sidecar": {
+                "path": "Тренировки/Блоки",
+                "filter": {"type": "trainer_block", "status": "active"},
+                "show_tip": False,
+                "fields": {
+                    "date": "started",
+                    "done": "done",
+                    "remaining": "remaining",
+                    "total": "total",
+                    "label": "title",
+                },
+            },
+            "labels": {"title": "Тренировки", "currency": "кг", "metric_block": "Блок"},
+        }
+        payload = agg.compute(
+            self.root,
+            {"id": "workouts", "title": "Тренировки", "kind": "cached_view", "sort_order": 10},
+            definition,
+        )
+        metrics = next(n for n in payload["document"]["screen"]["children"] if n.get("id") == "metrics_row")
+        self.assertTrue(any(m.get("id") == "m_sidecar" and m.get("text") == "4/20" for m in metrics["children"]))
+        callouts = [n for n in payload["document"]["screen"]["children"] if n.get("id") == "sidecar_progress"]
+        self.assertEqual(callouts, [])
+
+    def test_median_unit_price(self) -> None:
+        definition = {
+            **self.definition,
+            "labels": {
+                **self.definition["labels"],
+                "qty_unit": "л",
+                "metric_avg": "Средняя",
+                "metric_median": "Медиана",
+            },
+        }
+        meta = {"id": "car-fuel", "title": "Fuel", "kind": "cached_view", "sort_order": 1}
+        payload = agg.compute(self.root, meta, definition)
+        metrics = next(n for n in payload["document"]["screen"]["children"] if n.get("id") == "metrics_row")
+        by_id = {m["id"]: m["text"] for m in metrics["children"]}
+        self.assertIn("m_avg", by_id)
+        self.assertIn("m_median", by_id)
+        # unit prices: 2996/40=74.9, 1500/20=75 → median 74.95
+        self.assertIn("74,95", by_id["m_median"])
+
     def test_period_filters_month(self) -> None:
         definition = {
             "provider": "vault_frontmatter_agg",
