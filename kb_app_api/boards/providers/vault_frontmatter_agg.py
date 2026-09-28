@@ -84,6 +84,16 @@ def _format_qty(qty: float | None) -> str:
     return f"{qty:.2f}".rstrip("0").rstrip(".")
 
 
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
 def _meta_get(meta: dict[str, Any], dotted: str) -> Any:
     """Read ``a.b.c`` from nested frontmatter dicts; flat keys work too."""
     current: Any = meta
@@ -262,6 +272,7 @@ def _build_metrics(
     period: str | None,
     sidecar: dict[str, Any] | None,
     quantity_agg: str = "sum",
+    show_median: bool = True,
 ) -> list[dict[str, Any]]:
     """KPI set depends on period mode. No redundant last-amount tile."""
     currency = str(labels.get("currency") or "₽")
@@ -272,6 +283,7 @@ def _build_metrics(
     metric_count = str(labels.get("metric_count") or "Count")
     metric_qty = str(labels.get("metric_qty") or "Quantity")
     metric_avg = str(labels.get("metric_avg") or "Average")
+    metric_median = str(labels.get("metric_median") or "Median")
 
     total = sum(e.amount for e in entries)
     count = len(entries)
@@ -306,11 +318,38 @@ def _build_metrics(
             metrics.append(
                 {"type": "metric", "id": "m_avg", "label": metric_avg, "text": f"{_format_money(avg)} {avg_unit}"}
             )
+            if show_median:
+                unit_rates = [
+                    e.amount / e.quantity
+                    for e in entries
+                    if e.quantity is not None and e.quantity > 0
+                ]
+                med = _median(unit_rates)
+                if med is not None:
+                    metrics.append(
+                        {
+                            "type": "metric",
+                            "id": "m_median",
+                            "label": metric_median,
+                            "text": f"{_format_money(med)} {avg_unit}",
+                        }
+                    )
     elif count > 0:
         avg = total / count
         metrics.append(
             {"type": "metric", "id": "m_avg", "label": metric_avg, "text": f"{_format_money(avg)} {currency}"}
         )
+        if show_median:
+            med = _median([e.amount for e in entries])
+            if med is not None:
+                metrics.append(
+                    {
+                        "type": "metric",
+                        "id": "m_median",
+                        "label": metric_median,
+                        "text": f"{_format_money(med)} {currency}",
+                    }
+                )
 
     if sidecar and sidecar.get("total") is not None:
         metrics.append(
@@ -388,6 +427,9 @@ def build_document(
     quantity_agg = str(
         fields.get("quantity_agg") or definition.get("quantity_agg") or "sum"
     )
+    show_median = definition.get("show_median")
+    if show_median is None:
+        show_median = True
     metrics_children = _build_metrics(
         entries,
         labels,
@@ -395,6 +437,7 @@ def build_document(
         period=period,
         sidecar=sidecar,
         quantity_agg=quantity_agg,
+        show_median=bool(show_median),
     )
 
     rows = [
@@ -414,7 +457,10 @@ def build_document(
         {"type": "text", "id": "title", "text": title},
         {"type": "hstack", "id": "metrics_row", "spacing": 12, "children": metrics_children},
     ]
-    if sidecar:
+    show_sidecar_tip = True
+    if isinstance(sidecar, dict) and sidecar.get("show_tip") is False:
+        show_sidecar_tip = False
+    if sidecar and show_sidecar_tip:
         block_name = str(sidecar.get("label") or "Progress")
         tip_tpl = str(labels.get("sidecar_tip") or "{label}: {done} / {total}, remaining {remaining}")
         tip = tip_tpl.format(
@@ -608,6 +654,11 @@ def compute(
             logger.error("invalid sidecar path: %s", exc)
         else:
             sidecar_meta = load_sidecar(kb_root, sidecar_def)
+            if sidecar_meta is not None:
+                if "show_tip" in sidecar_def:
+                    sidecar_meta["show_tip"] = sidecar_def["show_tip"]
+                if sidecar_def.get("label"):
+                    sidecar_meta["label"] = sidecar_def["label"]
 
     period_ui = str(definition.get("period_ui") or "month").strip().lower()
     if period_ui not in ("none", "month", "range"):
