@@ -100,6 +100,42 @@ class TestBoardProvidersExtra(unittest.TestCase):
         metrics = [c for c in children if c.get("type") == "metric"]
         self.assertEqual(metrics[0]["text"], "2")
 
+    def test_vault_script_json_and_shell(self) -> None:
+        from kb_app_api.boards.providers import vault_script
+
+        root = Path(os.environ["LOCAL_KB_PATH"])
+        scripts = root / "Boards"
+        scripts.mkdir(parents=True, exist_ok=True)
+        (scripts / "demo.board.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "screen": {
+                        "type": "vstack",
+                        "id": "root",
+                        "children": [{"type": "text", "id": "t", "text": "from-json"}],
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (scripts / "demo.board.sh").write_text(
+            "#!/bin/bash\necho '{\"schema_version\":1,\"screen\":{\"type\":\"vstack\",\"id\":\"root\",\"children\":[{\"type\":\"text\",\"id\":\"t\",\"text\":\"from-sh\"}]}}'\n",
+            encoding="utf-8",
+        )
+        out_json = vault_script.compute(
+            root,
+            {"id": "j", "title": "J", "kind": "cached_view", "sort_order": 1},
+            {"provider": "vault_script", "script_path": "Boards/demo.board.json"},
+        )
+        self.assertIn("from-json", str(out_json["document"]))
+        out_sh = vault_script.compute(
+            root,
+            {"id": "s", "title": "S", "kind": "cached_view", "sort_order": 2},
+            {"provider": "vault_script", "script_path": "Boards/demo.board.sh"},
+        )
+        self.assertIn("from-sh", str(out_sh["document"]))
+
     def test_remote_allowlist(self) -> None:
         from kb_app_api.boards.providers import remote_structured_ui
 
