@@ -47,20 +47,34 @@ async def get_board_detail(
 async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
     """Create or replace a board definition, then return rendered detail."""
     board_id = validate_board_id(str(payload.get("id") or ""))
+    await repository.ensure_boards_schema()
+    existing = await repository.get_board_row(board_id)
+
+    raw_sort = payload.get("sort_order")
+    if existing is None:
+        # New boards append to the end unless an explicit positive order is given.
+        if raw_sort is None or int(raw_sort or 0) <= 0:
+            sort_order = await repository.next_sort_order()
+        else:
+            sort_order = int(raw_sort)
+    elif raw_sort is None:
+        sort_order = int(existing.get("sort_order") or 0)
+    else:
+        sort_order = int(raw_sort)
+
     row = {
         "id": board_id,
         "title": payload.get("title") or board_id,
         "subtitle": payload.get("subtitle"),
         "icon": payload.get("icon"),
         "kind": payload.get("kind") or "cached_view",
-        "sort_order": int(payload.get("sort_order") or 0),
+        "sort_order": sort_order,
         "enabled": payload.get("enabled", True),
         "definition": payload.get("definition") or {},
         "list_cell": payload.get("list_cell"),
         "rendered_document": payload.get("rendered_document"),
         "rendered_at": payload.get("rendered_at"),
     }
-    await repository.ensure_boards_schema()
     await repository.upsert_board_row(row)
     detail = await runtime.get_board_detail(board_id)
     if detail is None:
@@ -83,6 +97,12 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
             "rendered_at": stored.get("rendered_at"),
         }
     return detail
+
+
+async def reorder_boards(ordered_ids: list[str]) -> list[dict[str, Any]]:
+    """Persist Overview list order; returns refreshed board list."""
+    await repository.set_board_sort_orders(ordered_ids)
+    return await runtime.list_boards(include_disabled=False)
 
 
 async def delete_board(board_id: str) -> bool:

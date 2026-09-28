@@ -6,7 +6,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from kb_app_api.boards_catalog import delete_board, get_board_detail, list_boards, upsert_board
+from kb_app_api.boards_catalog import (
+    delete_board,
+    get_board_detail,
+    list_boards,
+    reorder_boards,
+    upsert_board,
+)
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 
@@ -18,7 +24,8 @@ class BoardUpsertBody(BaseModel):
     subtitle: str | None = Field(default=None, max_length=400)
     icon: str | None = Field(default=None, max_length=80)
     kind: str = Field(default="cached_view", max_length=40)
-    sort_order: int = Field(default=0, ge=0, le=1_000_000)
+    # None = append on create / keep existing on update
+    sort_order: int | None = Field(default=None, ge=0, le=1_000_000)
     enabled: bool = True
     definition: dict[str, Any] = Field(default_factory=dict)
     list_cell: dict[str, Any] | None = None
@@ -26,11 +33,29 @@ class BoardUpsertBody(BaseModel):
     rendered_at: str | None = None
 
 
+class BoardReorderBody(BaseModel):
+    ordered_ids: list[str] = Field(..., min_length=1, max_length=200)
+
+
 @router.get("")
 async def get_boards(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     boards = await list_boards(user_id=int(user["id"]))
+    return {"boards": boards, "total": len(boards)}
+
+
+@router.put("/order")
+async def put_boards_order(
+    body: BoardReorderBody,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """Persist Overview tab order (drag-and-drop). ``ordered_ids`` = enabled boards."""
+    _ = user
+    try:
+        boards = await reorder_boards(body.ordered_ids)
+    except ValueError as exc:
+        raise APIError("invalid_request", str(exc), status_code=400) from exc
     return {"boards": boards, "total": len(boards)}
 
 
