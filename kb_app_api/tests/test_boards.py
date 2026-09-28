@@ -190,6 +190,51 @@ class BoardsRouteTests(unittest.TestCase):
         response = self.client.get("/api/boards")
         self.assertIn(response.status_code, (401, 403))
 
+    def test_archive_and_restore_board(self) -> None:
+        body = {
+            "title": "Archive me",
+            "kind": "cached_view",
+            "enabled": True,
+            "definition": {"provider": "static"},
+            "list_cell": {"kind": "metrics", "title": "Archive me", "metrics": []},
+            "rendered_document": {
+                "schema_version": 1,
+                "screen": {
+                    "type": "vstack",
+                    "id": "root",
+                    "children": [{"type": "text", "id": "t", "text": "hi"}],
+                },
+            },
+        }
+        put = self.client.put("/api/boards/archive-me", headers=self.headers, json=body)
+        self.assertEqual(put.status_code, 200, put.text)
+
+        archived = self.client.post("/api/boards/archive-me/archive", headers=self.headers)
+        self.assertEqual(archived.status_code, 200, archived.text)
+        self.assertFalse(archived.json()["board"]["enabled"])
+
+        listed = self.client.get("/api/boards", headers=self.headers)
+        self.assertEqual(listed.status_code, 200)
+        self.assertNotIn("archive-me", [b["id"] for b in listed.json()["boards"]])
+
+        archive_list = self.client.get("/api/boards/archived", headers=self.headers)
+        self.assertEqual(archive_list.status_code, 200, archive_list.text)
+        self.assertIn("archive-me", [b["id"] for b in archive_list.json()["boards"]])
+
+        detail = self.client.get("/api/boards/archive-me", headers=self.headers)
+        self.assertEqual(detail.status_code, 404)
+
+        restored = self.client.post("/api/boards/archive-me/restore", headers=self.headers)
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertTrue(restored.json()["board"]["enabled"])
+
+        listed2 = self.client.get("/api/boards", headers=self.headers)
+        ids = [b["id"] for b in listed2.json()["boards"]]
+        self.assertIn("archive-me", ids)
+        self.assertEqual(ids[-1], "archive-me")
+
+        self.client.delete("/api/boards/archive-me", headers=self.headers)
+
 
 if __name__ == "__main__":
     unittest.main()
