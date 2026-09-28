@@ -143,7 +143,7 @@ class Config:
     BOARDS_REMOTE_TIMEOUT_SEC: float = float(os.getenv("BOARDS_REMOTE_TIMEOUT_SEC", "8"))
     # vault_script: max seconds for sandboxed build()
     BOARDS_VAULT_SCRIPT_TIMEOUT_SEC: float = float(
-        os.getenv("BOARDS_VAULT_SCRIPT_TIMEOUT_SEC", "3")
+        os.getenv("BOARDS_VAULT_SCRIPT_TIMEOUT_SEC", "30")
     )
 
     # APNs (push о готовом ответе в чате KB App)

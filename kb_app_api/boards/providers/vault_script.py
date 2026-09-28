@@ -159,7 +159,9 @@ def _normalize_result(
 ) -> dict[str, Any]:
     list_cell = None
     if isinstance(result, dict) and "schema_version" in result and "screen" in result:
-        return wrap(result)
+        if isinstance(result.get("list_cell"), dict):
+            list_cell = result["list_cell"]
+        return wrap(result, list_cell)
     if isinstance(result, dict) and "children" in result:
         children = result.get("children")
         if not isinstance(children, list):
@@ -277,7 +279,7 @@ def compute(
     if not path.is_file():
         return _error(str(labels.get("err_missing") or f"Script not found: {script_path}"))
 
-    timeout = float(config.BOARDS_VAULT_SCRIPT_TIMEOUT_SEC or 3)
+    timeout = float(config.BOARDS_VAULT_SCRIPT_TIMEOUT_SEC or 30)
 
     try:
         if suffix == _JSON_SUFFIX:
