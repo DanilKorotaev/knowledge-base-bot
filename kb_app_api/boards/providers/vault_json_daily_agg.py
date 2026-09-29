@@ -75,6 +75,23 @@ def _format_number(value: float, *, decimals: int | None) -> str:
     return text.replace(",", " ").replace(".", ",")
 
 
+def _downsample_series(series: list[dict[str, Any]], max_points: int) -> list[dict[str, Any]]:
+    """Evenly sample series so both ends stay (fixes truncation of recent days)."""
+    if max_points <= 0 or len(series) <= max_points:
+        return series
+    if max_points == 1:
+        return [series[-1]]
+    n = len(series)
+    idxs: list[int] = []
+    seen: set[int] = set()
+    for i in range(max_points):
+        idx = round(i * (n - 1) / (max_points - 1))
+        if idx not in seen:
+            seen.add(idx)
+            idxs.append(idx)
+    return [series[i] for i in idxs]
+
+
 def _load_day_records(
     kb_root: Path,
     *,
@@ -262,9 +279,7 @@ def compute(
                     continue
                 series.append({"x": day.isoformat(), "y": num * scale})
             max_points = int(chart.get("max_points") or 90)
-            if max_points > 0 and len(series) > max_points:
-                step = max(1, len(series) // max_points)
-                series = series[::step][:max_points]
+            series = _downsample_series(series, max_points)
             if series:
                 children.append(
                     {
