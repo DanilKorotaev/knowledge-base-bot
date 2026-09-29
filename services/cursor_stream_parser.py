@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -25,6 +26,47 @@ _TOOL_LABELS: dict[str, str] = {
     "globToolCall": "Ищу файлы",
     "todoToolCall": "Обновляю задачи",
 }
+
+# Cursor often concatenates assistant turns / result without a blank line, which
+# breaks Markdown headings (`###`) and looks glued in the chat UI.
+_HEADING_STUCK_RE = re.compile(r"([^\n])(#{1,6}\s)")
+_FENCE_STUCK_RE = re.compile(r"([^\n])(```)")
+_LIST_STUCK_RE = re.compile(r"([^\n])([-*+]\s|\d+\.\s)")
+_SENTENCE_STUCK_RE = re.compile(r"([.!?…])([A-ZА-ЯЁ])")
+_BOLD_PARA_STUCK_RE = re.compile(r"([^\n])(\*\*[^*\n])")
+
+
+def heal_glued_assistant_text(text: str) -> str:
+    """Insert paragraph breaks where Cursor glued Markdown / sentences together."""
+    if not text:
+        return text
+    healed = text
+    healed = _HEADING_STUCK_RE.sub(r"\1\n\n\2", healed)
+    healed = _FENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
+    healed = _LIST_STUCK_RE.sub(r"\1\n\n\2", healed)
+    healed = _BOLD_PARA_STUCK_RE.sub(r"\1\n\n\2", healed)
+    healed = _SENTENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
+    return healed
+
+
+def separator_between_segments(previous: str, nxt: str) -> str:
+    """Return ``\\n\\n`` when two stream segments would otherwise glue."""
+    if not previous or not nxt:
+        return ""
+    if previous[-1] in "\n\r" or nxt[0] in "\n\r \t":
+        return ""
+    stripped = nxt.lstrip()
+    if stripped.startswith(("#", "```", "> ")):
+        return "\n\n"
+    if stripped.startswith(("- ", "* ", "+ ")) or re.match(r"^\d+\.\s", stripped):
+        return "\n\n"
+    if stripped.startswith("**"):
+        return "\n\n"
+    if previous[-1] in ".!?…" and nxt[0].isupper():
+        return "\n\n"
+    if previous[-1] not in " \t" and nxt[0] not in " \t":
+        return "\n\n"
+    return ""
 
 
 def parse_ndjson_line(line: str) -> Optional[dict[str, Any]]:
@@ -182,15 +224,28 @@ class StreamJsonAccumulator:
 
         chunk = assistant_text_for_stream(event, stream_partial=self.stream_partial)
         if chunk:
+            sep = ""
+            if self.assistant_segments:
+                sep = separator_between_segments(self.assistant_segments[-1], chunk)
+            emitted = f"{sep}{chunk}" if sep else chunk
             self.assistant_segments.append(chunk)
+            return emitted, activity
 
-        return chunk, activity
+        return None, activity
 
     def final_response(self) -> str:
+        def _join_segments() -> str:
+            if not self.assistant_segments:
+                return ""
+            joined = self.assistant_segments[0]
+            for part in self.assistant_segments[1:]:
+                joined += separator_between_segments(joined, part) + part
+            return heal_glued_assistant_text(joined)
+
+        # Non-partial: each assistant event is a full turn. Cursor's ``result`` often
+        # concatenates turns without newlines (``fileDone``); prefer our join.
+        if not self.stream_partial and self.assistant_segments:
+            return _join_segments()
         if self.result_text_value is not None:
-            return self.result_text_value
-        if self.assistant_segments:
-            if self.stream_partial:
-                return "".join(self.assistant_segments)
-            return "".join(self.assistant_segments)
-        return ""
+            return heal_glued_assistant_text(self.result_text_value)
+        return _join_segments()

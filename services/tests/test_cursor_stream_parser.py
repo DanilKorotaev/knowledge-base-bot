@@ -96,8 +96,29 @@ class TestStreamJsonAccumulator(unittest.TestCase):
                 chunks.append(chunk)
         self.assertTrue(any("README" in a for a in activities))
         self.assertEqual(chunks[0], "I'll read the README.md file")
+        # Second assistant turn is glued by Cursor in ``result``; we heal it.
+        self.assertTrue(chunks[1].startswith("\n\n") or chunks[1] == "Done!")
         final = acc.final_response()
-        self.assertEqual(final, result_text(parse_ndjson_line(CURSOR_DOC_EXAMPLE_LINES[-1]) or {}))
+        self.assertIn("I'll read the README.md file", final)
+        self.assertIn("Done!", final)
+        self.assertNotIn("fileDone", final)
+
+    def test_heals_heading_stuck_to_previous_sentence(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = "Сначала посмотрю поля.B QueryJob уже есть.### Итог\nТекст"
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("есть.\n\n### Итог", healed)
+        self.assertIn("поля.\n\nB QueryJob", healed)
+
+    def test_separator_between_segments_for_markdown(self) -> None:
+        from services.cursor_stream_parser import separator_between_segments
+
+        self.assertEqual(
+            separator_between_segments("Сначала посмотрю.", "**Сделано.**"),
+            "\n\n",
+        )
+        self.assertEqual(separator_between_segments("Hello\n", "world"), "")
 
 
 if __name__ == "__main__":
