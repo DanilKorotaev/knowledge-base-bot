@@ -120,6 +120,10 @@ async def compute(
                     "id": f"{row_id}_session",
                     "label": col_session,
                     "text": str(job.session_id),
+                    "action": {
+                        "type": "open_session",
+                        "session_id": str(job.session_id),
+                    },
                 }
             )
             children.append(
