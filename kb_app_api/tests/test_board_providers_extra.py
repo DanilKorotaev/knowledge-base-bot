@@ -191,6 +191,52 @@ class TestBoardProvidersExtra(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_system_query_jobs_shows_timer(self) -> None:
+        async def _run() -> None:
+            from utils.db_helpers import get_db
+            from kb_app_api.boards.providers import system_query_jobs
+            from kb_app_api.query_jobs.service import QueryJob, QueryJobService
+
+            db = await get_db()
+            user = await db.ensure_user(9000000009000088, "boards-prov")
+            fake = QueryJob(
+                id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                session_id=1,
+                user_id=int(user["id"]),
+                telegram_user_id=9000000009000088,
+                status="running",
+                query_text="hello world",
+                use_knowledge_base=True,
+                allow_structured_ui=False,
+                attached_files=[],
+                created_at="2026-09-29T10:00:00+00:00",
+                started_at="2026-09-29T10:01:00+00:00",
+            )
+            with patch.object(QueryJobService, "list_active", return_value=[fake]):
+                out = await system_query_jobs.compute(
+                    {"id": "active-jobs", "title": "Jobs", "kind": "system", "sort_order": 0},
+                    {"provider": "system_query_jobs", "labels": {"title": "Jobs"}},
+                    user_id=int(user["id"]),
+                )
+            flat: list[dict] = []
+
+            def walk(node: dict) -> None:
+                flat.append(node)
+                for child in node.get("children") or []:
+                    walk(child)
+
+            walk(out["document"]["screen"])
+            types = [n.get("type") for n in flat]
+            self.assertIn("timer", types)
+            timer = next(n for n in flat if n.get("type") == "timer")
+            self.assertEqual(timer.get("value"), "2026-09-29T10:01:00+00:00")
+            started = next(
+                n for n in flat if n.get("type") == "metric" and str(n.get("id", "")).endswith("_started")
+            )
+            self.assertTrue(started.get("text"))
+
+        asyncio.run(_run())
+
 
 if __name__ == "__main__":
     unittest.main()
