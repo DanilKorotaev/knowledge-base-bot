@@ -234,6 +234,12 @@ class TestBoardProvidersExtra(unittest.TestCase):
                 n for n in flat if n.get("type") == "metric" and str(n.get("id", "")).endswith("_started")
             )
             self.assertTrue(started.get("text"))
+            meta = next(n for n in flat if n.get("id", "").endswith("_meta"))
+            meta_types = [c.get("type") for c in (meta.get("children") or [])]
+            self.assertEqual(meta_types, ["metric", "metric", "timer", "metric"])
+            job_row = next(n for n in flat if n.get("id", "").startswith("job_"))
+            row_child_types = [c.get("type") for c in (job_row.get("children") or [])]
+            self.assertEqual(row_child_types, ["text", "hstack", "button"])
 
         asyncio.run(_run())
 
