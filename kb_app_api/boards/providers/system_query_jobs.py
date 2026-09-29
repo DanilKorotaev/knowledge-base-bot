@@ -114,25 +114,19 @@ async def compute(
                         "text": _format_elapsed(elapsed_sec),
                     }
                 )
-            actions_children: list[dict[str, Any]] = [
+            meta_children.append(
                 {
                     "type": "metric",
                     "id": f"{row_id}_session",
                     "label": col_session,
                     "text": str(job.session_id),
-                },
-                {
-                    "type": "button",
-                    "id": job.id,
-                    "label": cancel_label,
-                    "action_id": "cancel_job",
-                },
-            ]
+                }
+            )
             children.append(
                 {
                     "type": "vstack",
                     "id": row_id,
-                    "spacing": 6,
+                    "spacing": 8,
                     "children": [
                         {
                             "type": "text",
@@ -146,10 +140,10 @@ async def compute(
                             "children": meta_children,
                         },
                         {
-                            "type": "hstack",
-                            "id": f"{row_id}_actions",
-                            "spacing": 8,
-                            "children": actions_children,
+                            "type": "button",
+                            "id": job.id,
+                            "label": cancel_label,
+                            "action_id": "cancel_job",
                         },
                     ],
                 }
