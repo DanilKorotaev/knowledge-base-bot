@@ -31,22 +31,51 @@ _TOOL_LABELS: dict[str, str] = {
 # breaks Markdown headings (`###`) and looks glued in the chat UI.
 _HEADING_STUCK_RE = re.compile(r"([^\n])(#{1,6}\s)")
 _FENCE_STUCK_RE = re.compile(r"([^\n])(```)")
-_LIST_STUCK_RE = re.compile(r"([^\n])([-*+]\s|\d+\.\s)")
+# Glued list marker only (no whitespace before '-'/'*'/'+'/digits). Avoids
+# breaking normal prose like "скринам + БД" or closing '**' + space.
+_LIST_STUCK_RE = re.compile(r"([^\n*\s])([-*+]\s|\d+\.\s)")
 _SENTENCE_STUCK_RE = re.compile(r"([.!?…])([A-ZА-ЯЁ])")
-_BOLD_PARA_STUCK_RE = re.compile(r"([^\n])(\*\*[^*\n])")
+# New bold paragraph glued after punctuation/code (not mid-word, not closing **).
+_BOLD_PARA_STUCK_RE = re.compile(r"([.!?…)`])(\*\*[A-ZА-ЯЁ])")
+_FENCE_BLOCK_RE = re.compile(r"```[\s\S]*?```")
+# Double-backtick inline first (`` `code` `` / ``code``), then single.
+_DOUBLE_INLINE_CODE_RE = re.compile(r"``[\s\S]*?``")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
+def _protect_code_spans(text: str) -> tuple[str, list[str]]:
+    """Replace fenced/inline code with placeholders so heal regexes skip them."""
+    held: list[str] = []
+
+    def _hold(match: re.Match[str]) -> str:
+        held.append(match.group(0))
+        return f"\uff08CODE{len(held) - 1}\uff09"
+
+    out = _FENCE_BLOCK_RE.sub(_hold, text)
+    out = _DOUBLE_INLINE_CODE_RE.sub(_hold, out)
+    out = _INLINE_CODE_RE.sub(_hold, out)
+    return out, held
+
+
+def _restore_code_spans(text: str, held: list[str]) -> str:
+    out = text
+    for idx, chunk in enumerate(held):
+        out = out.replace(f"\uff08CODE{idx}\uff09", chunk)
+    return out
 
 
 def heal_glued_assistant_text(text: str) -> str:
     """Insert paragraph breaks where Cursor glued Markdown / sentences together."""
     if not text:
         return text
-    healed = text
+    protected, held = _protect_code_spans(text)
+    healed = protected
     healed = _HEADING_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _FENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _LIST_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _BOLD_PARA_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _SENTENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
-    return healed
+    return _restore_code_spans(healed, held)
 
 
 def separator_between_segments(previous: str, nxt: str) -> str:
