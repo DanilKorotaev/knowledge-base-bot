@@ -62,7 +62,8 @@ def separator_between_segments(previous: str, nxt: str) -> str:
         return "\n\n"
     if stripped.startswith("**"):
         return "\n\n"
-    if previous[-1] in ".!?…" and nxt[0].isupper():
+    # New agent turn / sentence after terminal punctuation.
+    if previous.rstrip()[-1:] in ".!?…" and stripped[:1].isalpha():
         return "\n\n"
     if previous[-1] not in " \t" and nxt[0] not in " \t":
         return "\n\n"

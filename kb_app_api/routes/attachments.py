@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["attachments"])
 
-_MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
 
 
 def _content_type_for_attachment(att: dict[str, Any], file_path: str | None = None) -> str:
