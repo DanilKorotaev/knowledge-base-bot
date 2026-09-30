@@ -111,6 +111,32 @@ class TestStreamJsonAccumulator(unittest.TestCase):
         self.assertIn("есть.\n\n### Итог", healed)
         self.assertIn("поля.\n\nB QueryJob", healed)
 
+    def test_heal_preserves_bold_and_inline_code(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = (
+            "**Пачка 1 (тест склейки).** Сейчас пример `делаю.Если` / "
+            "`абзац.Проблема`.**Пачка 2 — смотри сюда.** Между пачками."
+        )
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("**Пачка 1 (тест склейки).** Сейчас", healed)
+        self.assertIn("`делаю.Если`", healed)
+        self.assertIn("`абзац.Проблема`", healed)
+        self.assertIn("`абзац.Проблема`.\n\n**Пачка 2 — смотри сюда.**", healed)
+        self.assertNotIn(".*\n\n*", healed)
+
+    def test_heal_does_not_break_plus_in_prose_or_double_backticks(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = (
+            "**Склейка (по скринам + БД)**\n\n"
+            "Плюс старый хилер ломал `**bold**` и резал текст внутри `` `кода` ``."
+        )
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("**Склейка (по скринам + БД)**", healed)
+        self.assertNotIn("скринам \n\n+ БД", healed)
+        self.assertIn("`` `кода` ``", healed)
+
     def test_separator_between_segments_for_markdown(self) -> None:
         from services.cursor_stream_parser import separator_between_segments
 
@@ -119,7 +145,6 @@ class TestStreamJsonAccumulator(unittest.TestCase):
             "\n\n",
         )
         self.assertEqual(separator_between_segments("Hello\n", "world"), "")
-
 
 if __name__ == "__main__":
     unittest.main()
