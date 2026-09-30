@@ -278,7 +278,7 @@ def compute(
                 if num is None:
                     continue
                 series.append({"x": day.isoformat(), "y": num * scale})
-            max_points = int(chart.get("max_points") or 90)
+            max_points = int(chart["max_points"]) if chart.get("max_points") is not None else 90
             series = _downsample_series(series, max_points)
             if series:
                 children.append(
