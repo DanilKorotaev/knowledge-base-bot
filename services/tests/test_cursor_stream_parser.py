@@ -111,6 +111,16 @@ class TestStreamJsonAccumulator(unittest.TestCase):
         self.assertIn("есть.\n\n### Итог", healed)
         self.assertIn("поля.\n\nB QueryJob", healed)
 
+    def test_heal_does_not_split_atx_heading_hashes(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = "Сделано обе фичи.\n\n### Архив сессий\nКак у бордов.\n\n### Автоназвание\nТекст."
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("### Архив сессий", healed)
+        self.assertIn("### Автоназвание", healed)
+        self.assertNotIn("\n#\n\n## ", healed)
+        self.assertNotIn("\n#\n## ", healed)
+
     def test_heal_preserves_bold_and_inline_code(self) -> None:
         from services.cursor_stream_parser import heal_glued_assistant_text
 
