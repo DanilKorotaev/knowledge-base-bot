@@ -29,8 +29,9 @@ _TOOL_LABELS: dict[str, str] = {
 
 # Cursor often concatenates assistant turns / result without a blank line, which
 # breaks Markdown headings (`###`) and looks glued in the chat UI.
-_HEADING_STUCK_RE = re.compile(r"([^\n])(#{1,6}\s)")
-_FENCE_STUCK_RE = re.compile(r"([^\n])(```)")
+# Do not match inside an ATX heading run (`### Title` must stay intact).
+_HEADING_STUCK_RE = re.compile(r"([^\n#])(#{1,6}\s)")
+_FENCE_STUCK_RE = re.compile(r"([^\n`])(```)")
 # Glued list marker only (no whitespace before '-'/'*'/'+'/digits). Avoids
 # breaking normal prose like "скринам + БД" or closing '**' + space.
 _LIST_STUCK_RE = re.compile(r"([^\n*\s])([-*+]\s|\d+\.\s)")
@@ -64,6 +65,10 @@ def _restore_code_spans(text: str, held: list[str]) -> str:
     return out
 
 
+# Undo accidental ATX splits from older healers: "#\n\n## Title" → "### Title".
+_SPLIT_ATX_HEADING_RE = re.compile(r"(?m)^(#{1,5})\s*\n+(#{1,5}\s)")
+
+
 def heal_glued_assistant_text(text: str) -> str:
     """Insert paragraph breaks where Cursor glued Markdown / sentences together."""
     if not text:
@@ -75,6 +80,12 @@ def heal_glued_assistant_text(text: str) -> str:
     healed = _LIST_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _BOLD_PARA_STUCK_RE.sub(r"\1\n\n\2", healed)
     healed = _SENTENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
+    # Collapse runs produced by older buggy heading splits.
+    while True:
+        nxt = _SPLIT_ATX_HEADING_RE.sub(r"\1\2", healed)
+        if nxt == healed:
+            break
+        healed = nxt
     return _restore_code_spans(healed, held)
 
 
