@@ -17,6 +17,7 @@ class SessionStatus(str, Enum):
     """Статусы сессий"""
     ACTIVE = "active"
     COMPLETED = "completed"
+    ARCHIVED = "archived"
     DELETED = "deleted"
     
     def __str__(self) -> str:

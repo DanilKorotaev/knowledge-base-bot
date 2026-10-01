@@ -217,6 +217,33 @@ class TestKbAppApiSmoke(unittest.TestCase):
         ids_after = [s["id"] for s in listed_after.json()["sessions"]]
         self.assertNotIn(sid, ids_after)
 
+    def test_archive_and_restore_session(self) -> None:
+        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        create = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "To archive"},
+        )
+        self.assertEqual(create.status_code, 201)
+        sid = create.json()["session"]["id"]
+
+        archived = self.client.post(f"/api/sessions/{sid}/archive", headers=headers)
+        self.assertEqual(archived.status_code, 200)
+        self.assertEqual(archived.json()["session"]["id"], sid)
+
+        listed = self.client.get("/api/sessions", headers=headers)
+        self.assertNotIn(sid, [s["id"] for s in listed.json()["sessions"]])
+
+        archive_list = self.client.get("/api/sessions/archived", headers=headers)
+        self.assertEqual(archive_list.status_code, 200)
+        self.assertIn(sid, [s["id"] for s in archive_list.json()["sessions"]])
+
+        restored = self.client.post(f"/api/sessions/{sid}/restore", headers=headers)
+        self.assertEqual(restored.status_code, 200)
+
+        listed_again = self.client.get("/api/sessions", headers=headers)
+        self.assertIn(sid, [s["id"] for s in listed_again.json()["sessions"]])
+
     def test_file_share_link_endpoint_requires_nextcloud(self) -> None:
         headers = {"Authorization": "Bearer smoke-test-bearer"}
         create = self.client.post(

@@ -330,7 +330,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 clauses.append(f"status = ${len(params) + 1}")
                 params.append(status)
             elif exclude_deleted:
-                clauses.append("status != 'deleted'")
+                clauses.append("status NOT IN ('deleted', 'archived')")
             row = await conn.fetchrow(
                 f"SELECT COUNT(*)::int AS cnt FROM sessions WHERE {' AND '.join(clauses)}",
                 *params,
@@ -353,7 +353,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 clauses.append(f"s.status = ${len(params) + 1}")
                 params.append(status)
             elif exclude_deleted:
-                clauses.append("s.status != 'deleted'")
+                clauses.append("s.status NOT IN ('deleted', 'archived')")
             query = f"""
                 SELECT s.*, COALESCE(c.cnt, 0)::int AS message_count
                 FROM sessions s
@@ -409,7 +409,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                         FROM messages
                         GROUP BY session_id
                     ) c ON c.session_id = s.id
-                    WHERE s.user_id = $1 AND s.id = $2 AND s.status != 'deleted'
+                    WHERE s.user_id = $1 AND s.id = $2 AND s.status NOT IN ('deleted', 'archived')
                     """,
                     user_id,
                     search_id,
@@ -427,7 +427,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                     GROUP BY session_id
                 ) c ON c.session_id = s.id
                 WHERE s.user_id = $1
-                  AND s.status != 'deleted'
+                  AND s.status NOT IN ('deleted', 'archived')
                   AND (
                     LOWER(COALESCE(s.display_title, '')) LIKE $2
                     OR EXISTS (

@@ -399,7 +399,7 @@ class SQLiteDatabase(DatabaseInterface):
                 clauses.append("status = ?")
                 params.append(status)
             elif exclude_deleted:
-                clauses.append("status != 'deleted'")
+                clauses.append("status NOT IN ('deleted', 'archived')")
             cursor = await db.execute(
                 f"SELECT COUNT(*) FROM sessions WHERE {' AND '.join(clauses)}",
                 tuple(params),
@@ -423,7 +423,7 @@ class SQLiteDatabase(DatabaseInterface):
                 clauses.append("s.status = ?")
                 params.append(status)
             elif exclude_deleted:
-                clauses.append("s.status != 'deleted'")
+                clauses.append("s.status NOT IN ('deleted', 'archived')")
             query = f"""
                 SELECT s.id, s.user_id, s.session_type, s.status, s.context_files,
                        s.cursor_chat_id, s.display_title, s.created_at, s.updated_at,
@@ -488,7 +488,7 @@ class SQLiteDatabase(DatabaseInterface):
                         FROM messages
                         GROUP BY session_id
                     ) c ON c.session_id = s.id
-                    WHERE s.user_id = ? AND s.id = ? AND s.status != 'deleted'
+                    WHERE s.user_id = ? AND s.id = ? AND s.status NOT IN ('deleted', 'archived')
                     """,
                     (user_id, search_id),
                 )
@@ -508,7 +508,7 @@ class SQLiteDatabase(DatabaseInterface):
                     GROUP BY session_id
                 ) c ON c.session_id = s.id
                 WHERE s.user_id = ?
-                  AND s.status != 'deleted'
+                  AND s.status NOT IN ('deleted', 'archived')
                   AND (
                     LOWER(COALESCE(s.display_title, '')) LIKE ?
                     OR EXISTS (
