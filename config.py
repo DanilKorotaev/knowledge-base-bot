@@ -76,6 +76,11 @@ class Config:
     TRANSCRIPTION_POLISH_ENABLED: bool = os.getenv("TRANSCRIPTION_POLISH_ENABLED", "true").lower() in ("true", "1", "yes")
     TRANSCRIPTION_POLISH_MODEL: str = os.getenv("TRANSCRIPTION_POLISH_MODEL", "auto")
     TRANSCRIPTION_POLISH_PROMPT_PATH: Optional[str] = os.getenv("TRANSCRIPTION_POLISH_PROMPT_PATH")  # Путь к файлу промпта (по умолчанию agent/transcription_polish_prompt.md)
+
+    # Auto session display title after first Q&A (KB App / bot)
+    SESSION_TITLE_ENABLED: bool = os.getenv("SESSION_TITLE_ENABLED", "true").lower() in ("true", "1", "yes")
+    SESSION_TITLE_MODEL: str = os.getenv("SESSION_TITLE_MODEL") or os.getenv("TRANSCRIPTION_POLISH_MODEL", "auto")
+    SESSION_TITLE_TIMEOUT_SEC: float = float(os.getenv("SESSION_TITLE_TIMEOUT_SEC", "45"))
     
     # Streaming
     STREAMING_ENABLED: bool = os.getenv("STREAMING_ENABLED", "true").lower() in ("true", "1", "yes")

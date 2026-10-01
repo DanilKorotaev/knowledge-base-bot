@@ -372,6 +372,23 @@ class QueryProcessingService:
             
             # Сохранить ответ ассистента в сессию
             await db.add_message(session_id, str(MessageRole.ASSISTANT), strip_terminal_escape_sequences(response))
+
+            try:
+                from services.session_title_service import SessionTitleService
+
+                await SessionTitleService().maybe_set_title_after_first_reply(
+                    db,
+                    session_id,
+                    user_query=query,
+                    assistant_reply=strip_terminal_escape_sequences(response),
+                )
+            except Exception as title_exc:
+                logger.warning(
+                    "session auto-title failed (session_id=%s): %s",
+                    session_id,
+                    title_exc,
+                    exc_info=True,
+                )
             
             # Обработать изменения файлов
             await self.handle_file_changes(session_id, changes, message)
@@ -616,6 +633,23 @@ class QueryProcessingService:
             )
 
             clean_reply = strip_terminal_escape_sequences(response)
+            try:
+                from services.session_title_service import SessionTitleService
+
+                await SessionTitleService().maybe_set_title_after_first_reply(
+                    db,
+                    session_id,
+                    user_query=query,
+                    assistant_reply=clean_reply,
+                )
+            except Exception as title_exc:
+                logger.warning(
+                    "session auto-title failed (session_id=%s): %s",
+                    session_id,
+                    title_exc,
+                    exc_info=True,
+                )
+
             if allow_structured_ui:
                 try:
                     from kb_app_api.structured_ui.reply_suggest import attach_structured_ui_if_suggested

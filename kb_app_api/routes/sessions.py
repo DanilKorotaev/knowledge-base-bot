@@ -15,12 +15,16 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
 class CreateSessionBody(BaseModel):
-    title: str = Field(default="Новый чат", max_length=500)
+    title: str = Field(default="", max_length=500)
     use_knowledge_base: bool = True
 
 
 class PatchSessionBody(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
+
+
+def _serialize(session: dict[str, Any], message_count: int) -> dict[str, Any]:
+    return session_to_kb_from_row(session, message_count)
 
 
 @router.get("")
@@ -45,7 +49,35 @@ async def list_sessions(
         offset=offset,
         exclude_deleted=True,
     )
-    items = [session_to_kb_from_row(s, int(s.get("message_count") or 0)) for s in rows]
+    items = [_serialize(s, int(s.get("message_count") or 0)) for s in rows]
+    return {"sessions": items, "total": total, "page": page, "per_page": per_page}
+
+
+@router.get("/archived")
+async def list_archived_sessions(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    page: int = 1,
+    per_page: int = 50,
+) -> dict[str, Any]:
+    if page < 1:
+        raise APIError("validation_error", "page должен быть >= 1", detail="page")
+    if per_page < 1 or per_page > 100:
+        raise APIError("validation_error", "per_page должен быть 1…100", detail="per_page")
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    status = str(SessionStatus.ARCHIVED)
+    total = await db.count_user_sessions(user["id"], status=status, exclude_deleted=False)
+    offset = (page - 1) * per_page
+    rows = await db.get_user_sessions_with_counts(
+        user["id"],
+        limit=per_page,
+        offset=offset,
+        status=status,
+        exclude_deleted=False,
+    )
+    items = [_serialize(s, int(s.get("message_count") or 0)) for s in rows]
     return {"sessions": items, "total": total, "page": page, "per_page": per_page}
 
 
@@ -59,7 +91,7 @@ async def search_sessions(
 
     db = await get_db()
     rows = await db.search_user_sessions_with_counts(user["id"], q, limit=100)
-    items = [session_to_kb_from_row(s, int(s.get("message_count") or 0)) for s in rows]
+    items = [_serialize(s, int(s.get("message_count") or 0)) for s in rows]
     return {"sessions": items, "total": len(items)}
 
 
@@ -74,14 +106,19 @@ async def create_session(
     session_type = (
         SessionType.QUERY_WITH_KB if body.use_knowledge_base else SessionType.EMPTY_CHAT
     )
+    # Empty / "Новый чат" → NULL so auto-title can fill after first reply.
+    raw_title = (body.title or "").strip()
+    display_title = None
+    if raw_title and raw_title.casefold() not in {"новый чат", "new chat", "new session"}:
+        display_title = raw_title
     session = await db.create_session(
         user_id=user["id"],
         session_type=str(session_type),
         status=str(SessionStatus.ACTIVE),
         context_files=None,
-        display_title=body.title.strip() or None,
+        display_title=display_title,
     )
-    return {"session": session_to_kb_from_row(session, 0)}
+    return {"session": _serialize(session, 0)}
 
 
 @router.patch("/{session_id}")
@@ -105,7 +142,49 @@ async def patch_session(
     if not session:
         raise APIError("not_found", "Сессия не найдена", status_code=404)
     count = await db.count_session_messages(sid)
-    return {"session": session_to_kb_from_row(session, count)}
+    return {"session": _serialize(session, count)}
+
+
+@router.post("/{session_id}/archive")
+async def archive_session(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    sid = parse_session_id(session_id)
+    session = await require_session_for_user(sid, user["id"])
+    if str(session.get("status") or "") == str(SessionStatus.DELETED):
+        raise APIError("conflict", "Удалённую сессию нельзя архивировать", status_code=409)
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    await db.update_session(sid, status=str(SessionStatus.ARCHIVED))
+    refreshed = await db.get_session(sid)
+    if not refreshed:
+        raise APIError("not_found", "Сессия не найдена", status_code=404)
+    count = await db.count_session_messages(sid)
+    return {"session": _serialize(refreshed, count)}
+
+
+@router.post("/{session_id}/restore")
+async def restore_session(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    sid = parse_session_id(session_id)
+    session = await require_session_for_user(sid, user["id"])
+    if str(session.get("status") or "") == str(SessionStatus.DELETED):
+        raise APIError("conflict", "Удалённую сессию нельзя восстановить из архива", status_code=409)
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    await db.update_session(sid, status=str(SessionStatus.ACTIVE))
+    refreshed = await db.get_session(sid)
+    if not refreshed:
+        raise APIError("not_found", "Сессия не найдена", status_code=404)
+    count = await db.count_session_messages(sid)
+    return {"session": _serialize(refreshed, count)}
 
 
 @router.delete("/{session_id}")
