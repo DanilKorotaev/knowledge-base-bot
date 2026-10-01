@@ -27,21 +27,18 @@ _TOOL_LABELS: dict[str, str] = {
     "todoToolCall": "Обновляю задачи",
 }
 
-# Cursor often concatenates assistant turns / result without a blank line, which
-# breaks Markdown headings (`###`) and looks glued in the chat UI.
-# Do not match inside an ATX heading run (`### Title` must stay intact).
-_HEADING_STUCK_RE = re.compile(r"([^\n#])(#{1,6}\s)")
-_FENCE_STUCK_RE = re.compile(r"([^\n`])(```)")
-# Glued list marker only (no whitespace before '-'/'*'/'+'/digits). Avoids
-# breaking normal prose like "скринам + БД" or closing '**' + space.
-_LIST_STUCK_RE = re.compile(r"([^\n*\s])([-*+]\s|\d+\.\s)")
-_SENTENCE_STUCK_RE = re.compile(r"([.!?…])([A-ZА-ЯЁ])")
-# New bold paragraph glued after punctuation/code (not mid-word, not closing **).
-_BOLD_PARA_STUCK_RE = re.compile(r"([.!?…)`])(\*\*[A-ZА-ЯЁ])")
+# Prefer separator_between_segments for live stream joins. Final-text heal is
+# narrow: only after sentence/closing punct — never mid-``###``, list markers,
+# or prose ``+``. Code spans are protected so inline ``делаю.Если`` stays intact.
 _FENCE_BLOCK_RE = re.compile(r"```[\s\S]*?```")
-# Double-backtick inline first (`` `code` `` / ``code``), then single.
 _DOUBLE_INLINE_CODE_RE = re.compile(r"``[\s\S]*?``")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_STUCK_HEADING_RE = re.compile(r"([.!?…])(#{1,6}\s)")
+_STUCK_FENCE_RE = re.compile(r"([.!?…])(```)")
+_STUCK_BOLD_PARA_RE = re.compile(r"([.!?…)`])(\*\*[A-ZА-ЯЁ])")
+_STUCK_SENTENCE_RE = re.compile(r"([.!?…])([A-ZА-ЯЁ])")
+# Older buggy heal left "#\n\n## Title" — collapse back to "### Title".
+_SPLIT_ATX_HEADING_RE = re.compile(r"(?m)^(#{1,5})\s*\n+(#{1,5}\s)")
 
 
 def _protect_code_spans(text: str) -> tuple[str, list[str]]:
@@ -65,22 +62,17 @@ def _restore_code_spans(text: str, held: list[str]) -> str:
     return out
 
 
-# Undo accidental ATX splits from older healers: "#\n\n## Title" → "### Title".
-_SPLIT_ATX_HEADING_RE = re.compile(r"(?m)^(#{1,5})\s*\n+(#{1,5}\s)")
-
-
 def heal_glued_assistant_text(text: str) -> str:
-    """Insert paragraph breaks where Cursor glued Markdown / sentences together."""
+    """Insert paragraph breaks only where Cursor clearly glued turns together."""
     if not text:
         return text
-    protected, held = _protect_code_spans(text)
+    # Fence openers must be split before code protection (placeholders hide ```).
+    healed = _STUCK_FENCE_RE.sub(r"\1\n\n\2", text)
+    protected, held = _protect_code_spans(healed)
     healed = protected
-    healed = _HEADING_STUCK_RE.sub(r"\1\n\n\2", healed)
-    healed = _FENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
-    healed = _LIST_STUCK_RE.sub(r"\1\n\n\2", healed)
-    healed = _BOLD_PARA_STUCK_RE.sub(r"\1\n\n\2", healed)
-    healed = _SENTENCE_STUCK_RE.sub(r"\1\n\n\2", healed)
-    # Collapse runs produced by older buggy heading splits.
+    healed = _STUCK_HEADING_RE.sub(r"\1\n\n\2", healed)
+    healed = _STUCK_BOLD_PARA_RE.sub(r"\1\n\n\2", healed)
+    healed = _STUCK_SENTENCE_RE.sub(r"\1\n\n\2", healed)
     while True:
         nxt = _SPLIT_ATX_HEADING_RE.sub(r"\1\2", healed)
         if nxt == healed:

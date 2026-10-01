@@ -120,6 +120,16 @@ class TestStreamJsonAccumulator(unittest.TestCase):
         self.assertIn("### Автоназвание", healed)
         self.assertNotIn("\n#\n\n## ", healed)
         self.assertNotIn("\n#\n## ", healed)
+        self.assertEqual(healed.count("###"), 2)
+
+    def test_heal_collapses_legacy_split_atx(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = "Готово.\n\n#\n\n## Архив сессий\nТекст.\n\n#\n## Автоназвание"
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("### Архив сессий", healed)
+        self.assertIn("### Автоназвание", healed)
+        self.assertNotIn("#\n\n##", healed)
 
     def test_heal_preserves_bold_and_inline_code(self) -> None:
         from services.cursor_stream_parser import heal_glued_assistant_text
@@ -147,6 +157,50 @@ class TestStreamJsonAccumulator(unittest.TestCase):
         self.assertNotIn("скринам \n\n+ БД", healed)
         self.assertIn("`` `кода` ``", healed)
 
+    def test_heal_preserves_numbered_and_bullet_lists(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = (
+            "Сделано.\n\n"
+            "1. **Первый пункт** — нормальный.\n"
+            "2. Второй с `кодом.Внутри`.\n"
+            "- bullet ok\n"
+            "* star ok\n"
+            "+ plus list ok\n"
+            "И проза про скринам + БД без разрыва."
+        )
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("1. **Первый пункт**", healed)
+        self.assertIn("2. Второй", healed)
+        self.assertIn("- bullet ok", healed)
+        self.assertIn("* star ok", healed)
+        self.assertIn("+ plus list ok", healed)
+        self.assertIn("скринам + БД", healed)
+        self.assertNotIn("\n\n1. ", healed.replace("Сделано.\n\n1. ", ""))
+
+    def test_heal_does_not_touch_mid_word_hash_or_fence(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = "tag#name and C## style stay; only after punct.### Heading\nDone.```py\nx=1\n```"
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("tag#name", healed)
+        self.assertIn("C## style", healed)
+        self.assertIn("punct.\n\n### Heading", healed)
+        self.assertIn("Done.\n\n```py", healed)
+
+    def test_heal_fenced_code_body_untouched(self) -> None:
+        from services.cursor_stream_parser import heal_glued_assistant_text
+
+        raw = (
+            "Intro.\n\n```\nfoo.Bar### not heading\n1. not list\n```\n\n"
+            "Closing without punct**Bold mid** then Out.**Next para.**"
+        )
+        healed = heal_glued_assistant_text(raw)
+        self.assertIn("foo.Bar### not heading", healed)
+        self.assertIn("1. not list", healed)
+        self.assertIn("punct**Bold mid**", healed)
+        self.assertIn("Out.\n\n**Next para.**", healed)
+
     def test_separator_between_segments_for_markdown(self) -> None:
         from services.cursor_stream_parser import separator_between_segments
 
@@ -155,6 +209,10 @@ class TestStreamJsonAccumulator(unittest.TestCase):
             "\n\n",
         )
         self.assertEqual(separator_between_segments("Hello\n", "world"), "")
+        self.assertEqual(separator_between_segments("Done.", "### Title"), "\n\n")
+        self.assertEqual(separator_between_segments("Done.", "- item"), "\n\n")
+        self.assertEqual(separator_between_segments("Done.", "1. item"), "\n\n")
+        self.assertEqual(separator_between_segments("Done.", "```py"), "\n\n")
 
 if __name__ == "__main__":
     unittest.main()
