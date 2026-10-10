@@ -441,13 +441,16 @@ class QueryProcessingService:
         db = await self._get_db()
         sync_service = self._get_sync_service()
 
+        from utils.file_helpers import sanitize_file_change_text
+
         for change in changes:
+            path = change.get("path", "") or ""
             await db.log_file_change(
                 session_id=session_id,
-                file_path=change.get("path", ""),
+                file_path=path,
                 change_type=change.get("type", str(ChangeType.MODIFIED)),
-                old_content=change.get("old_content"),
-                new_content=change.get("new_content"),
+                old_content=sanitize_file_change_text(path, change.get("old_content")),
+                new_content=sanitize_file_change_text(path, change.get("new_content")),
             )
 
         try:

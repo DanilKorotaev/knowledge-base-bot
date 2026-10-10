@@ -1197,12 +1197,15 @@ class CursorCLIService:
             paths_before = set(file_states_before.keys())
             paths_after = set(file_states_after.keys())
             
+            from utils.file_helpers import read_text_for_file_change
+
             # Новые файлы (created)
             new_files = paths_after - paths_before
             for rel_path in new_files:
                 full_path = self.kb_path / rel_path
                 try:
-                    new_content = full_path.read_text(encoding='utf-8', errors='ignore')
+                    # Binary (jpg/…) — track path only; never read as UTF-8 into file_changes.
+                    new_content = read_text_for_file_change(full_path)
                     changes.append({
                         "path": rel_path,
                         "type": "created",
@@ -1222,7 +1225,7 @@ class CursorCLIService:
                 if before['mtime'] != after['mtime'] or before['size'] != after['size']:
                     full_path = self.kb_path / rel_path
                     try:
-                        new_content = full_path.read_text(encoding='utf-8', errors='ignore')
+                        new_content = read_text_for_file_change(full_path)
                         changes.append({
                             "path": rel_path,
                             "type": "modified",

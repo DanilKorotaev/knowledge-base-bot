@@ -727,12 +727,25 @@ class PostgreSQLDatabase(DatabaseInterface):
         
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
+        # Do not pull JPEG/audio/etc bodies into chat enrichment (legacy rows can be ~500KB each).
+        binary_path_sql = (
+            r"lower(file_path) ~ "
+            r"'\.(jpe?g|png|gif|webp|heic|heif|bmp|tif|tiff|ico|pdf|zip|gz|tgz|7z|rar|"
+            r"mp3|m4a|aac|ogg|wav|flac|mp4|mov|mkv|webm|avi)$'"
+        )
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(f"""
-                SELECT * FROM file_changes 
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    id, session_id, file_path, change_type, file_hash, created_at,
+                    CASE WHEN {binary_path_sql} THEN NULL ELSE old_content END AS old_content,
+                    CASE WHEN {binary_path_sql} THEN NULL ELSE new_content END AS new_content
+                FROM file_changes
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-            """, *params)
+                """,
+                *params,
+            )
             return [dict(row) for row in rows]
     
     async def get_file_change(self, change_id: int) -> Optional[Dict[str, Any]]:
