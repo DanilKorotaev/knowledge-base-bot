@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from kb_app_api.timefmt import to_iso_z
+from utils.file_helpers import sanitize_file_change_text
 
 _HTML_TAG_RE = re.compile(r"<\s*(/?)\s*(b|strong|i|em|code|pre|ul|ol|li|a|p|br|blockquote)\b", re.I)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
@@ -70,12 +71,14 @@ def changed_file_to_kb(row: dict[str, Any]) -> dict[str, Any]:
     change_kind = str(row.get("change_type") or "").lower()
     if change_kind not in ("created", "modified", "deleted"):
         change_kind = "modified"
+    path = row.get("file_path") or ""
     return {
         "id": str(row["id"]),
-        "path": row.get("file_path") or "",
+        "path": path,
         "change_kind": change_kind,
-        "before_text": row.get("old_content"),
-        "after_text": row.get("new_content"),
+        # Never ship JPEG/audio/etc bodies (or legacy binary-as-text) into chat JSON.
+        "before_text": sanitize_file_change_text(path, row.get("old_content")),
+        "after_text": sanitize_file_change_text(path, row.get("new_content")),
         "created_at": to_iso_z(row.get("created_at")),
     }
 

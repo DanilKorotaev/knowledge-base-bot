@@ -3,11 +3,120 @@
 """
 import hashlib
 import logging
+import mimetypes
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Paths whose body must never be stored/served as text in file_changes / chat API.
+_BINARY_SUFFIXES = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".heic",
+        ".heif",
+        ".bmp",
+        ".tif",
+        ".tiff",
+        ".ico",
+        ".pdf",
+        ".zip",
+        ".gz",
+        ".tgz",
+        ".7z",
+        ".rar",
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".ogg",
+        ".wav",
+        ".flac",
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".dmg",
+        ".ipa",
+        ".apk",
+        ".exe",
+        ".dll",
+        ".so",
+        ".dylib",
+        ".bin",
+        ".dat",
+        ".sqlite",
+        ".db",
+        ".wasm",
+    }
+)
+
+# Safety cap for text diffs exposed via related_changed_files.
+FILE_CHANGE_TEXT_MAX_CHARS = 100_000
+
+
+def is_binary_kb_path(path: str | Path | None) -> bool:
+    """True for images/media/archives — not meaningful as UTF-8 chat diffs."""
+    if path is None:
+        return False
+    suffix = Path(str(path)).suffix.lower()
+    if suffix in _BINARY_SUFFIXES:
+        return True
+    mime, _ = mimetypes.guess_type(str(path))
+    if not mime:
+        return False
+    return not (
+        mime.startswith("text/")
+        or mime in {"application/json", "application/xml", "application/javascript"}
+        or mime.endswith("+json")
+        or mime.endswith("+xml")
+    )
+
+
+def looks_like_binary_blob(text: str | None) -> bool:
+    """Heuristic for already-stored garbage from read_text(..., errors='ignore') on JPEGs."""
+    if not text:
+        return False
+    if "\x00" in text:
+        return True
+    # Large mostly-non-printable payloads (legacy binary-as-text rows).
+    if len(text) < 512:
+        return False
+    sample = text[:4000]
+    weird = sum(1 for ch in sample if ord(ch) < 9 or (14 <= ord(ch) < 32))
+    return (weird / len(sample)) > 0.08
+
+
+def sanitize_file_change_text(path: str | Path | None, content: str | None) -> str | None:
+    """Drop binary / oversized bodies before DB write or API serialize."""
+    if content is None:
+        return None
+    if is_binary_kb_path(path) or looks_like_binary_blob(content):
+        return None
+    if len(content) > FILE_CHANGE_TEXT_MAX_CHARS:
+        return content[:FILE_CHANGE_TEXT_MAX_CHARS]
+    return content
+
+
+def read_text_for_file_change(file_path: Path) -> Optional[str]:
+    """Read file body for file_changes only when it is plausible text."""
+    if is_binary_kb_path(file_path):
+        return None
+    try:
+        # Reject obvious binary via NUL in the first chunk.
+        with file_path.open("rb") as fh:
+            head = fh.read(8192)
+        if b"\x00" in head:
+            return None
+        text = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return sanitize_file_change_text(file_path, text)
 
 
 def calculate_file_hash(file_path: Path) -> str:

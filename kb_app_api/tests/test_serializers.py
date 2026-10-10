@@ -95,6 +95,21 @@ class TestMessageSerializers(unittest.TestCase):
         self.assertEqual(out["id"], "7")
         self.assertEqual(out["path"], "docs/guide.md")
         self.assertEqual(out["change_kind"], "created")
+        self.assertEqual(out["after_text"], "hello")
+
+    def test_changed_file_to_kb_omits_binary_image_bodies(self) -> None:
+        row = {
+            "id": 9,
+            "file_path": "Питание/_raw/label.jpg",
+            "change_type": "created",
+            "old_content": None,
+            "new_content": "\x00" + ("ÿØÿà" * 2000),
+            "created_at": "2026-06-01T12:00:00Z",
+        }
+        out = changed_file_to_kb(row)
+        self.assertEqual(out["path"], "Питание/_raw/label.jpg")
+        self.assertIsNone(out["before_text"])
+        self.assertIsNone(out["after_text"])
 
     def test_messages_to_kb_with_related_changed_files(self) -> None:
         msgs = [
