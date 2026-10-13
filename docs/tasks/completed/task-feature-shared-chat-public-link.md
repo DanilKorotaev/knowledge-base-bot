@@ -1,6 +1,6 @@
 # Feature: Share chat as read-only public URL
 
-**Status:** Code done (`feature/session-share-public-link` bot + `feature/session-share-link` iOS)  
+**Status:** Done (merged to develop + iOS main; host default PUBLIC_BASE_URL)  
 **Priority:** Medium–High  
 **iOS:** overflow menu Share → system sheet  
 **Vault:** foundation for future web KB App
@@ -26,14 +26,8 @@ Owner creates an opaque share token for a session. Anyone with the URL can **rea
 
 ## Ops
 
-Set on mini `.env` (then restart API):
-
-```bash
-KB_APP_PUBLIC_BASE_URL=https://<public-host>
-KB_APP_SHARE_DEFAULT_TTL_DAYS=30
-```
-
-Without base URL, API returns relative `/share/{token}` paths.
+`scripts/start-kb-app-api-host.sh` defaults `KB_APP_PUBLIC_BASE_URL=https://kbapp.example.com`.
+Override in `.env` if the public hostname changes. Optional: `KB_APP_SHARE_DEFAULT_TTL_DAYS=30`.
 
 ## Phase 2
 
