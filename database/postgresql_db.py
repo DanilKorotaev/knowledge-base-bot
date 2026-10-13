@@ -3,7 +3,8 @@
 """
 import asyncpg
 import json
-from typing import Optional, List, Dict, Any
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Union
 from .base import DatabaseInterface
 from config import config
 
@@ -903,8 +904,16 @@ class PostgreSQLDatabase(DatabaseInterface):
         self,
         session_id: int,
         token_hash: str,
-        expires_at: Optional[str],
+        expires_at: Optional[Union[str, datetime]],
     ) -> Dict[str, Any]:
+        expires_value: Optional[datetime]
+        if expires_at is None:
+            expires_value = None
+        elif isinstance(expires_at, datetime):
+            expires_value = expires_at
+        else:
+            expires_value = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
@@ -917,12 +926,12 @@ class PostgreSQLDatabase(DatabaseInterface):
             row = await conn.fetchrow(
                 """
                 INSERT INTO session_shares (session_id, token_hash, expires_at)
-                VALUES ($1, $2, $3::timestamptz)
+                VALUES ($1, $2, $3)
                 RETURNING id, session_id, token_hash, created_at, expires_at, revoked_at
                 """,
                 session_id,
                 token_hash,
-                expires_at,
+                expires_value,
             )
             return dict(row)
 
