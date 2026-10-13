@@ -208,6 +208,21 @@ class SQLiteDatabase(DatabaseInterface):
                     PRIMARY KEY (job_id, seq)
                 )
             """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS session_shares (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_session_shares_session
+                ON session_shares(session_id)
+            """)
             
             await db.commit()
     
@@ -1112,4 +1127,83 @@ class SQLiteDatabase(DatabaseInterface):
             )
             await db.commit()
         return health_data_relative
+
+    async def create_session_share(
+        self,
+        session_id: int,
+        token_hash: str,
+        expires_at: Optional[str],
+    ) -> Dict[str, Any]:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE session_shares
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE session_id = ? AND revoked_at IS NULL
+                """,
+                (session_id,),
+            )
+            cursor = await db.execute(
+                """
+                INSERT INTO session_shares (session_id, token_hash, expires_at)
+                VALUES (?, ?, ?)
+                """,
+                (session_id, token_hash, expires_at),
+            )
+            await db.commit()
+            share_id = cursor.lastrowid
+            row = await (
+                await db.execute(
+                    """
+                    SELECT id, session_id, token_hash, created_at, expires_at, revoked_at
+                    FROM session_shares WHERE id = ?
+                    """,
+                    (share_id,),
+                )
+            ).fetchone()
+            return {
+                "id": row[0],
+                "session_id": row[1],
+                "token_hash": row[2],
+                "created_at": row[3],
+                "expires_at": row[4],
+                "revoked_at": row[5],
+            }
+
+    async def revoke_session_shares(self, session_id: int) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                UPDATE session_shares
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE session_id = ? AND revoked_at IS NULL
+                """,
+                (session_id,),
+            )
+            await db.commit()
+            return int(cursor.rowcount or 0)
+
+    async def get_active_share_by_token_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, session_id, token_hash, created_at, expires_at, revoked_at
+                FROM session_shares
+                WHERE token_hash = ?
+                  AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+                """,
+                (token_hash,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "session_id": row[1],
+                "token_hash": row[2],
+                "created_at": row[3],
+                "expires_at": row[4],
+                "revoked_at": row[5],
+            }
 

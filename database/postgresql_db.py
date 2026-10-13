@@ -244,6 +244,21 @@ class PostgreSQLDatabase(DatabaseInterface):
                     PRIMARY KEY (job_id, seq)
                 )
             """)
+
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS session_shares (
+                    id SERIAL PRIMARY KEY,
+                    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ,
+                    revoked_at TIMESTAMPTZ
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_session_shares_session
+                ON session_shares(session_id)
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
@@ -883,4 +898,61 @@ class PostgreSQLDatabase(DatabaseInterface):
                 user_id,
             )
         return health_data_relative
+
+    async def create_session_share(
+        self,
+        session_id: int,
+        token_hash: str,
+        expires_at: Optional[str],
+    ) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE session_shares
+                SET revoked_at = NOW()
+                WHERE session_id = $1 AND revoked_at IS NULL
+                """,
+                session_id,
+            )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO session_shares (session_id, token_hash, expires_at)
+                VALUES ($1, $2, $3::timestamptz)
+                RETURNING id, session_id, token_hash, created_at, expires_at, revoked_at
+                """,
+                session_id,
+                token_hash,
+                expires_at,
+            )
+            return dict(row)
+
+    async def revoke_session_shares(self, session_id: int) -> int:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE session_shares
+                SET revoked_at = NOW()
+                WHERE session_id = $1 AND revoked_at IS NULL
+                """,
+                session_id,
+            )
+            # asyncpg: "UPDATE N"
+            try:
+                return int(str(result).split()[-1])
+            except (TypeError, ValueError, IndexError):
+                return 0
+
+    async def get_active_share_by_token_hash(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, session_id, token_hash, created_at, expires_at, revoked_at
+                FROM session_shares
+                WHERE token_hash = $1
+                  AND revoked_at IS NULL
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                """,
+                token_hash,
+            )
+            return dict(row) if row else None
 

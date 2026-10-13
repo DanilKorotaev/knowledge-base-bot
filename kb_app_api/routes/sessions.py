@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -9,6 +12,7 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.serializers import session_to_kb_from_row
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.timefmt import to_iso_z
 from utils.constants import SessionStatus, SessionType
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -21,6 +25,12 @@ class CreateSessionBody(BaseModel):
 
 class PatchSessionBody(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
+
+
+class CreateShareBody(BaseModel):
+    """Optional TTL override (days). Default from KB_APP_SHARE_DEFAULT_TTL_DAYS."""
+
+    ttl_days: Optional[int] = Field(default=None, ge=1, le=365)
 
 
 def _serialize(session: dict[str, Any], message_count: int) -> dict[str, Any]:
@@ -200,3 +210,64 @@ async def delete_session(
     db = await get_db()
     await db.update_session(sid, status=str(SessionStatus.DELETED))
     return {"success": True}
+
+
+def _share_urls(raw_token: str) -> tuple[str, str]:
+    import config as app_config
+
+    base = (app_config.config.KB_APP_PUBLIC_BASE_URL or "").rstrip("/")
+    viewer_path = f"/share/{raw_token}"
+    api_path = f"/api/share/{raw_token}"
+    if base:
+        return f"{base}{viewer_path}", f"{base}{api_path}"
+    return viewer_path, api_path
+
+
+@router.post("/{session_id}/share", status_code=201)
+async def create_session_share(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    body: CreateShareBody | None = None,
+) -> dict[str, Any]:
+    """Create (or rotate) a read-only public link for the session."""
+    import config as app_config
+
+    sid = parse_session_id(session_id)
+    session = await require_session_for_user(sid, user["id"])
+    if str(session.get("status") or "") == str(SessionStatus.DELETED):
+        raise APIError("conflict", "Удалённую сессию нельзя шарить", status_code=409)
+
+    ttl_days = (body.ttl_days if body and body.ttl_days is not None else None) or int(
+        app_config.config.KB_APP_SHARE_DEFAULT_TTL_DAYS
+    )
+    expires = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+    expires_iso = to_iso_z(expires)
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    await db.create_session_share(sid, token_hash, expires_iso)
+    share_url, api_url = _share_urls(raw)
+    return {
+        "share_url": share_url,
+        "api_url": api_url,
+        "expires_at": expires_iso,
+        "ttl_days": ttl_days,
+    }
+
+
+@router.delete("/{session_id}/share")
+async def revoke_session_share(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    sid = parse_session_id(session_id)
+    await require_session_for_user(sid, user["id"])
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    revoked = await db.revoke_session_shares(sid)
+    return {"success": True, "revoked": revoked}
