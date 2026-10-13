@@ -43,6 +43,8 @@ export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
 export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 # Prefer background query worker for Cursor (survives API redeploy; SSE still streams via job events).
 export KB_APP_QUERY_JOBS_ENABLED="${KB_APP_QUERY_JOBS_ENABLED:-true}"
+# Public share viewer / API URLs (override in .env if the public hostname changes).
+export KB_APP_PUBLIC_BASE_URL="${KB_APP_PUBLIC_BASE_URL:-https://kbapp.coredan.ru}"
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {
