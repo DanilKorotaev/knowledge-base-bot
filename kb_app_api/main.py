@@ -42,6 +42,7 @@ from kb_app_api.routes import (
     me,
     messages,
     sessions,
+    share,
     ui_events,
     voice,
 )
@@ -83,6 +84,7 @@ app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 app.include_router(health.router)
+app.include_router(share.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")

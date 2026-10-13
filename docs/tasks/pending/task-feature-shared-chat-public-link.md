@@ -1,6 +1,6 @@
 # Feature: Share chat as read-only public URL
 
-**Status:** Backlog  
+**Status:** Code done (`feature/session-share-public-link` bot + `feature/session-share-link` iOS)  
 **Priority:** Medium–High  
 **iOS:** overflow menu Share → system sheet  
 **Vault:** foundation for future web KB App
@@ -14,13 +14,26 @@ Owner creates an opaque share token for a session. Anyone with the URL can **rea
 - Do **not** expose `KB_APP_API_TOKEN` (single shared bearer today).
 - Public routes are token-scoped only; ownership APIs stay Bearer-authenticated.
 
-## MVP (~2–4 days)
+## MVP
 
-- Table `session_shares` (token hash, session_id, expires_at, revoked_at)
-- `POST/DELETE /api/sessions/{id}/share` (owner)
-- `GET /api/share/{token}` + messages page (no write)
-- Minimal static/web read-only viewer
-- iOS: Share action copies/opens URL
+- [x] Table `session_shares` (token hash, session_id, expires_at, revoked_at) — SQLite + Postgres `init_db`
+- [x] `POST/DELETE /api/sessions/{id}/share` (owner Bearer)
+- [x] `GET /api/share/{token}` JSON (no write; strip attachment `download_url`)
+- [x] Minimal HTML viewer `GET /share/{token}`
+- [x] Config: `KB_APP_PUBLIC_BASE_URL`, `KB_APP_SHARE_DEFAULT_TTL_DAYS`
+- [x] Tests: `kb_app_api/tests/test_session_share.py`
+- [x] iOS: Share in overflow menu → `UIActivityViewController`
+
+## Ops
+
+Set on mini `.env` (then restart API):
+
+```bash
+KB_APP_PUBLIC_BASE_URL=https://<public-host>
+KB_APP_SHARE_DEFAULT_TTL_DAYS=30
+```
+
+Without base URL, API returns relative `/share/{token}` paths.
 
 ## Phase 2
 

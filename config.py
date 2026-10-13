@@ -139,6 +139,10 @@ class Config:
     QUERY_JOB_EVENT_POLL_MS: int = int(os.getenv("QUERY_JOB_EVENT_POLL_MS", "100"))
     QUERY_JOB_STALE_RUNNING_SEC: int = int(os.getenv("QUERY_JOB_STALE_RUNNING_SEC", "1800"))
 
+    # Public share links (read-only chat URLs; do not put the API bearer in these links)
+    KB_APP_PUBLIC_BASE_URL: Optional[str] = os.getenv("KB_APP_PUBLIC_BASE_URL")
+    KB_APP_SHARE_DEFAULT_TTL_DAYS: int = int(os.getenv("KB_APP_SHARE_DEFAULT_TTL_DAYS", "30"))
+
     # Remote boards: comma-separated hostnames allowed for remote_structured_ui provider
     BOARDS_REMOTE_HOST_ALLOWLIST: List[str] = [
         h.strip().lower()
