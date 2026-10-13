@@ -89,6 +89,23 @@ class TestSessionShare(unittest.TestCase):
         self.assertIn("text/html", html.headers.get("content-type", ""))
         self.assertIn("Hello shared world", html.text)
 
+        # Assistant markdown should render as HTML (not raw **markers**).
+        import asyncio
+
+        from utils.db_helpers import get_db
+
+        async def _add_assistant() -> None:
+            db = await get_db()
+            await db.add_message(int(session_id), "assistant", "## Title\n\n**bold** and `code`")
+
+        asyncio.run(_add_assistant())
+        html_md = self.client.get(f"/share/{token}")
+        self.assertEqual(html_md.status_code, 200)
+        self.assertIn("<strong>bold</strong>", html_md.text)
+        self.assertIn("<code>code</code>", html_md.text)
+        self.assertNotIn("**bold**", html_md.text)
+        self.assertNotIn("<script>", html_md.text)
+
         revoked = self.client.delete(
             f"/api/sessions/{session_id}/share",
             headers=self.headers,

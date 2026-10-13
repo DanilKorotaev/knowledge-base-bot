@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.serializers import session_to_kb_from_row
+from kb_app_api.share_markdown import render_share_message_body
 from utils.constants import SessionStatus
 
 router = APIRouter(tags=["share"])
@@ -125,11 +126,12 @@ body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:2r
     for message in payload.get("messages") or []:
         role = str(message.get("role") or "user")
         role_label = "Ассистент" if role == "assistant" else "Вы"
-        content = html.escape(str(message.get("content") or "")).replace("\n", "<br>")
+        content = render_share_message_body(message)
+        md_class = " md" if role == "assistant" or str(message.get("content_format") or "") == "markdown" else ""
         messages_html.append(
             f'<article class="msg {html.escape(role)}">'
             f'<div class="role">{role_label}</div>'
-            f'<div class="content">{content}</div>'
+            f'<div class="content{md_class}">{content}</div>'
             f"</article>"
         )
     if not messages_html:
@@ -141,14 +143,33 @@ body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:2r
 <title>{title}</title>
 <style>
 body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:0;background:#f7f7f8;color:#1c1c1e}}
-header{{padding:1rem 1.25rem;background:#fff;border-bottom:1px solid #e5e5ea;position:sticky;top:0}}
+header{{padding:1rem 1.25rem;background:#fff;border-bottom:1px solid #e5e5ea;position:sticky;top:0;z-index:1}}
 header h1{{font-size:1.1rem;margin:0}}
 header p{{margin:.35rem 0 0;color:#8e8e93;font-size:.85rem}}
 main{{max-width:44rem;margin:0 auto;padding:1rem 1.25rem 2rem;display:flex;flex-direction:column;gap:.75rem}}
 .msg{{padding:.85rem 1rem;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}}
 .msg.assistant{{background:#eef2ff}}
 .role{{font-size:.75rem;color:#8e8e93;margin-bottom:.35rem}}
-.content{{white-space:pre-wrap;line-height:1.45;word-break:break-word}}
+.content{{line-height:1.5;word-break:break-word}}
+.content:not(.md){{white-space:pre-wrap}}
+.content.md p{{margin:.55em 0}}
+.content.md p:first-child{{margin-top:0}}
+.content.md p:last-child{{margin-bottom:0}}
+.content.md h1,.content.md h2,.content.md h3,.content.md h4{{margin:.85em 0 .4em;line-height:1.25;font-weight:650}}
+.content.md h1{{font-size:1.35rem}}
+.content.md h2{{font-size:1.2rem}}
+.content.md h3{{font-size:1.05rem}}
+.content.md ul,.content.md ol{{margin:.45em 0;padding-left:1.35rem}}
+.content.md li{{margin:.2em 0}}
+.content.md code{{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em;background:rgba(0,0,0,.06);padding:.1em .35em;border-radius:4px}}
+.content.md pre{{overflow:auto;padding:.75rem 1rem;border-radius:10px;background:#1c1c1e;color:#f2f2f7;margin:.65em 0}}
+.content.md pre code{{background:transparent;padding:0;color:inherit;font-size:.85em}}
+.content.md a{{color:#3145c4;text-decoration:underline}}
+.content.md blockquote{{margin:.55em 0;padding:.15rem 0 .15rem .85rem;border-left:3px solid #c7c7cc;color:#3a3a3c}}
+.content.md table{{border-collapse:collapse;width:100%;margin:.65em 0;font-size:.92em}}
+.content.md th,.content.md td{{border:1px solid #d1d1d6;padding:.35rem .55rem;text-align:left}}
+.content.md th{{background:rgba(0,0,0,.04)}}
+.content.md hr{{border:none;border-top:1px solid #d1d1d6;margin:1em 0}}
 .empty{{color:#8e8e93}}
 </style></head>
 <body>
