@@ -53,6 +53,53 @@ def _job_anchor_ts(job: QueryJob) -> str | None:
     return job.started_at or job.created_at
 
 
+def _quick_action_nodes(definition: dict[str, Any], labels: dict[str, Any]) -> list[dict[str, Any]]:
+    """Config-driven presets from ``definition.quick_actions`` (KBAppAction buttons).
+
+    Each item: ``{id, label, action: {type, ...}}``. No vault paths — generic client
+    actions only. Personal labels/targets live in the board definition (DB / MCP).
+    """
+    raw = definition.get("quick_actions")
+    if not isinstance(raw, list) or not raw:
+        return []
+    section_title = str(labels.get("quick_title") or "Быстрые").strip() or "Быстрые"
+    nodes: list[dict[str, Any]] = [
+        {"type": "text", "id": "quick_title", "text": section_title},
+    ]
+    buttons: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        action = item.get("action")
+        if not isinstance(action, dict):
+            continue
+        action_type = str(action.get("type") or "").strip()
+        if not action_type:
+            continue
+        btn_id = str(item.get("id") or f"qa_{index}").strip() or f"qa_{index}"
+        label = str(item.get("label") or action_type).strip() or action_type
+        # ``action`` (not action_id) so cancel_job and form events stay separate.
+        buttons.append(
+            {
+                "type": "button",
+                "id": btn_id,
+                "label": label,
+                "action": action,
+            }
+        )
+    if not buttons:
+        return []
+    nodes.append(
+        {
+            "type": "hstack",
+            "id": "quick_actions",
+            "spacing": 8,
+            "children": buttons,
+        }
+    )
+    return nodes
+
+
 async def compute(
     board_meta: dict[str, Any],
     definition: dict[str, Any],
@@ -78,6 +125,8 @@ async def compute(
     ]
     if tip:
         children.append({"type": "callout", "id": "tip", "text": tip, "variant": "tip"})
+
+    children.extend(_quick_action_nodes(definition, labels if isinstance(labels, dict) else {}))
 
     if not jobs:
         children.append({"type": "callout", "id": "empty", "text": empty, "variant": "info"})
