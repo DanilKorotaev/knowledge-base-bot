@@ -191,6 +191,54 @@ class TestBoardProvidersExtra(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_system_query_jobs_quick_actions(self) -> None:
+        async def _run() -> None:
+            from utils.db_helpers import get_db
+            from kb_app_api.boards.providers import system_query_jobs
+
+            db = await get_db()
+            user = await db.ensure_user(9000000009000088, "boards-prov")
+            out = await system_query_jobs.compute(
+                {"id": "active-jobs", "title": "Jobs", "kind": "system", "sort_order": 0},
+                {
+                    "provider": "system_query_jobs",
+                    "labels": {
+                        "title": "Jobs",
+                        "empty": "None",
+                        "quick_title": "Quick",
+                    },
+                    "quick_actions": [
+                        {
+                            "id": "qa_boards",
+                            "label": "Overview",
+                            "action": {"type": "open_tab", "tab": "boards"},
+                        },
+                        {
+                            "id": "qa_alert",
+                            "label": "Ping",
+                            "action": {
+                                "type": "alert",
+                                "title": "Actions",
+                                "message": "ok",
+                            },
+                        },
+                    ],
+                },
+                user_id=int(user["id"]),
+            )
+            children = out["document"]["screen"]["children"]
+            ids = [c.get("id") for c in children]
+            self.assertIn("quick_title", ids)
+            self.assertIn("quick_actions", ids)
+            row = next(c for c in children if c.get("id") == "quick_actions")
+            btns = row.get("children") or []
+            self.assertEqual(len(btns), 2)
+            self.assertEqual(btns[0].get("action", {}).get("type"), "open_tab")
+            self.assertNotIn("action_id", btns[0])
+            self.assertIn("None", [c.get("text") for c in children])
+
+        asyncio.run(_run())
+
     def test_system_query_jobs_shows_timer(self) -> None:
         async def _run() -> None:
             from utils.db_helpers import get_db
