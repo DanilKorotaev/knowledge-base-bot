@@ -1,19 +1,22 @@
-"""Generic proxy: named upstream → Structured UI JSON (no domain hardcode).
+"""Proxy Structured UI by absolute URL (template/URL come from Actions JSON).
 
-Env: ``REMOTE_UI_UPSTREAMS=lyrics=http://127.0.0.1:8095``
+Env only filters **hosts** (and schemes) — no named upstream map:
 
-Client: ``GET /api/remote-ui/lyrics/v1/ui/home`` → ``http://127.0.0.1:8095/v1/ui/home``
+    REMOTE_UI_HOST_ALLOWLIST=127.0.0.1,localhost,lyrics.coredan.ru
+
+Client (after resolving ``{{q}}`` / ``{{shared_url}}`` in the action URL):
+
+    GET /api/remote-ui?url=http%3A%2F%2F127.0.0.1%3A8095%2Fv1%2Fui%2Fhome
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import Annotated, Any
-from urllib.parse import urljoin
+from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from config import config
 from kb_app_api.deps import require_bearer
@@ -23,40 +26,49 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/remote-ui", tags=["remote-ui"])
 
-_UPSTREAM_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+def _host_allowed(hostname: str) -> bool:
+    allow = {h.lower() for h in (config.REMOTE_UI_HOST_ALLOWLIST or []) if h}
+    if not allow:
+        return False
+    host = (hostname or "").strip().lower()
+    if not host:
+        return False
+    # strip IPv6 brackets
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host in allow
 
 
-def _upstream_base(name: str) -> str:
-    key = name.strip().lower()
-    if not _UPSTREAM_NAME_RE.match(key):
-        raise APIError("bad_request", "Invalid upstream name", status_code=400)
-    base = (config.REMOTE_UI_UPSTREAMS or {}).get(key)
-    if not base:
+def _validate_target(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        raise APIError("bad_request", "Missing url query parameter", status_code=400)
+    parsed = urlparse(raw)
+    scheme = (parsed.scheme or "").lower()
+    allowed_schemes = {
+        s.lower() for s in (config.REMOTE_UI_ALLOWED_SCHEMES or ["http", "https"]) if s
+    }
+    if scheme not in allowed_schemes:
         raise APIError(
-            "not_found",
-            f"Unknown remote-ui upstream: {key}",
-            status_code=404,
+            "bad_request",
+            f"URL scheme not allowed (need one of {sorted(allowed_schemes)})",
+            status_code=400,
         )
-    return base
+    if not parsed.hostname:
+        raise APIError("bad_request", "URL must include a host", status_code=400)
+    if parsed.username or parsed.password:
+        raise APIError("bad_request", "URL must not include credentials", status_code=400)
+    if not _host_allowed(parsed.hostname):
+        raise APIError(
+            "forbidden",
+            "Host is not in REMOTE_UI_HOST_ALLOWLIST",
+            status_code=403,
+        )
+    return raw
 
 
-@router.api_route(
-    "/{upstream}/{path:path}",
-    methods=["GET", "POST"],
-    dependencies=[Depends(require_bearer)],
-)
-async def proxy_remote_ui(
-    upstream: str,
-    path: str,
-    request: Request,
-) -> Response:
-    """Forward to a configured upstream; return JSON body as-is."""
-    base = _upstream_base(upstream)
-    # urljoin needs trailing slash on base when path has no leading slash handling
-    target = urljoin(base.rstrip("/") + "/", path.lstrip("/"))
-    if request.url.query:
-        target = f"{target}?{request.url.query}"
-
+async def _forward(method: str, target: str, request: Request) -> Response:
     timeout = float(config.REMOTE_UI_TIMEOUT_SEC or 12)
     max_bytes = int(config.REMOTE_UI_MAX_BYTES or 512 * 1024)
     headers = {
@@ -64,7 +76,7 @@ async def proxy_remote_ui(
         "User-Agent": "kb-app-api-remote-ui/1",
     }
     body: bytes | None = None
-    if request.method.upper() == "POST":
+    if method == "POST":
         body = await request.body()
         if len(body) > max_bytes:
             raise APIError("bad_request", "Request body too large", status_code=413)
@@ -75,17 +87,17 @@ async def proxy_remote_ui(
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             upstream_resp = await client.request(
-                request.method.upper(),
+                method,
                 target,
                 content=body,
                 headers=headers,
             )
     except httpx.TimeoutException as exc:
-        logger.warning("remote-ui timeout upstream=%s err=%s", upstream, exc)
-        raise APIError("upstream_timeout", "Remote UI upstream timed out", status_code=504) from exc
+        logger.warning("remote-ui timeout url=%s err=%s", target, exc)
+        raise APIError("upstream_timeout", "Remote UI timed out", status_code=504) from exc
     except httpx.HTTPError as exc:
-        logger.warning("remote-ui fetch failed upstream=%s err=%s", upstream, exc)
-        raise APIError("upstream_error", "Remote UI upstream failed", status_code=502) from exc
+        logger.warning("remote-ui fetch failed url=%s err=%s", target, exc)
+        raise APIError("upstream_error", "Remote UI fetch failed", status_code=502) from exc
 
     content = upstream_resp.content
     if len(content) > max_bytes:
@@ -100,7 +112,21 @@ async def proxy_remote_ui(
 
 
 @router.get("")
-async def list_upstreams(_: Annotated[None, Depends(require_bearer)]) -> dict[str, Any]:
-    """List configured upstream names (no base URLs — avoid leaking internals)."""
-    names = sorted((config.REMOTE_UI_UPSTREAMS or {}).keys())
-    return {"upstreams": names}
+async def proxy_remote_ui_get(
+    request: Request,
+    _: Annotated[None, Depends(require_bearer)],
+    url: str = Query(..., description="Absolute URL to fetch (allowlisted host)"),
+) -> Response:
+    """Fetch Structured UI JSON from an absolute URL (host must be allowlisted)."""
+    target = _validate_target(url)
+    # Always GET the target document; Actions templates are resolved on the client.
+    return await _forward("GET", target, request)
+
+
+@router.get("/allowlist")
+async def list_allowlist(_: Annotated[None, Depends(require_bearer)]) -> dict[str, Any]:
+    """Hosts the proxy will fetch (no secrets)."""
+    return {
+        "hosts": sorted(config.REMOTE_UI_HOST_ALLOWLIST or []),
+        "schemes": sorted(config.REMOTE_UI_ALLOWED_SCHEMES or []),
+    }
