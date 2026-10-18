@@ -10,19 +10,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _parse_remote_ui_upstreams(raw: str) -> dict[str, str]:
-    """Parse ``name=base_url,name2=base_url2`` into a dict (names lowercased)."""
-    out: dict[str, str] = {}
-    for part in (raw or "").split(","):
-        part = part.strip()
-        if not part or "=" not in part:
-            continue
-        name, url = part.split("=", 1)
-        name = name.strip().lower()
-        url = url.strip().rstrip("/")
-        if name and url:
-            out[name] = url
-    return out
+def _parse_host_allowlist(raw: str, *, defaults: Optional[List[str]] = None) -> List[str]:
+    """Comma-separated hostnames/IPs (no schemes, no paths)."""
+    items = [
+        h.strip().lower()
+        for h in (raw or "").split(",")
+        if h.strip()
+    ]
+    if items:
+        return items
+    return list(defaults or [])
 
 
 class Config:
@@ -170,13 +167,21 @@ class Config:
         os.getenv("BOARDS_VAULT_SCRIPT_TIMEOUT_SEC", "30")
     )
 
-    # Named upstreams for generic remote Structured UI proxy:
-    # REMOTE_UI_UPSTREAMS=lyrics=http://127.0.0.1:8095,monitor=https://example
-    REMOTE_UI_UPSTREAMS: dict[str, str] = _parse_remote_ui_upstreams(
-        os.getenv("REMOTE_UI_UPSTREAMS", "")
+    # Host allowlist for GET /api/remote-ui?url=… (full URL lives in Actions JSON).
+    # Env REMOTE_UI_HOST_ALLOWLIST=127.0.0.1,localhost,lyrics.example.com
+    # Empty env → defaults (local mini services). Not a URL map — only hosts/IPs.
+    REMOTE_UI_HOST_ALLOWLIST: List[str] = _parse_host_allowlist(
+        os.getenv("REMOTE_UI_HOST_ALLOWLIST", ""),
+        defaults=["127.0.0.1", "localhost"],
     )
     REMOTE_UI_TIMEOUT_SEC: float = float(os.getenv("REMOTE_UI_TIMEOUT_SEC", "12"))
     REMOTE_UI_MAX_BYTES: int = int(os.getenv("REMOTE_UI_MAX_BYTES", str(512 * 1024)))
+    # Allowed URL schemes for proxied remote UI (http for LAN/Tailscale, https for public).
+    REMOTE_UI_ALLOWED_SCHEMES: List[str] = [
+        s.strip().lower()
+        for s in os.getenv("REMOTE_UI_ALLOWED_SCHEMES", "http,https").split(",")
+        if s.strip()
+    ]
 
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
