@@ -41,6 +41,7 @@ from kb_app_api.routes import (
     jobs,
     me,
     messages,
+    remote_ui,
     sessions,
     share,
     ui_events,
@@ -97,6 +98,7 @@ app.include_router(me.router, prefix="/api")
 app.include_router(health_sync.router, prefix="/api")
 app.include_router(boards.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
+app.include_router(remote_ui.router, prefix="/api")
 
 
 if __name__ == "__main__":

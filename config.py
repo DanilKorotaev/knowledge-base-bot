@@ -10,6 +10,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _parse_remote_ui_upstreams(raw: str) -> dict[str, str]:
+    """Parse ``name=base_url,name2=base_url2`` into a dict (names lowercased)."""
+    out: dict[str, str] = {}
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name, url = part.split("=", 1)
+        name = name.strip().lower()
+        url = url.strip().rstrip("/")
+        if name and url:
+            out[name] = url
+    return out
+
+
 class Config:
     """Конфигурация приложения"""
     
@@ -154,6 +169,14 @@ class Config:
     BOARDS_VAULT_SCRIPT_TIMEOUT_SEC: float = float(
         os.getenv("BOARDS_VAULT_SCRIPT_TIMEOUT_SEC", "30")
     )
+
+    # Named upstreams for generic remote Structured UI proxy:
+    # REMOTE_UI_UPSTREAMS=lyrics=http://127.0.0.1:8095,monitor=https://example
+    REMOTE_UI_UPSTREAMS: dict[str, str] = _parse_remote_ui_upstreams(
+        os.getenv("REMOTE_UI_UPSTREAMS", "")
+    )
+    REMOTE_UI_TIMEOUT_SEC: float = float(os.getenv("REMOTE_UI_TIMEOUT_SEC", "12"))
+    REMOTE_UI_MAX_BYTES: int = int(os.getenv("REMOTE_UI_MAX_BYTES", str(512 * 1024)))
 
     # APNs (push о готовом ответе в чате KB App)
     APNS_KEY_ID: str = os.getenv("APNS_KEY_ID", "")
