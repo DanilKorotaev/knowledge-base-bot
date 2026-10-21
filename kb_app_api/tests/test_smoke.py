@@ -66,6 +66,16 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json().get("status"), "ok")
 
+    def test_metrics_prometheus(self) -> None:
+        r = self.client.get("/metrics")
+        self.assertEqual(r.status_code, 200)
+        body = r.text
+        self.assertIn("http_request", body)
+        self.assertTrue(
+            "process_resident_memory_bytes" in body or "python_info" in body,
+            msg="expected process/python prometheus series",
+        )
+
     def test_sessions_require_bearer(self) -> None:
         r = self.client.get("/api/sessions")
         self.assertEqual(r.status_code, 401)

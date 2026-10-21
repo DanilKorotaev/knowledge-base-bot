@@ -30,6 +30,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
+from kb_app_api.metrics import setup_metrics
 from kb_app_api.routes import (
     attachments,
     auth,
@@ -83,6 +84,8 @@ app.add_middleware(ClientMetadataMiddleware)
 
 app.add_exception_handler(APIError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
+
+setup_metrics(app)
 
 app.include_router(health.router)
 app.include_router(share.router)
