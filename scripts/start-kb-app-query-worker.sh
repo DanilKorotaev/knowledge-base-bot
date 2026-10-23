@@ -26,6 +26,8 @@ export DB_HOST="${DB_HOST:-127.0.0.1}"
 export DB_PORT="${DB_PORT:-5432}"
 export TELEGRAM_PROXY="${TELEGRAM_PROXY:-socks5://127.0.0.1:1080}"
 export OPENAI_PROXY="${OPENAI_PROXY:-socks5://127.0.0.1:1080}"
+# See start-kb-app-api-host.sh — host.docker.internal is for Docker only.
+export NEXTCLOUD_URL="${NEXTCLOUD_URL_HOST:-http://127.0.0.1:8080}"
 if [[ -n "${CURSOR_CLI_PROXY:-}" ]]; then
   case "${CURSOR_CLI_PROXY}" in
     socks5://*|socks://*|socks5h://*)

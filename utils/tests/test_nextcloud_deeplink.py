@@ -14,14 +14,20 @@ def _svc(**kwargs) -> NextCloudService:
     return svc
 
 
-def test_build_nextcloud_deeplink_encodes_user_link_path():
-    link = _svc().build_nextcloud_deeplink("docs/plan.md")
+def test_build_nextcloud_deeplink_encodes_spaces_as_percent20():
+    link = _svc().build_nextcloud_deeplink("docs/my plan.md")
     assert link is not None
     assert link.startswith("nextcloud://open-file?")
+    assert "+" not in link.split("path=", 1)[-1].split("&")[0]
     qs = parse_qs(urlparse(link).query)
     assert qs["user"] == ["danilpdr"]
     assert qs["link"] == ["https://nextcloud.example.com"]
-    assert qs["path"] == ["KnowledgeBase/docs/plan.md"]
+    assert qs["path"] == ["KnowledgeBase/docs/my plan.md"]
+
+
+def test_build_nextcloud_deeplink_prefers_file_id():
+    link = _svc().build_nextcloud_deeplink("docs/x.md", file_id=210190)
+    assert link == "nextcloud://directlink/f/210190"
 
 
 def test_build_nextcloud_deeplink_requires_user_and_base():

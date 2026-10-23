@@ -224,6 +224,7 @@ NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
 NEXTCLOUD_URL=http://host.docker.internal:8080
 NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
 NEXTCLOUD_LINK_MODE=share
+# Host LaunchAgent (kb-app-api-host) overrides host.docker.internal → http://127.0.0.1:8080
 ```
 
 При `LINK_MODE=share` кликабельный URL обычно приходит из OCS (на NC должен быть `overwritehost` = публичный домен). Если всё же пришёл `127.0.0.1` / `localhost` — бот перепишет origin на `NEXTCLOUD_WEB_URL`.
