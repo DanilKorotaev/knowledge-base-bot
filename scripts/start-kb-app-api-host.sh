@@ -24,6 +24,10 @@ export DB_HOST="${DB_HOST:-127.0.0.1}"
 export DB_PORT="${DB_PORT:-5432}"
 export TELEGRAM_PROXY="${TELEGRAM_PROXY:-socks5://127.0.0.1:1080}"
 export OPENAI_PROXY="${OPENAI_PROXY:-socks5://127.0.0.1:1080}"
+# Host process (not Docker): .env may say host.docker.internal (for containers), which
+# does not resolve for LaunchAgent on macOS. Force localhost before Python load_dotenv
+# (dotenv will not override an already-set variable).
+export NEXTCLOUD_URL="${NEXTCLOUD_URL_HOST:-http://127.0.0.1:8080}"
 # CRITICAL: cursor-agent (Node) cannot use SOCKS. Always HTTP CONNECT :8118.
 # Do not default to $OPENAI_PROXY (socks) — that strips HTTPS_PROXY and breaks auth
 # ("The provided API key is invalid" from RU / no egress).

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from requests.auth import HTTPBasicAuth
 from urllib.parse import urljoin, quote, unquote, urlparse, urlunparse, urlencode
-
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -714,22 +713,29 @@ class NextCloudService:
         # URL-encode для параметров
         return f"{web_base}/apps/files/?dir=/{quote(parent_dir)}&scrollto={quote(filename)}"
 
-    def build_nextcloud_deeplink(self, remote_path: str) -> Optional[str]:
+    def build_nextcloud_deeplink(
+        self, remote_path: str, file_id: Optional[int] = None
+    ) -> Optional[str]:
         """
         Deep link into the official Nextcloud mobile app (custom URL scheme).
-        Requires the app account username (NEXTCLOUD_DEEPLINK_USERNAME) and public server URL.
+        Prefer file-id form when known; path form uses %20 (not +) for spaces.
         """
+        if file_id is not None:
+            return f"nextcloud://directlink/f/{int(file_id)}"
+
         web_base = (self.web_url or self.url or "").rstrip("/")
         user = (self.deeplink_username or "").strip()
         if not web_base or not user:
             return None
         full_path = self._get_full_path(remote_path)
+        # quote_plus turns spaces into '+'; NC iOS often treats that literally — use %20.
         query = urlencode(
             {
                 "user": user,
                 "link": web_base,
                 "path": full_path,
-            }
+            },
+            quote_via=quote,
         )
         return f"nextcloud://open-file?{query}"
 
@@ -743,7 +749,7 @@ class NextCloudService:
 
         file_id = await self.get_file_id(remote_path)
         web_url = self.get_web_url(remote_path, file_id=file_id) or None
-        deeplink = self.build_nextcloud_deeplink(remote_path)
+        deeplink = self.build_nextcloud_deeplink(remote_path, file_id=file_id)
         return {
             "web_url": web_url,
             "nextcloud_deeplink": deeplink,
