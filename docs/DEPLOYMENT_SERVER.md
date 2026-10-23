@@ -211,7 +211,7 @@ MINIAPP_PORT=8080
 
 | Переменная | Назначение |
 |------------|------------|
-| `NEXTCLOUD_URL` | WebDAV sync + OCS API (создание share). На Mac mini host: можно `http://127.0.0.1:8080` |
+| `NEXTCLOUD_URL` | WebDAV sync + OCS API (создание share). На том же хосте: `http://host.docker.internal:8080` из Docker-контейнера или `http://127.0.0.1:8080` с хоста |
 | `NEXTCLOUD_WEB_URL` | Публичная база для `direct`-ссылок и подстраховки, если OCS вернул localhost. Обычно `https://nextcloud.example.ru` |
 
 ```bash
@@ -219,8 +219,8 @@ MINIAPP_PORT=8080
 NEXTCLOUD_URL=https://nextcloud.example.ru
 NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
 
-# Split на Mac mini (бот + NC на одном хосте):
-NEXTCLOUD_URL=http://127.0.0.1:8080
+# Split на Mac mini (бот в Docker + NC на том же хосте):
+NEXTCLOUD_URL=http://host.docker.internal:8080
 NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
 NEXTCLOUD_LINK_MODE=share
 ```
