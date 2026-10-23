@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from requests.auth import HTTPBasicAuth
-from urllib.parse import urljoin, quote, unquote, urlparse, urlunparse
+from urllib.parse import urljoin, quote, unquote, urlparse, urlunparse, urlencode
 
 from config import config
 
@@ -73,6 +73,9 @@ class NextCloudService:
         self.web_url = getattr(config, 'NEXTCLOUD_WEB_URL', None) or self.url
         self.link_mode = getattr(config, 'NEXTCLOUD_LINK_MODE', 'disabled')
         self.share_expiration_hours = getattr(config, 'NEXTCLOUD_SHARE_EXPIRATION_HOURS', 24)
+        self.deeplink_username = (
+            getattr(config, "NEXTCLOUD_DEEPLINK_USERNAME", None) or self.username
+        )
         
         if not self.url or not self.username or not self.password:
             logger.warning("NextCloud не настроен. Синхронизация будет отключена.")
@@ -710,6 +713,43 @@ class NextCloudService:
         
         # URL-encode для параметров
         return f"{web_base}/apps/files/?dir=/{quote(parent_dir)}&scrollto={quote(filename)}"
+
+    def build_nextcloud_deeplink(self, remote_path: str) -> Optional[str]:
+        """
+        Deep link into the official Nextcloud mobile app (custom URL scheme).
+        Requires the app account username (NEXTCLOUD_DEEPLINK_USERNAME) and public server URL.
+        """
+        web_base = (self.web_url or self.url or "").rstrip("/")
+        user = (self.deeplink_username or "").strip()
+        if not web_base or not user:
+            return None
+        full_path = self._get_full_path(remote_path)
+        query = urlencode(
+            {
+                "user": user,
+                "link": web_base,
+                "path": full_path,
+            }
+        )
+        return f"nextcloud://open-file?{query}"
+
+    async def build_authenticated_open_links(self, remote_path: str) -> Dict[str, Any]:
+        """
+        Non-public open targets for KB App: authenticated web URL + optional app deep link.
+        Does not create OCS share links.
+        """
+        if not self.enabled:
+            return {"web_url": None, "nextcloud_deeplink": None, "path": remote_path}
+
+        file_id = await self.get_file_id(remote_path)
+        web_url = self.get_web_url(remote_path, file_id=file_id) or None
+        deeplink = self.build_nextcloud_deeplink(remote_path)
+        return {
+            "web_url": web_url,
+            "nextcloud_deeplink": deeplink,
+            "path": remote_path,
+            "nc_file_id": file_id,
+        }
     
     async def get_file_link(self, remote_path: str) -> Optional[str]:
         """

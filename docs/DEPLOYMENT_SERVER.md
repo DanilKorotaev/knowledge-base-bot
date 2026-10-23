@@ -213,6 +213,7 @@ MINIAPP_PORT=8080
 |------------|------------|
 | `NEXTCLOUD_URL` | WebDAV sync + OCS API (создание share). На том же хосте: `http://host.docker.internal:8080` из Docker-контейнера или `http://127.0.0.1:8080` с хоста |
 | `NEXTCLOUD_WEB_URL` | Публичная база для `direct`-ссылок и подстраховки, если OCS вернул localhost. Обычно `https://nextcloud.example.ru` |
+| `NEXTCLOUD_DEEPLINK_USERNAME` | Логин аккаунта в Nextcloud iOS/Android app для `nextcloud://open-file` (часто ≠ `NEXTCLOUD_BOT_USERNAME`) |
 
 ```bash
 # Одинаковые (как раньше / бот не на той же машине, что NC):

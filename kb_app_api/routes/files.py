@@ -79,19 +79,14 @@ class ShareLinkBody(BaseModel):
     file_id: str = Field(..., description="Идентификатор записи изменения (как в GET /changes)")
 
 
-@router.post("/share-link")
-async def create_file_share_link(
-    user: Annotated[dict[str, Any], Depends(get_api_user)],
-    body: ShareLinkBody,
-) -> dict[str, Any]:
-    raw = body.file_id.strip()
-    if not raw:
-        raise APIError("validation_error", "Пустой file_id", detail="file_id")
-    try:
-        change_id = int(raw)
-    except ValueError:
-        raise APIError("validation_error", "file_id должен быть числом", detail=body.file_id)
+class OpenLinkBody(BaseModel):
+    file_id: str = Field(..., description="Идентификатор записи изменения (как в GET /changes)")
 
+
+async def _authorized_file_change(
+    change_id: int,
+    user_id: int,
+) -> dict[str, Any]:
     from utils.db_helpers import get_db
 
     db = await get_db()
@@ -100,10 +95,65 @@ async def create_file_share_link(
         raise APIError("not_found", "Изменение не найдено", status_code=404)
 
     session = await db.get_session(change["session_id"])
-    if not session or session["user_id"] != user["id"]:
+    if not session or session["user_id"] != user_id:
         raise APIError("forbidden", "Нет доступа к этому изменению", status_code=403)
+    return change
 
+
+def _parse_change_id(raw: str, original: str) -> int:
+    value = raw.strip()
+    if not value:
+        raise APIError("validation_error", "Пустой file_id", detail="file_id")
+    try:
+        return int(value)
+    except ValueError:
+        raise APIError("validation_error", "file_id должен быть числом", detail=original)
+
+
+@router.post("/open-link")
+async def create_file_open_link(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    body: OpenLinkBody,
+) -> dict[str, Any]:
+    """Authenticated web URL + optional nextcloud:// deep link (no public share)."""
+    change_id = _parse_change_id(body.file_id, body.file_id)
+    change = await _authorized_file_change(change_id, user["id"])
     remote_path = change["file_path"]
+
+    nextcloud = NextCloudService()
+    if not nextcloud.enabled:
+        raise APIError(
+            "nextcloud_unavailable",
+            "Nextcloud не настроен, ссылка на файл недоступна",
+            status_code=503,
+        )
+
+    links = await nextcloud.build_authenticated_open_links(remote_path)
+    web_url = links.get("web_url")
+    if not web_url:
+        raise APIError(
+            "open_unavailable",
+            "Не удалось построить ссылку на текущую версию файла",
+            status_code=409,
+        )
+
+    return {
+        "web_url": web_url,
+        "nextcloud_deeplink": links.get("nextcloud_deeplink"),
+        "path": remote_path,
+        "change_id": str(change_id),
+    }
+
+
+@router.post("/share-link")
+async def create_file_share_link(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+    body: ShareLinkBody,
+) -> dict[str, Any]:
+    change_id = _parse_change_id(body.file_id, body.file_id)
+    change = await _authorized_file_change(change_id, user["id"])
+    remote_path = change["file_path"]
+
     nextcloud = NextCloudService()
     if not nextcloud.enabled:
         raise APIError(

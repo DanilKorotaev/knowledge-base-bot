@@ -290,6 +290,42 @@ class TestKbAppApiSmoke(unittest.TestCase):
         body = response.json()
         self.assertEqual(body.get("error", {}).get("code"), "nextcloud_unavailable")
 
+    def test_file_open_link_endpoint_requires_nextcloud(self) -> None:
+        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        create = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "Files open"},
+        )
+        self.assertEqual(create.status_code, 201)
+        sid = create.json()["session"]["id"]
+
+        from utils.db_helpers import get_db
+
+        import asyncio
+
+        async def seed() -> str:
+            db = await get_db()
+            row = await db.log_file_change(
+                session_id=int(sid),
+                file_path="notes/open.md",
+                change_type="modified",
+                old_content="before",
+                new_content="after",
+            )
+            return str(row["id"])
+
+        change_id = asyncio.run(seed())
+
+        response = self.client.post(
+            "/api/files/open-link",
+            headers=headers,
+            json={"file_id": change_id},
+        )
+        self.assertEqual(response.status_code, 503)
+        body = response.json()
+        self.assertEqual(body.get("error", {}).get("code"), "nextcloud_unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()
