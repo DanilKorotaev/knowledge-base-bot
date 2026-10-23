@@ -113,13 +113,13 @@ CURSOR_MODEL=auto
 # ============================================
 # NextCloud
 # ============================================
-# URL NextCloud (ваш существующий поддомен)
+# API (WebDAV/OCS). Может совпадать с WEB или быть localhost на том же хосте.
 NEXTCLOUD_URL=https://nextcloud.example.ru
 NEXTCLOUD_BOT_USERNAME=telegram_knowledge_bot
 NEXTCLOUD_BOT_PASSWORD=your_app_password_here
 NEXTCLOUD_KNOWLEDGE_BASE_PATH=/KnowledgeBase
 
-# Ссылки на файлы в ответах бота (опционально)
+# Публичная база ссылок пользователю (может = NEXTCLOUD_URL). См. ниже «API vs публичные».
 NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
 # NEXTCLOUD_LINK_MODE=disabled  # "share" | "direct" | "disabled"
 
@@ -205,17 +205,29 @@ MINIAPP_PORT=8080
 # MINIAPP_CORS_ORIGINS=https://knowledgebotminiapp.example.ru
 ```
 
-### Важно: NEXTCLOUD_URL — только внешний домен
+### NextCloud URLs: API vs публичные ссылки
 
-Бот работает **внутри Docker-контейнера**, но `NEXTCLOUD_URL` **обязательно** должен быть вашим внешним доменом:
+Две независимые переменные (могут быть **одинаковыми** или **разными**):
+
+| Переменная | Назначение |
+|------------|------------|
+| `NEXTCLOUD_URL` | WebDAV sync + OCS API (создание share). На Mac mini host: можно `http://127.0.0.1:8080` |
+| `NEXTCLOUD_WEB_URL` | Публичная база для `direct`-ссылок и подстраховки, если OCS вернул localhost. Обычно `https://nextcloud.example.ru` |
 
 ```bash
+# Одинаковые (как раньше / бот не на той же машине, что NC):
 NEXTCLOUD_URL=https://nextcloud.example.ru
+NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
+
+# Split на Mac mini (бот + NC на одном хосте):
+NEXTCLOUD_URL=http://127.0.0.1:8080
+NEXTCLOUD_WEB_URL=https://nextcloud.example.ru
+NEXTCLOUD_LINK_MODE=share
 ```
 
-**Почему нельзя использовать внутренний Docker URL?** Бот генерирует кликабельные ссылки на файлы в NextCloud (при `NEXTCLOUD_LINK_MODE=share` или `direct`) и отправляет их пользователю в Telegram. Эти ссылки строятся на основе `NEXTCLOUD_URL` (или `NEXTCLOUD_WEB_URL`). Если указать внутренний адрес (`http://nextcloud:80` или `http://172.17.0.1:PORT`), ссылки будут нерабочими — пользователь не сможет открыть их в браузере.
+При `LINK_MODE=share` кликабельный URL обычно приходит из OCS (на NC должен быть `overwritehost` = публичный домен). Если всё же пришёл `127.0.0.1` / `localhost` — бот перепишет origin на `NEXTCLOUD_WEB_URL`.
 
-Путь: Бот из контейнера → внешний URL → Nginx → NextCloud. Это работает надёжно.
+Не путать с `KB_APP_PUBLIC_BASE_URL` (шаринг чатов KB App, не файлы Nextcloud).
 
 ---
 
