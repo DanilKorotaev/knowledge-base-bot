@@ -53,6 +53,9 @@ class Config:
     NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")
     NEXTCLOUD_LINK_MODE: str = os.getenv("NEXTCLOUD_LINK_MODE", "disabled")  # "share" | "direct" | "disabled"
     NEXTCLOUD_SHARE_EXPIRATION_HOURS: int = int(os.getenv("NEXTCLOUD_SHARE_EXPIRATION_HOURS", "24"))
+    # Username of the account logged into the Nextcloud iOS/Android app (for nextcloud:// deep links).
+    # Often differs from NEXTCLOUD_BOT_USERNAME. Fallback → bot username.
+    NEXTCLOUD_DEEPLINK_USERNAME: Optional[str] = os.getenv("NEXTCLOUD_DEEPLINK_USERNAME")
     
     # Local Knowledge Base
     LOCAL_KB_PATH: Path = Path(os.getenv("LOCAL_KB_PATH", "/var/knowledge-base-bot/kb"))
