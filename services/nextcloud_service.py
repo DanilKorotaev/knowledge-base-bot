@@ -8,23 +8,68 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from requests.auth import HTTPBasicAuth
-from urllib.parse import urljoin, quote, unquote
+from urllib.parse import urljoin, quote, unquote, urlparse, urlunparse
 
 from config import config
 
 logger = logging.getLogger(__name__)
+
+# Хосты, которые нельзя отдавать пользователю в кликабельных ссылках
+_PRIVATE_SHARE_HOSTS = frozenset(
+    {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "0.0.0.0",
+        "host.docker.internal",
+    }
+)
+
+
+def rewrite_public_nextcloud_url(candidate: str, public_base: Optional[str]) -> str:
+    """
+    Если OCS/сервер вернул ссылку на loopback/docker-internal host —
+    заменить origin на public_base (NEXTCLOUD_WEB_URL), сохранив path/query.
+    Если public_base не задан или host уже публичный — вернуть candidate как есть.
+    """
+    if not candidate or not public_base:
+        return candidate
+    try:
+        parsed = urlparse(candidate)
+        public = urlparse(public_base)
+        host = (parsed.hostname or "").lower()
+        if not host:
+            return candidate
+        is_private = host in _PRIVATE_SHARE_HOSTS or host.endswith(".local")
+        if not is_private:
+            return candidate
+        if not public.scheme or not public.netloc:
+            return candidate
+        return urlunparse(
+            (
+                public.scheme,
+                public.netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+    except Exception:
+        return candidate
 
 
 class NextCloudService:
     """Сервис для работы с NextCloud через WebDAV и OCS API"""
     
     def __init__(self):
+        # API base (sync / OCS) — может быть localhost
         self.url = config.NEXTCLOUD_URL
         self.username = config.NEXTCLOUD_BOT_USERNAME
         self.password = config.NEXTCLOUD_BOT_PASSWORD
         self.base_path = config.NEXTCLOUD_KNOWLEDGE_BASE_PATH
         
-        # Настройки ссылок
+        # Публичная база ссылок — может совпадать с url или быть доменом
         self.web_url = getattr(config, 'NEXTCLOUD_WEB_URL', None) or self.url
         self.link_mode = getattr(config, 'NEXTCLOUD_LINK_MODE', 'disabled')
         self.share_expiration_hours = getattr(config, 'NEXTCLOUD_SHARE_EXPIRATION_HOURS', 24)
@@ -38,12 +83,18 @@ class NextCloudService:
             self.url = self.url.rstrip('/')
             if self.web_url:
                 self.web_url = self.web_url.rstrip('/')
-            # WebDAV base URL
+            # WebDAV base URL (всегда через NEXTCLOUD_URL)
             self.webdav_url = f"{self.url}/remote.php/dav/files/{self.username}"
-            # OCS Share API base URL
+            # OCS Share API (создание share — тоже через NEXTCLOUD_URL; публичный URL в ответе)
             self.ocs_share_url = f"{self.url}/ocs/v2.php/apps/files_sharing/api/v1/shares"
             # Убрать leading slash из base_path
             self.base_path = self.base_path.lstrip('/')
+            if self.web_url != self.url:
+                logger.info(
+                    "NextCloud API=%s public_web=%s (split URLs)",
+                    self.url,
+                    self.web_url,
+                )
     
     def _get_full_path(self, relative_path: str) -> str:
         """Получить полный путь в NextCloud"""
@@ -513,8 +564,19 @@ class NextCloudService:
             share_id = ocs_data.get('id')
             
             if share_url:
-                logger.debug(f"Создана share-ссылка для {remote_path}: {share_url} (id={share_id}, expire={expire_date})")
-                return share_url
+                public_url = rewrite_public_nextcloud_url(share_url, self.web_url)
+                if public_url != share_url:
+                    logger.info(
+                        "Share URL rewritten for user: %s → %s (id=%s)",
+                        share_url,
+                        public_url,
+                        share_id,
+                    )
+                logger.debug(
+                    f"Создана share-ссылка для {remote_path}: {public_url} "
+                    f"(id={share_id}, expire={expire_date})"
+                )
+                return public_url
             else:
                 logger.warning(f"OCS Share API вернул ответ без URL для {remote_path}: {result}")
                 return None

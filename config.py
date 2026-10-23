@@ -38,14 +38,19 @@ class Config:
     # Модель для Cursor CLI: "auto"/"default" → --model auto (пул Auto); иначе --model как есть
     CURSOR_MODEL: str = os.getenv("CURSOR_MODEL", "auto")
     
-    # NextCloud
+    # NextCloud — два независимых URL (могут совпадать или различаться):
+    # NEXTCLOUD_URL     — API для бота: WebDAV sync + OCS (создание share). Можно http://127.0.0.1:8080 на mini.
+    # NEXTCLOUD_WEB_URL — публичная база для ссылок пользователю (direct /f/… и rewrite localhost из OCS).
+    #                     Если не задан → fallback на NEXTCLOUD_URL.
+    # Share-ссылки (LINK_MODE=share): URL в основном из ответа OCS (overwritehost на NC);
+    # если OCS вернул localhost — подменяем хост на NEXTCLOUD_WEB_URL.
+    # Не путать с KB_APP_PUBLIC_BASE_URL (шаринг чатов KB App).
     NEXTCLOUD_URL: Optional[str] = os.getenv("NEXTCLOUD_URL")
     NEXTCLOUD_BOT_USERNAME: Optional[str] = os.getenv("NEXTCLOUD_BOT_USERNAME")
     NEXTCLOUD_BOT_PASSWORD: Optional[str] = os.getenv("NEXTCLOUD_BOT_PASSWORD")
     NEXTCLOUD_KNOWLEDGE_BASE_PATH: str = os.getenv("NEXTCLOUD_KNOWLEDGE_BASE_PATH", "/KnowledgeBase")
-    
-    # NextCloud Web Links
-    NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")  # Fallback на NEXTCLOUD_URL
+
+    NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")
     NEXTCLOUD_LINK_MODE: str = os.getenv("NEXTCLOUD_LINK_MODE", "disabled")  # "share" | "direct" | "disabled"
     NEXTCLOUD_SHARE_EXPIRATION_HOURS: int = int(os.getenv("NEXTCLOUD_SHARE_EXPIRATION_HOURS", "24"))
     
