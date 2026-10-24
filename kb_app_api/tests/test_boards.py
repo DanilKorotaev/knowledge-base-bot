@@ -111,7 +111,7 @@ class BoardsRouteTests(unittest.TestCase):
         import config as config_mod
         import kb_app_api.boards.repository as repo
 
-    os.environ["ACCESS_MODE"] = "open"
+        os.environ["ACCESS_MODE"] = "open"
         os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
         config_mod.config.KB_APP_JWT_SECRET = "test-jwt-secret"
         config_mod.config.KB_APP_OPEN_SIGNUP = True
