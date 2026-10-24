@@ -19,6 +19,7 @@ from config import config
 
 from kb_app_api.client_metadata import structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
+from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.query_jobs.sse_bridge import enqueue_and_bridge_pipeline, run_query_inline_or_job
@@ -221,8 +222,11 @@ def _parse_use_kb(value: str) -> bool:
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
-def _session_upload_root(session_id: int) -> Path:
-    kb_root = Path(config.LOCAL_KB_PATH)
+def _session_upload_root(session_id: int, user: dict | None = None) -> Path:
+    if user and user.get("vault_root"):
+        kb_root = Path(user["vault_root"])
+    else:
+        kb_root = Path(config.LOCAL_KB_PATH)
     kb_root.mkdir(parents=True, exist_ok=True)
     upload_root = kb_root / ".kb_app_api_uploads" / str(session_id)
     upload_root.mkdir(parents=True, exist_ok=True)
@@ -508,7 +512,7 @@ async def post_message(
     await require_session_for_user(sid, user["id"])
 
     wants_sse = accept and "text/event-stream" in accept.lower()
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     if wants_sse:
@@ -605,7 +609,7 @@ async def post_attachment(
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
@@ -614,9 +618,7 @@ async def post_attachment(
         raise APIError("validation_error", "Пустой файл", detail="file")
 
     safe = _safe_filename(file.filename)
-    kb_root = Path(config.LOCAL_KB_PATH)
-    kb_root.mkdir(parents=True, exist_ok=True)
-    upload_root = kb_root / ".kb_app_api_uploads" / str(sid)
+    upload_root = _session_upload_root(sid, user)
     upload_root.mkdir(parents=True, exist_ok=True)
     dest = upload_root / f"{uuid.uuid4().hex[:10]}_{safe}"
     dest.write_bytes(data)
@@ -694,7 +696,7 @@ async def post_voice_message(
     file_size = len(data)
 
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
@@ -805,7 +807,7 @@ async def post_compose_message(
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     use_kb = _parse_use_kb(use_knowledge_base)
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from kb_app_api.client_metadata import structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
+from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
@@ -101,7 +102,7 @@ async def voice_query(
     await require_session_for_user(sid, user["id"])
 
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     text_for_pipeline: str

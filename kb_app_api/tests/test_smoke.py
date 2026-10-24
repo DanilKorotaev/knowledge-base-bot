@@ -38,8 +38,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "smoke-test-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000001"
+    os.environ["KB_APP_JWT_SECRET"] = "smoke-test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
     Path(_kb_dir).mkdir(parents=True, exist_ok=True)
@@ -58,8 +59,10 @@ class TestKbAppApiSmoke(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         from kb_app_api.main import app
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
 
         cls.client = TestClient(app)
+        cls.headers = bearer_headers(cls.client)
 
     def test_health_ok(self) -> None:
         r = self.client.get("/health")
@@ -80,10 +83,15 @@ class TestKbAppApiSmoke(unittest.TestCase):
         r = self.client.get("/api/sessions")
         self.assertEqual(r.status_code, 401)
 
+    def test_auth_me(self) -> None:
+        r = self.client.get("/api/auth/me", headers=self.headers)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["user"]["login"], "smoketest")
+
     def test_sessions_with_bearer_empty(self) -> None:
         r = self.client.get(
             "/api/sessions",
-            headers={"Authorization": "Bearer smoke-test-bearer"},
+            headers=self.headers,
         )
         self.assertEqual(r.status_code, 200)
         data = r.json()
@@ -93,7 +101,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
     def test_create_session(self) -> None:
         r = self.client.post(
             "/api/sessions",
-            headers={"Authorization": "Bearer smoke-test-bearer"},
+            headers=self.headers,
             json={"title": "Smoke"},
         )
         self.assertEqual(r.status_code, 201)
@@ -104,7 +112,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
     def test_messages_include_content_format(self) -> None:
         create = self.client.post(
             "/api/sessions",
-            headers={"Authorization": "Bearer smoke-test-bearer"},
+            headers=self.headers,
             json={"title": "Rich"},
         )
         sid = create.json()["session"]["id"]
@@ -133,7 +141,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
 
         r = self.client.get(
             f"/api/sessions/{sid}/messages",
-            headers={"Authorization": "Bearer smoke-test-bearer"},
+            headers=self.headers,
         )
         self.assertEqual(r.status_code, 200)
         data = r.json()
@@ -161,7 +169,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
     def test_voice_transcribe_rejects_empty_audio(self) -> None:
         r = self.client.post(
             "/api/query/voice/transcribe",
-            headers={"Authorization": "Bearer smoke-test-bearer"},
+            headers=self.headers,
             files={"audio": ("note.m4a", b"", "audio/mp4")},
         )
         self.assertEqual(r.status_code, 422)
@@ -175,7 +183,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertEqual(r.status_code, 401)
 
     def test_voice_message_rejects_empty_content(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post("/api/sessions", headers=headers, json={"title": "Voice msg"})
         sid = create.json()["session"]["id"]
         r = self.client.post(
@@ -187,7 +195,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertEqual(r.status_code, 422)
 
     def test_create_session_without_knowledge_base(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post(
             "/api/sessions",
             headers=headers,
@@ -198,7 +206,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertFalse(session["use_knowledge_base"])
 
     def test_delete_and_patch_session(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post(
             "/api/sessions",
             headers=headers,
@@ -228,7 +236,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertNotIn(sid, ids_after)
 
     def test_archive_and_restore_session(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post(
             "/api/sessions",
             headers=headers,
@@ -255,7 +263,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertIn(sid, [s["id"] for s in listed_again.json()["sessions"]])
 
     def test_file_share_link_endpoint_requires_nextcloud(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post(
             "/api/sessions",
             headers=headers,
@@ -291,7 +299,7 @@ class TestKbAppApiSmoke(unittest.TestCase):
         self.assertEqual(body.get("error", {}).get("code"), "nextcloud_unavailable")
 
     def test_file_open_link_endpoint_requires_nextcloud(self) -> None:
-        headers = {"Authorization": "Bearer smoke-test-bearer"}
+        headers = self.headers
         create = self.client.post(
             "/api/sessions",
             headers=headers,

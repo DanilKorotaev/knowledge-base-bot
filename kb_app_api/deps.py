@@ -1,55 +1,93 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
+import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from config import config
 from kb_app_api.errors import APIError
+from kb_app_api.jwt_tokens import decode_access_token
+from kb_app_api.vault_paths import absolute_vault_root, ensure_vault_dir
 
 logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
 
 
-async def require_bearer(
+async def get_api_user_optional(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
-) -> None:
-    expected = config.KB_APP_API_TOKEN
-    if not expected:
-        logger.error("KB_APP_API_TOKEN is not set")
-        raise APIError(
-            "service_unavailable",
-            "KB App API не сконфигурирован",
-            status_code=503,
-        )
+) -> Optional[dict[str, Any]]:
     if creds is None or creds.scheme.lower() != "bearer":
-        raise APIError("unauthorized", "Нужен заголовок Authorization: Bearer", status_code=401)
-    if creds.credentials != expected:
-        raise APIError("forbidden", "Неверный токен", status_code=403)
+        return None
+    try:
+        return await _user_from_access_token(creds.credentials)
+    except APIError:
+        return None
 
 
 async def get_api_user(
     request: Request,
-    _: Annotated[None, Depends(require_bearer)],
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> dict[str, Any]:
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise APIError(
+            "unauthorized",
+            "Нужен заголовок Authorization: Bearer <access_token>",
+            status_code=401,
+        )
+    return await _user_from_access_token(creds.credentials)
+
+
+async def _user_from_access_token(token: str) -> dict[str, Any]:
     from utils.db_helpers import get_db
 
-    telegram_id = config.KB_APP_API_TELEGRAM_ID
-    if request.headers.get("X-KB-App-E2E") == "1":
-        telegram_id = config.KB_APP_API_TEST_TELEGRAM_ID
+    try:
+        payload = decode_access_token(token)
+    except jwt.ExpiredSignatureError as exc:
+        raise APIError("unauthorized", "Access token истёк", status_code=401) from exc
+    except jwt.InvalidTokenError as exc:
+        raise APIError("unauthorized", "Неверный access token", status_code=401) from exc
+
+    if payload.get("typ") not in (None, "access"):
+        raise APIError("unauthorized", "Неверный тип токена", status_code=401)
+
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise APIError("unauthorized", "Неверный access token", status_code=401) from exc
 
     db = await get_db()
-    username = "kb-app-api" if telegram_id == config.KB_APP_API_TELEGRAM_ID else "kb-app-api-e2e"
-    user = await db.ensure_user(telegram_id, username)
-    if config.ACCESS_MODE == "restricted" and not config.KB_APP_API_BYPASS_ACCESS_CHECK:
-        if not user.get("is_allowed"):
+    user = await db.get_user_by_id(user_id)
+    if not user or not user.get("login"):
+        raise APIError("unauthorized", "Пользователь не найден", status_code=401)
+
+    if config.ACCESS_MODE == "restricted" and not user.get("is_allowed"):
+        if not config.KB_APP_API_BYPASS_ACCESS_CHECK:
             raise APIError(
                 "forbidden",
-                "В режиме restricted пользователь API не разрешён (is_allowed=false). "
-                "Разрешите доступ через бота или задайте KB_APP_API_BYPASS_ACCESS_CHECK=true только для отладки.",
+                "Пользователь не разрешён (is_allowed=false)",
                 status_code=403,
             )
+
+    try:
+        vault = ensure_vault_dir(user)
+        user = dict(user)
+        user["vault_root"] = str(vault)
+        user["vault_root_absolute"] = str(absolute_vault_root(user))
+    except ValueError as exc:
+        logger.error("vault resolve failed user=%s: %s", user_id, exc)
+        raise APIError("internal_error", "Некорректный vault_root", status_code=500) from exc
+
     return user
+
+
+# Back-compat name used nowhere critical; keep importable
+async def require_bearer(
+    creds: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+) -> None:
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise APIError("unauthorized", "Нужен заголовок Authorization: Bearer", status_code=401)
+    await _user_from_access_token(creds.credentials)

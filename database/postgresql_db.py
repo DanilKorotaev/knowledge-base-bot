@@ -260,6 +260,55 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_session_shares_session
                 ON session_shares(session_id)
             """)
+
+            # KB App multi-user auth columns
+            auth_cols = await conn.fetch("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name='users'
+            """)
+            existing = {r["column_name"] for r in auth_cols}
+            alter_specs = [
+                ("login", "VARCHAR(255)"),
+                ("password_hash", "TEXT"),
+                ("email", "VARCHAR(255)"),
+                ("role", "VARCHAR(32) DEFAULT 'user'"),
+                ("must_change_password", "BOOLEAN DEFAULT FALSE"),
+                ("signup_source", "VARCHAR(32)"),
+                ("nextcloud_username", "VARCHAR(255)"),
+                ("vault_root_relative", "VARCHAR(512)"),
+                ("quota_bytes", "BIGINT"),
+                ("cursor_isolation", "VARCHAR(32) DEFAULT 'strict'"),
+            ]
+            for name, typ in alter_specs:
+                if name not in existing:
+                    await conn.execute(f"ALTER TABLE users ADD COLUMN {name} {typ}")
+            # telegram_id nullable for app-only accounts
+            null_check = await conn.fetchval("""
+                SELECT is_nullable FROM information_schema.columns
+                WHERE table_name='users' AND column_name='telegram_id'
+            """)
+            if null_check == "NO":
+                await conn.execute("""
+                    ALTER TABLE users ALTER COLUMN telegram_id DROP NOT NULL
+                """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login
+                ON users (login) WHERE login IS NOT NULL
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS auth_refresh_sessions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    revoked_at TIMESTAMPTZ
+                )
+            """)
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_auth_refresh_user
+                ON auth_refresh_sessions(user_id)
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
@@ -269,9 +318,156 @@ class PostgreSQLDatabase(DatabaseInterface):
                 VALUES ($1, $2)
                 ON CONFLICT (telegram_id) 
                 DO UPDATE SET username = EXCLUDED.username
-                RETURNING id, telegram_id, username, is_allowed, is_admin, created_at
+                RETURNING id, telegram_id, username, is_allowed, is_admin, created_at,
+                    login, password_hash, email, role, must_change_password, signup_source,
+                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+                    health_data_relative
             """, telegram_id, username)
             return dict(row)
+
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
+                    login, password_hash, email, role, must_change_password, signup_source,
+                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+                    health_data_relative
+                FROM users WHERE id = $1
+                """,
+                user_id,
+            )
+            return dict(row) if row else None
+
+    async def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
+                    login, password_hash, email, role, must_change_password, signup_source,
+                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+                    health_data_relative
+                FROM users WHERE lower(login) = lower($1)
+                """,
+                login,
+            )
+            return dict(row) if row else None
+
+    async def count_login_users(self) -> int:
+        async with self.pool.acquire() as conn:
+            return int(await conn.fetchval("SELECT COUNT(*) FROM users WHERE login IS NOT NULL") or 0)
+
+    async def create_app_user(
+        self,
+        *,
+        login: str,
+        password_hash: str,
+        email: Optional[str] = None,
+        role: str = "user",
+        vault_root_relative: str,
+        cursor_isolation: str = "strict",
+        must_change_password: bool = False,
+        signup_source: str = "self",
+        nextcloud_username: Optional[str] = None,
+        quota_bytes: Optional[int] = None,
+        is_admin: bool = False,
+    ) -> Dict[str, Any]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO users (
+                    telegram_id, username, login, password_hash, email, role,
+                    must_change_password, signup_source, nextcloud_username,
+                    vault_root_relative, quota_bytes, cursor_isolation,
+                    is_allowed, is_admin
+                ) VALUES (
+                    NULL, $1, $2, $3, $4, $5,
+                    $6, $7, $8,
+                    $9, $10, $11,
+                    TRUE, $12
+                )
+                RETURNING id, telegram_id, username, is_allowed, is_admin, created_at,
+                    login, password_hash, email, role, must_change_password, signup_source,
+                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+                    health_data_relative
+                """,
+                login,
+                login,
+                password_hash,
+                email,
+                role,
+                must_change_password,
+                signup_source,
+                nextcloud_username or login,
+                vault_root_relative,
+                quota_bytes,
+                cursor_isolation,
+                is_admin,
+            )
+            return dict(row)
+
+    async def update_user_password(
+        self, user_id: int, password_hash: str, *, must_change_password: bool = False
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users
+                SET password_hash = $2, must_change_password = $3
+                WHERE id = $1
+                """,
+                user_id,
+                password_hash,
+                must_change_password,
+            )
+
+    async def create_refresh_session(
+        self, user_id: int, token_hash: str, expires_at: datetime
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO auth_refresh_sessions (user_id, token_hash, expires_at)
+                VALUES ($1, $2, $3)
+                """,
+                user_id,
+                token_hash,
+                expires_at,
+            )
+
+    async def get_refresh_session(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, user_id, token_hash, created_at, expires_at, revoked_at
+                FROM auth_refresh_sessions WHERE token_hash = $1
+                """,
+                token_hash,
+            )
+            return dict(row) if row else None
+
+    async def revoke_refresh_session(self, token_hash: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE auth_refresh_sessions
+                SET revoked_at = NOW()
+                WHERE token_hash = $1 AND revoked_at IS NULL
+                """,
+                token_hash,
+            )
+
+    async def revoke_all_refresh_sessions(self, user_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE auth_refresh_sessions
+                SET revoked_at = NOW()
+                WHERE user_id = $1 AND revoked_at IS NULL
+                """,
+                user_id,
+            )
+
     
     async def create_session(
         self,

@@ -3,6 +3,7 @@
 """
 import aiosqlite
 import json
+from datetime import datetime
 from typing import Optional, List, Dict, Any
 from .base import DatabaseInterface
 from config import config
@@ -223,39 +224,249 @@ class SQLiteDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_session_shares_session
                 ON session_shares(session_id)
             """)
+
+            cursor = await db.execute("PRAGMA table_info(users)")
+            user_columns = {row[1] for row in await cursor.fetchall()}
+            for col, decl in (
+                ("login", "TEXT"),
+                ("password_hash", "TEXT"),
+                ("email", "TEXT"),
+                ("role", "TEXT DEFAULT 'user'"),
+                ("must_change_password", "INTEGER DEFAULT 0"),
+                ("signup_source", "TEXT"),
+                ("nextcloud_username", "TEXT"),
+                ("vault_root_relative", "TEXT"),
+                ("quota_bytes", "INTEGER"),
+                ("cursor_isolation", "TEXT DEFAULT 'strict'"),
+            ):
+                if col not in user_columns:
+                    await db.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
+            await db.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login
+                ON users (login) WHERE login IS NOT NULL
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS auth_refresh_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    revoked_at TIMESTAMP
+                )
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_auth_refresh_user
+                ON auth_refresh_sessions(user_id)
+            """)
             
             await db.commit()
+
+    def _row_to_user(self, row: Any) -> Dict[str, Any]:
+        # Flexible by index after SELECT list below
+        return {
+            "id": row[0],
+            "telegram_id": row[1],
+            "username": row[2],
+            "is_allowed": bool(row[3]),
+            "is_admin": bool(row[4]),
+            "created_at": row[5],
+            "login": row[6],
+            "password_hash": row[7],
+            "email": row[8],
+            "role": row[9] or "user",
+            "must_change_password": bool(row[10]) if row[10] is not None else False,
+            "signup_source": row[11],
+            "nextcloud_username": row[12],
+            "vault_root_relative": row[13],
+            "quota_bytes": row[14],
+            "cursor_isolation": row[15] or "strict",
+            "health_data_relative": row[16] if len(row) > 16 else "HealthData",
+        }
+
+    _USER_SELECT = """
+        id, telegram_id, username, is_allowed, is_admin, created_at,
+        login, password_hash, email, role, must_change_password, signup_source,
+        nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+        health_data_relative
+    """
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
         async with aiosqlite.connect(self.db_path) as db:
-            # Сначала попробуем вставить, если пользователя нет
             await db.execute("""
                 INSERT OR IGNORE INTO users (telegram_id, username)
                 VALUES (?, ?)
             """, (telegram_id, username))
-            
-            # Затем обновим username, если пользователь уже существует
             if username:
                 await db.execute("""
                     UPDATE users SET username = ? WHERE telegram_id = ?
                 """, (username, telegram_id))
-            
             await db.commit()
-            
-            cursor = await db.execute("""
-                SELECT id, telegram_id, username, is_allowed, is_admin, created_at 
-                FROM users WHERE telegram_id = ?
-            """, (telegram_id,))
+            cursor = await db.execute(
+                f"SELECT {self._USER_SELECT} FROM users WHERE telegram_id = ?",
+                (telegram_id,),
+            )
             row = await cursor.fetchone()
+            return self._row_to_user(row)
+
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                f"SELECT {self._USER_SELECT} FROM users WHERE id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            return self._row_to_user(row) if row else None
+
+    async def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                f"SELECT {self._USER_SELECT} FROM users WHERE lower(login) = lower(?)",
+                (login,),
+            )
+            row = await cursor.fetchone()
+            return self._row_to_user(row) if row else None
+
+    async def count_login_users(self) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM users WHERE login IS NOT NULL"
+            )
+            row = await cursor.fetchone()
+            return int(row[0] if row else 0)
+
+    async def create_app_user(
+        self,
+        *,
+        login: str,
+        password_hash: str,
+        email: Optional[str] = None,
+        role: str = "user",
+        vault_root_relative: str,
+        cursor_isolation: str = "strict",
+        must_change_password: bool = False,
+        signup_source: str = "self",
+        nextcloud_username: Optional[str] = None,
+        quota_bytes: Optional[int] = None,
+        is_admin: bool = False,
+    ) -> Dict[str, Any]:
+        # SQLite users.telegram_id stays NOT NULL — synthetic negative id for app accounts
+        synthetic = -abs(hash(login)) % (10**12)
+        if synthetic == 0:
+            synthetic = -1
+        async with aiosqlite.connect(self.db_path) as db:
+            # collide retry
+            for _ in range(5):
+                try:
+                    await db.execute(
+                        """
+                        INSERT INTO users (
+                            telegram_id, username, login, password_hash, email, role,
+                            must_change_password, signup_source, nextcloud_username,
+                            vault_root_relative, quota_bytes, cursor_isolation,
+                            is_allowed, is_admin
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                        """,
+                        (
+                            synthetic,
+                            login,
+                            login,
+                            password_hash,
+                            email,
+                            role,
+                            1 if must_change_password else 0,
+                            signup_source,
+                            nextcloud_username or login,
+                            vault_root_relative,
+                            quota_bytes,
+                            cursor_isolation,
+                            1 if is_admin else 0,
+                        ),
+                    )
+                    await db.commit()
+                    break
+                except Exception:
+                    synthetic -= 1
+            else:
+                raise RuntimeError("could not allocate synthetic telegram_id")
+            cursor = await db.execute(
+                f"SELECT {self._USER_SELECT} FROM users WHERE login = ?",
+                (login,),
+            )
+            row = await cursor.fetchone()
+            return self._row_to_user(row)
+
+    async def update_user_password(
+        self, user_id: int, password_hash: str, *, must_change_password: bool = False
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE users SET password_hash = ?, must_change_password = ?
+                WHERE id = ?
+                """,
+                (password_hash, 1 if must_change_password else 0, user_id),
+            )
+            await db.commit()
+
+    async def create_refresh_session(
+        self, user_id: int, token_hash: str, expires_at: datetime
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO auth_refresh_sessions (user_id, token_hash, expires_at)
+                VALUES (?, ?, ?)
+                """,
+                (user_id, token_hash, expires_at.isoformat()),
+            )
+            await db.commit()
+
+    async def get_refresh_session(self, token_hash: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, token_hash, created_at, expires_at, revoked_at
+                FROM auth_refresh_sessions WHERE token_hash = ?
+                """,
+                (token_hash,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
             return {
                 "id": row[0],
-                "telegram_id": row[1],
-                "username": row[2],
-                "is_allowed": bool(row[3]) if len(row) > 3 else False,
-                "is_admin": bool(row[4]) if len(row) > 4 else False,
-                "created_at": row[5] if len(row) > 5 else row[3]
+                "user_id": row[1],
+                "token_hash": row[2],
+                "created_at": row[3],
+                "expires_at": row[4],
+                "revoked_at": row[5],
             }
+
+    async def revoke_refresh_session(self, token_hash: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE auth_refresh_sessions
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE token_hash = ? AND revoked_at IS NULL
+                """,
+                (token_hash,),
+            )
+            await db.commit()
+
+    async def revoke_all_refresh_sessions(self, user_id: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE auth_refresh_sessions
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND revoked_at IS NULL
+                """,
+                (user_id,),
+            )
+            await db.commit()
     
     async def create_session(
         self,
