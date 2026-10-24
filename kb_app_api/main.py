@@ -9,8 +9,7 @@
 
 Docker: ``docker compose up kb-app-api`` (см. ``kb-app-api/README.md``).
 
-Опционально ``POST /api/auth/token`` — переменные ``KB_APP_API_TOKEN_ENDPOINT_ENABLED``,
-``KB_APP_API_TOKEN_ISSUE_SECRET`` (см. ``kb-app-api/env.example``).
+Auth: ``POST /api/auth/register|login|refresh`` (JWT). Shared Bearer removed.
 """
 from __future__ import annotations
 
@@ -58,10 +57,15 @@ logger = logging.getLogger("kb_app_api")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from kb_app_api.auth_service import maybe_bootstrap_admin
     from utils.db_helpers import close_db, get_db
 
-    await get_db()
+    db = await get_db()
     logger.info("KB App API: база данных готова")
+    try:
+        await maybe_bootstrap_admin(db)
+    except Exception:
+        logger.exception("Bootstrap admin failed")
     yield
     await close_db()
 

@@ -20,6 +20,10 @@ if [[ ! -f .env.staging ]]; then
   exit 1
 fi
 
+# docker compose still reads `.env` for ${VAR} interpolation in compose YAML
+# even when --env-file is set for container env.
+ln -sfn .env.staging .env
+
 if [[ -d "${VAULT_MAC_MINI}" ]]; then
   for f in docker-compose.mac-mini-staging.yml docker-compose.mac-mini-staging-ports.yml; do
     if [[ ! -f "${f}" && -f "${VAULT_MAC_MINI}/${f}" ]]; then

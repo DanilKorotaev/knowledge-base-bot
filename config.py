@@ -116,18 +116,38 @@ class Config:
     ).lower() in ("true", "1", "yes")
     
     # KB App API (iOS) — отдельный процесс `uvicorn kb_app_api.main:app`
+    # Legacy shared Bearer removed for app traffic; JWT via /api/auth/login.
+    # KB_APP_API_TOKEN kept only as optional JWT secret fallback in tests.
     KB_APP_API_TOKEN: Optional[str] = os.getenv("KB_APP_API_TOKEN")
+    KB_APP_JWT_SECRET: Optional[str] = os.getenv("KB_APP_JWT_SECRET") or os.getenv(
+        "KB_APP_API_TOKEN"
+    )
+    KB_APP_ACCESS_TTL_SEC: int = int(os.getenv("KB_APP_ACCESS_TTL_SEC", "3600"))
+    KB_APP_REFRESH_TTL_SEC: int = int(os.getenv("KB_APP_REFRESH_TTL_SEC", str(60 * 60 * 24 * 30)))
+    KB_APP_OPEN_SIGNUP: bool = os.getenv("KB_APP_OPEN_SIGNUP", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    KB_APP_DEFAULT_CURSOR_ISOLATION: str = os.getenv(
+        "KB_APP_DEFAULT_CURSOR_ISOLATION", "strict"
+    ).strip().lower() or "strict"
+    KB_APP_DEFAULT_QUOTA: str = os.getenv("KB_APP_DEFAULT_QUOTA", "5 GB")
+    KB_APP_NC_PROVISION_ENABLED: bool = os.getenv(
+        "KB_APP_NC_PROVISION_ENABLED", "true"
+    ).lower() in ("true", "1", "yes")
+    # Bootstrap first admin if no login-users exist (staging/dev)
+    KB_BOOTSTRAP_ADMIN_LOGIN: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_LOGIN")
+    KB_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_PASSWORD")
+    KB_BOOTSTRAP_ADMIN_EMAIL: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_EMAIL")
+
+    # Deprecated Telegram-mapped identity (bot still uses telegram_id; API uses login JWT)
     KB_APP_API_TELEGRAM_ID: int = int(os.getenv("KB_APP_API_TELEGRAM_ID", "9000000009000001"))
-    # iOS E2E / интеграционные тесты: запросы с заголовком X-KB-App-E2E: 1
     KB_APP_API_TEST_TELEGRAM_ID: int = int(
         os.getenv("KB_APP_API_TEST_TELEGRAM_ID", "9000000009000001")
     )
-    # POST /api/auth/token — выдача того же Bearer после проверки секрета (см. kb_app_api/routes/auth.py)
-    KB_APP_API_TOKEN_ENDPOINT_ENABLED: bool = os.getenv(
-        "KB_APP_API_TOKEN_ENDPOINT_ENABLED", "false"
-    ).lower() in ("true", "1", "yes")
-    KB_APP_API_TOKEN_ISSUE_SECRET: Optional[str] = os.getenv("KB_APP_API_TOKEN_ISSUE_SECRET")
-    # Только для отладки: не проверять is_allowed у KB_APP_API_TELEGRAM_ID при ACCESS_MODE=restricted
+    KB_APP_API_TOKEN_ENDPOINT_ENABLED: bool = False  # removed shared-token issue endpoint
+    KB_APP_API_TOKEN_ISSUE_SECRET: Optional[str] = None
     KB_APP_API_BYPASS_ACCESS_CHECK: bool = os.getenv(
         "KB_APP_API_BYPASS_ACCESS_CHECK", "false"
     ).lower() in ("true", "1", "yes")
