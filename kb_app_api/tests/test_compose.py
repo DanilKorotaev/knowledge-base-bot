@@ -36,7 +36,7 @@ class TestComposeMessage(unittest.TestCase):
         from config import config
 
         config.KB_APP_JWT_SECRET = os.environ.get("KB_APP_JWT_SECRET", "test-jwt-secret")
-                config.ACCESS_MODE = "open"
+        config.ACCESS_MODE = "open"
         config.KB_APP_API_BYPASS_ACCESS_CHECK = True
         config.DB_TYPE = "sqlite"
         config.DB_FILE = os.environ["DB_FILE"]
