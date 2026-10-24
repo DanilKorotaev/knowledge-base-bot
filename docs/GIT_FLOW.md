@@ -21,15 +21,20 @@ Git Flow обеспечивает:
 
 #### `main` (production)
 - **Назначение**: Стабильный код, готовый к продакшену
-- **Защита**: Только через merge из `release/*` или `hotfix/*`
-- **Теги**: Все релизы помечаются тегами `vX.Y.Z`
-- **Деплой**: Автоматический деплой на продакшен при push
+- **Защита**: Только через merge из `staging` / `release/*` / `hotfix/*` (когда уверены)
+- **Теги**: Релизы `backend/vX.Y.Z` (см. `docs/RELEASES.md`, файл `VERSION`)
+- **Деплой**: GitHub Actions `deploy-mac-mini.yml` → prod на Mac mini (`~/Projects/knowledge-base-bot`)
+
+#### `staging` (pre-prod)
+- **Назначение**: Интеграция и приёмка API/фич до prod
+- **Деплой**: GitHub Actions `deploy-mac-mini-staging.yml` → Docker `kb-staging`  
+  Checkout: **`~/Projects/knowledge-base-bot-staging`** (отдельно от prod — не делать `checkout` в prod dir)
+- **URL**: `https://kbapp-staging.example.com`
 
 #### `develop` (development)
-- **Назначение**: Основная ветка разработки
-- **Источник**: Все фичи мержатся сюда
-- **Статус**: Всегда содержит последние изменения
-- **Деплой**: Опционально на staging окружение
+- **Назначение**: Рабочая ветка / интеграция фич
+- **Источник**: Feature-ветки мержатся сюда
+- **Деплой**: **нет** автодеплоя (с 2026-10-24; раньше ошибочно катил prod)
 
 ### Вспомогательные ветки
 

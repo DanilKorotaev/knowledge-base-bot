@@ -1,0 +1,84 @@
+name: Deploy to Mac mini (staging)
+
+# Staging only — separate git checkout; must not touch prod launchd or prod compose.
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mac-mini-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, mac-mini]
+    timeout-minutes: 30
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TELEGRAM_NOTIFY_PROXY: socks5://127.0.0.1:1080
+
+    steps:
+      - name: Pull staging checkout and redeploy kb-staging
+        id: deploy
+        env:
+          # Separate from prod runtime (~/Projects/knowledge-base-bot on main).
+          KB_STAGING_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot-staging
+          KB_PROD_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
+        run: |
+          set -euo pipefail
+          STAGING="${KB_STAGING_DIR}"
+          PROD="${KB_PROD_DIR}"
+
+          if [[ ! -d "${STAGING}/.git" ]]; then
+            echo "Bootstrapping staging clone at ${STAGING}"
+            mkdir -p "$(dirname "${STAGING}")"
+            if [[ -d "${PROD}/.git" ]]; then
+              git clone --branch staging "${PROD}" "${STAGING}" \
+                || git clone "${PROD}" "${STAGING}"
+            else
+              echo "ERROR: neither staging nor prod git checkout available" >&2
+              exit 1
+            fi
+          fi
+
+          cd "${STAGING}"
+          echo "Before: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
+          git remote get-url origin >/dev/null
+          git fetch origin staging
+          git checkout staging 2>/dev/null || git checkout -b staging origin/staging
+          git reset --hard origin/staging
+
+          # Prefer .env.staging from staging dir; else copy once from prod dir.
+          if [[ ! -f .env.staging && -f "${PROD}/.env.staging" ]]; then
+            cp "${PROD}/.env.staging" .env.staging
+            chmod 600 .env.staging
+            echo "Copied .env.staging from prod dir (same secrets file location OK)"
+          fi
+
+          if [[ -f scripts/deploy-mac-mini-staging.sh ]]; then
+            KB_STAGING_DIR="${STAGING}" bash scripts/deploy-mac-mini-staging.sh
+          else
+            echo "ERROR: scripts/deploy-mac-mini-staging.sh missing" >&2
+            exit 1
+          fi
+
+          echo "After: $(git rev-parse --short HEAD) (staging checkout only)"
+          # Sanity: prod checkout must remain on main (warn only).
+          if [[ -d "${PROD}/.git" ]]; then
+            PROD_BRANCH="$(git -C "${PROD}" branch --show-current 2>/dev/null || true)"
+            echo "Prod checkout branch: ${PROD_BRANCH:-unknown}"
+            if [[ "${PROD_BRANCH}" != "main" && -n "${PROD_BRANCH}" ]]; then
+              echo "WARN: prod checkout is not on main (got ${PROD_BRANCH})"
+            fi
+          fi
+
+      - name: Notify Telegram (deploy staging)
+        if: always()
+        working-directory: /Users/danilkorotaev/Projects/knowledge-base-bot
+        run: |
+          python3 scripts/ci/telegram_notify.py deploy --outcome ${{ steps.deploy.outcome }} \
+            || echo "notify skipped/failed"
