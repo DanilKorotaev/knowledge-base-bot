@@ -32,8 +32,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "health-test-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000002"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
     Path(_kb_dir).mkdir(parents=True, exist_ok=True)
@@ -54,7 +55,8 @@ class TestHealthSyncApi(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer health-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="healthuser")
 
     def test_settings_default(self) -> None:
         response = self.client.get("/api/me/settings", headers=self.headers)

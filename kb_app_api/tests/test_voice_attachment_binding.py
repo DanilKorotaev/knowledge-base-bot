@@ -15,15 +15,26 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from kb_app_api.tests import test_smoke as smoke  # noqa: E402
+
+
+def setUpModule() -> None:
+    smoke.setUpModule()
+
+
+def tearDownModule() -> None:
+    smoke.tearDownModule()
+
 
 @unittest.skipUnless(TestClient is not None, "Нужен fastapi (requirements.txt бота)")
 class TestVoiceAttachmentBinding(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         from kb_app_api.main import app
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer smoke-test-bearer"}
+        cls.headers = bearer_headers(cls.client, login="voicebind")
 
     def _create_session(self) -> str:
         response = self.client.post(

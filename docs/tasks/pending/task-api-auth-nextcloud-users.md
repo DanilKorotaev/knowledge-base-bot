@@ -1,6 +1,6 @@
 # API: auth + Nextcloud-unified users
 
-**Статус:** 📋 Planned  
+**Статус:** 🚧 In progress (MVP на staging 2026-10-24, `088e771`)  
 **Приоритет:** 🔴 Высокий  
 **Категория:** kb_app_api / Auth  
 **Эпик:** vault `эпик-kb-app-avtorizaciya-multiuser`  
@@ -32,15 +32,16 @@
 
 ## Чеклист
 
-- [ ] Миграции Postgres/SQLite
-- [ ] Password hashing (argon2/bcrypt)
-- [ ] JWT access + opaque/rotating refresh
-- [ ] NC provision service
-- [ ] `get_api_user` из access token → real user; все routes используют `vault_root`
-- [ ] Убрать shared Bearer из deps, config, tests, contract, env.example
-- [ ] E2E: login тестовым юзером вместо `KB_APP_API_TOKEN`
+- [x] Миграции Postgres/SQLite (+ `auth_refresh_sessions`)
+- [x] Password hashing (stdlib scrypt)
+- [x] JWT access + opaque refresh
+- [x] NC provision service (`kb_app_api/nextcloud_provision.py`)
+- [x] `get_api_user` из access token → real user
+- [x] Shared Bearer убран из deps; unit-тесты переведены на register/login
+- [x] Staging smoke: register + `kbadmin` login (2026-10-24)
+- [ ] Полный per-user `vault_root` во всех call sites (`health_sync`, `boards/runtime`, `voice_attachments`, `revert_helpers`) — частично (messages uploads)
+- [ ] E2E iOS: login тестовым юзером вместо `KB_APP_API_TOKEN`
 - [ ] Обновить `docs/KB_APP_API_CONTRACT.md` (и iOS копию при sync)
-- [ ] Катить и проверить **только staging**
 
 ## Вне скоупа здесь
 

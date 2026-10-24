@@ -1,9 +1,18 @@
 """Helpers: register/login and Authorization header for API tests."""
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from fastapi.testclient import TestClient
+
+
+def apply_auth_test_env(*, jwt_secret: str = "test-jwt-secret") -> None:
+    """Call from setUpModule *before* importing kb_app_api.main."""
+    os.environ["KB_APP_JWT_SECRET"] = jwt_secret
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
+    os.environ.setdefault("ACCESS_MODE", "open")
 
 
 def bearer_headers(

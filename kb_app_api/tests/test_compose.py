@@ -35,9 +35,8 @@ class TestComposeMessage(unittest.TestCase):
     def setUpClass(cls) -> None:
         from config import config
 
-        config.KB_APP_API_TOKEN = os.environ["KB_APP_API_TOKEN"]
-        config.KB_APP_API_TELEGRAM_ID = int(os.environ["KB_APP_API_TELEGRAM_ID"])
-        config.ACCESS_MODE = "open"
+        config.KB_APP_JWT_SECRET = os.environ.get("KB_APP_JWT_SECRET", "test-jwt-secret")
+                config.ACCESS_MODE = "open"
         config.KB_APP_API_BYPASS_ACCESS_CHECK = True
         config.DB_TYPE = "sqlite"
         config.DB_FILE = os.environ["DB_FILE"]
@@ -52,7 +51,8 @@ class TestComposeMessage(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer smoke-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="t_" + cls.__name__[:20].lower())
 
     def _create_session(self) -> str:
         response = self.client.post(
