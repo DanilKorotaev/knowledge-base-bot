@@ -30,6 +30,18 @@
 - [ ] [Share chat public link](tasks/pending/task-feature-shared-chat-public-link.md)
 - [x] [Быстрый список сессий (message_count)](tasks/completed/task-api-sessions-list-performance.md) — completed 2026-09-13
 
+### Multi-user / Auth (эпик vault)
+
+Порядок: CI → auth+NC → isolation/push → admin web → staging REST. **Катить только staging.**
+
+- [🚧] [CI: staging / main / tags](tasks/pending/task-ops-ci-staging-main-tags.md)
+- [ ] [Auth + Nextcloud-unified users](tasks/pending/task-api-auth-nextcloud-users.md)
+- [ ] [Admin REST + admin web](tasks/pending/task-api-admin-rest-and-web.md)
+- [ ] [Cursor isolation per-user](tasks/pending/task-api-cursor-isolation-per-user.md)
+- [ ] [Push devices per-user](tasks/pending/task-api-push-devices-per-user.md)
+- [ ] [Instance settings / provider keys](tasks/pending/task-api-instance-settings-provider-keys.md)
+- [ ] [Staging auth REST suite](tasks/pending/task-test-staging-auth-rest-suite.md)
+
 ### Улучшения UX
 
 - [x] [Исправить отображение путей к файлам в Telegram](tasks/completed/task-ux-fix-file-paths-in-telegram.md) ✅

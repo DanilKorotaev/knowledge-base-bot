@@ -1,13 +1,18 @@
-name: Deploy to Mac mini (runtime)
+name: Deploy to Mac mini (production)
+
+# Prod only. Staging is deploy-mac-mini-staging.yml (branch staging).
+# develop = no auto-deploy.
 
 on:
   push:
     branches:
-      - develop
+      - main
+    tags:
+      - "backend/v*"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-mac-mini
+  group: deploy-mac-mini-prod
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +25,7 @@ jobs:
       TELEGRAM_NOTIFY_PROXY: socks5://127.0.0.1:1080
 
     steps:
-      - name: Pull and deploy runtime
+      - name: Pull and deploy production runtime
         id: deploy
         env:
           KB_RUNTIME_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
@@ -35,8 +40,9 @@ jobs:
           fi
 
           echo "Before: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-          git fetch origin develop
-          git reset --hard origin/develop
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
 
           if [[ -f scripts/deploy-mac-mini.sh ]]; then
             bash scripts/deploy-mac-mini.sh
@@ -46,8 +52,11 @@ jobs:
           fi
 
           echo "After: $(git rev-parse --short HEAD)"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            echo "Deployed from tag ${GITHUB_REF_NAME}"
+          fi
 
-      - name: Notify Telegram (deploy)
+      - name: Notify Telegram (deploy prod)
         if: always()
         working-directory: /Users/danilkorotaev/Projects/knowledge-base-bot
         run: python3 scripts/ci/telegram_notify.py deploy --outcome ${{ steps.deploy.outcome }}
