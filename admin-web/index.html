@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KB Admin</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="login-view" class="panel">
+      <h1>KB Admin</h1>
+      <p class="muted">Логин администратора бэкенда</p>
+      <label>Login <input id="login" autocomplete="username" /></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" /></label>
+      <button id="btn-login" type="button">Войти</button>
+      <p id="login-error" class="error" hidden></p>
+    </section>
+
+    <section id="main-view" class="panel" hidden>
+      <header class="row">
+        <h1>Пользователи</h1>
+        <div class="row gap">
+          <span id="whoami" class="muted"></span>
+          <button id="btn-logout" type="button" class="ghost">Выйти</button>
+        </div>
+      </header>
+
+      <div class="card">
+        <h2>Создать</h2>
+        <div class="form-grid">
+          <label>Login <input id="new-login" /></label>
+          <label>Email <input id="new-email" type="email" /></label>
+          <label>Role
+            <select id="new-role">
+              <option value="user">user</option>
+              <option value="admin">admin</option>
+            </select>
+          </label>
+          <label>Cursor isolation
+            <select id="new-isolation">
+              <option value="strict">strict</option>
+              <option value="host">host</option>
+            </select>
+          </label>
+        </div>
+        <button id="btn-create" type="button">Создать (temp password)</button>
+        <pre id="create-result" class="result" hidden></pre>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <h2>Список</h2>
+          <button id="btn-refresh" type="button" class="ghost">Обновить</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Login</th>
+              <th>Role</th>
+              <th>Isolation</th>
+              <th>Allowed</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="users-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

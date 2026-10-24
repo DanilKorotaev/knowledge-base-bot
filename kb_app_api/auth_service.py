@@ -176,6 +176,7 @@ async def change_password(
     current_password: Optional[str],
     new_password: str,
     skip_current_check: bool = False,
+    must_change_password: bool = False,
 ) -> None:
     new_password = _validate_password(new_password)
     if not skip_current_check:
@@ -186,7 +187,7 @@ async def change_password(
     await db.update_user_password(
         int(user["id"]),
         hash_password(new_password),
-        must_change_password=False,
+        must_change_password=must_change_password,
     )
     nc_user = user.get("nextcloud_username") or user.get("login")
     if nc_user and config.KB_APP_NC_PROVISION_ENABLED:

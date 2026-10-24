@@ -26,11 +26,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
 from kb_app_api.metrics import setup_metrics
 from kb_app_api.routes import (
+    admin_users,
     attachments,
     auth,
     boards,
@@ -94,6 +97,7 @@ setup_metrics(app)
 app.include_router(health.router)
 app.include_router(share.router)
 app.include_router(auth.router, prefix="/api")
+app.include_router(admin_users.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
 app.include_router(ui_events.router, prefix="/api")
@@ -106,6 +110,19 @@ app.include_router(health_sync.router, prefix="/api")
 app.include_router(boards.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(remote_ui.router, prefix="/api")
+
+_ADMIN_WEB = _ROOT / "admin-web"
+if _ADMIN_WEB.is_dir():
+
+    @app.get("/admin")
+    async def admin_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/admin/", status_code=307)
+
+    app.mount(
+        "/admin",
+        StaticFiles(directory=str(_ADMIN_WEB), html=True),
+        name="admin-web",
+    )
 
 
 if __name__ == "__main__":

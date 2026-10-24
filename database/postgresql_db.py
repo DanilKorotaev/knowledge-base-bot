@@ -357,6 +357,60 @@ class PostgreSQLDatabase(DatabaseInterface):
         async with self.pool.acquire() as conn:
             return int(await conn.fetchval("SELECT COUNT(*) FROM users WHERE login IS NOT NULL") or 0)
 
+    async def list_app_users(self, *, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
+                    login, password_hash, email, role, must_change_password, signup_source,
+                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+                    health_data_relative
+                FROM users
+                WHERE login IS NOT NULL
+                ORDER BY id ASC
+                LIMIT $1 OFFSET $2
+                """,
+                limit,
+                offset,
+            )
+            return [dict(r) for r in rows]
+
+    async def update_app_user_fields(
+        self,
+        user_id: int,
+        *,
+        is_allowed: Optional[bool] = None,
+        cursor_isolation: Optional[str] = None,
+        quota_bytes: Optional[int] = None,
+        role: Optional[str] = None,
+        is_admin: Optional[bool] = None,
+        email: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        user = await self.get_user_by_id(user_id)
+        if not user or not user.get("login"):
+            return None
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users SET
+                    is_allowed = COALESCE($2, is_allowed),
+                    cursor_isolation = COALESCE($3, cursor_isolation),
+                    quota_bytes = COALESCE($4, quota_bytes),
+                    role = COALESCE($5, role),
+                    is_admin = COALESCE($6, is_admin),
+                    email = COALESCE($7, email)
+                WHERE id = $1
+                """,
+                user_id,
+                is_allowed,
+                cursor_isolation,
+                quota_bytes,
+                role,
+                is_admin,
+                email,
+            )
+        return await self.get_user_by_id(user_id)
+
     async def create_app_user(
         self,
         *,
