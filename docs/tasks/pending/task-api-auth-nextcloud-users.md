@@ -41,7 +41,7 @@
 - [x] Staging smoke: register + `kbadmin` login (2026-10-24)
 - [ ] Полный per-user `vault_root` во всех call sites (`health_sync`, `boards/runtime`, `voice_attachments`, `revert_helpers`) — частично (messages uploads)
 - [ ] E2E iOS: login тестовым юзером вместо `KB_APP_API_TOKEN`
-- [ ] Обновить `docs/KB_APP_API_CONTRACT.md` (и iOS копию при sync)
+- [x] Обновить `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md` (JWT auth v1.2)
 
 ## Вне скоупа здесь
 

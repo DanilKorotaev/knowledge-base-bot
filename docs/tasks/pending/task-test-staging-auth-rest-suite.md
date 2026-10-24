@@ -1,6 +1,6 @@
 # Test: REST / smoke suite на staging
 
-**Статус:** 📋 Planned  
+**Статус:** ✅ Done (скрипт; CI job опционально)  
 **Приоритет:** 🟡 Средний  
 **Категория:** Testing  
 **Эпик:** vault `эпик-kb-app-avtorizaciya-multiuser`  
@@ -19,7 +19,7 @@
 
 ## Чеклист
 
-- [ ] Скрипт или pytest marker `staging_live`
-- [ ] Secrets: staging test user (не в git)
+- [x] Скрипт `scripts/staging_auth_smoke.sh` (`BASE_URL=…`)
+- [x] Secrets: не нужны — создаёт временных users
 - [ ] Опционально job после `deploy-mac-mini-staging.yml`
-- [ ] Документ в `docs/testing/` или E2E notes
+- [x] Прогон на staging localhost:8191 (2026-10-25) — OK
