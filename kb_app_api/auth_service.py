@@ -1,6 +1,7 @@
 """Register / login / refresh / password + optional Nextcloud provision."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -116,18 +117,38 @@ async def register_user(
     )
     ensure_vault_dir(user)
     if provision_nc and config.KB_APP_NC_PROVISION_ENABLED:
-        try:
-            create_nextcloud_user(
-                userid=login,
+        # Never block the API worker on Nextcloud OCS — run in background.
+        asyncio.create_task(
+            _provision_nc_user_background(
+                login=login,
                 password=password,
                 email=email,
-                display_name=login,
                 quota=config.KB_APP_DEFAULT_QUOTA,
             )
-        except NextcloudProvisionError as exc:
-            logger.warning("NC provision failed for %s: %s", login, exc)
-            # Account still usable in KB; admin can retry NC later
+        )
     return user
+
+
+async def _provision_nc_user_background(
+    *,
+    login: str,
+    password: str,
+    email: Optional[str],
+    quota: Optional[str],
+) -> None:
+    try:
+        await asyncio.to_thread(
+            create_nextcloud_user,
+            userid=login,
+            password=password,
+            email=email,
+            display_name=login,
+            quota=quota,
+        )
+    except NextcloudProvisionError as exc:
+        logger.warning("NC provision failed for %s: %s", login, exc)
+    except Exception:
+        logger.exception("NC provision unexpected error for %s", login)
 
 
 async def login_user(db: Any, *, login: str, password: str) -> dict[str, Any]:

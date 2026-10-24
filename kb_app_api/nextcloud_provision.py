@@ -30,6 +30,13 @@ def _ocs_base() -> str:
     return config.NEXTCLOUD_URL.rstrip("/") + "/ocs/v1.php/cloud"
 
 
+def _timeout() -> float:
+    try:
+        return max(1.0, float(getattr(config, "KB_APP_NC_PROVISION_TIMEOUT_SEC", 5) or 5))
+    except (TypeError, ValueError):
+        return 5.0
+
+
 def create_nextcloud_user(
     *,
     userid: str,
@@ -61,7 +68,7 @@ def create_nextcloud_user(
             auth=_auth(),
             headers={"OCS-APIRequest": "true", "Accept": "application/json"},
             data=data,
-            timeout=30,
+            timeout=_timeout(),
         )
     except requests.RequestException as exc:
         raise NextcloudProvisionError(f"NC create user network error: {exc}") from exc
@@ -98,7 +105,7 @@ def set_nextcloud_password(userid: str, password: str) -> None:
             auth=_auth(),
             headers={"OCS-APIRequest": "true", "Accept": "application/json"},
             data={"key": "password", "value": password},
-            timeout=30,
+            timeout=_timeout(),
         )
     except requests.RequestException as exc:
         raise NextcloudProvisionError(f"NC set password network error: {exc}") from exc
@@ -118,7 +125,7 @@ def set_nextcloud_quota(userid: str, quota: str) -> None:
             auth=_auth(),
             headers={"OCS-APIRequest": "true", "Accept": "application/json"},
             data={"key": "quota", "value": quota},
-            timeout=30,
+            timeout=_timeout(),
         )
     except requests.RequestException as exc:
         raise NextcloudProvisionError(f"NC set quota network error: {exc}") from exc

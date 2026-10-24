@@ -136,6 +136,10 @@ class Config:
     KB_APP_NC_PROVISION_ENABLED: bool = os.getenv(
         "KB_APP_NC_PROVISION_ENABLED", "true"
     ).lower() in ("true", "1", "yes")
+    # Keep short: NC outages must not block register/login on the API worker.
+    KB_APP_NC_PROVISION_TIMEOUT_SEC: float = float(
+        os.getenv("KB_APP_NC_PROVISION_TIMEOUT_SEC", "5") or "5"
+    )
     # Bootstrap first admin if no login-users exist (staging/dev)
     KB_BOOTSTRAP_ADMIN_LOGIN: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_LOGIN")
     KB_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_PASSWORD")
