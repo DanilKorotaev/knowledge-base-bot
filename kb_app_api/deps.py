@@ -84,6 +84,15 @@ async def _user_from_access_token(token: str) -> dict[str, Any]:
     return user
 
 
+async def require_admin(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    role = (user.get("role") or "").lower()
+    if role != "admin" and not user.get("is_admin"):
+        raise APIError("forbidden", "Нужны права администратора", status_code=403)
+    return user
+
+
 # Back-compat name used nowhere critical; keep importable
 async def require_bearer(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],

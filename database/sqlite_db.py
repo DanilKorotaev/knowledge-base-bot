@@ -336,6 +336,77 @@ class SQLiteDatabase(DatabaseInterface):
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
 
+    async def list_app_users(self, *, limit: int = 200, offset: int = 0) -> List[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                f"""
+                SELECT {self._USER_SELECT}
+                FROM users
+                WHERE login IS NOT NULL
+                ORDER BY id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            rows = await cursor.fetchall()
+            return [self._row_to_user(r) for r in rows]
+
+    async def update_app_user_fields(
+        self,
+        user_id: int,
+        *,
+        is_allowed: Optional[bool] = None,
+        cursor_isolation: Optional[str] = None,
+        quota_bytes: Optional[int] = None,
+        role: Optional[str] = None,
+        is_admin: Optional[bool] = None,
+        email: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        user = await self.get_user_by_id(user_id)
+        if not user or not user.get("login"):
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            # fetch current then patch
+            cur = {
+                "is_allowed": user.get("is_allowed"),
+                "cursor_isolation": user.get("cursor_isolation"),
+                "quota_bytes": user.get("quota_bytes"),
+                "role": user.get("role"),
+                "is_admin": user.get("is_admin"),
+                "email": user.get("email"),
+            }
+            if is_allowed is not None:
+                cur["is_allowed"] = is_allowed
+            if cursor_isolation is not None:
+                cur["cursor_isolation"] = cursor_isolation
+            if quota_bytes is not None:
+                cur["quota_bytes"] = quota_bytes
+            if role is not None:
+                cur["role"] = role
+            if is_admin is not None:
+                cur["is_admin"] = is_admin
+            if email is not None:
+                cur["email"] = email
+            await db.execute(
+                """
+                UPDATE users SET
+                    is_allowed = ?, cursor_isolation = ?, quota_bytes = ?,
+                    role = ?, is_admin = ?, email = ?
+                WHERE id = ?
+                """,
+                (
+                    1 if cur["is_allowed"] else 0,
+                    cur["cursor_isolation"],
+                    cur["quota_bytes"],
+                    cur["role"],
+                    1 if cur["is_admin"] else 0,
+                    cur["email"],
+                    user_id,
+                ),
+            )
+            await db.commit()
+        return await self.get_user_by_id(user_id)
+
     async def create_app_user(
         self,
         *,
