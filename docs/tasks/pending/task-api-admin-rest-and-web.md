@@ -1,6 +1,6 @@
 # API + Admin web (не Telegram)
 
-**Статус:** 📋 Planned  
+**Статус:** 🚧 MVP на staging (`dbee382`) — UI `/admin/`, DNS готов; nginx на VPS — вручную  
 **Приоритет:** 🟡 Высокий после auth  
 **Категория:** Admin  
 **Эпик:** vault `эпик-kb-app-avtorizaciya-multiuser`  
@@ -28,8 +28,9 @@
 
 ## Чеклист
 
-- [ ] Admin routes + authz
+- [x] Admin routes + authz (`/api/admin/users`)
 - [ ] Email send (invite) — SMTP/settings
-- [ ] Scaffold admin-web (минимальный: login + users table + create)
-- [ ] Staging compose + nginx notes
-- [ ] Документация доменов в vault staging/infra
+- [x] Scaffold admin-web (`admin-web/` → `/admin/`)
+- [x] Staging: UI отдаётся с `:8191/admin/` (200)
+- [ ] VPS nginx+TLS для `kbadmin-staging` (конфиг в vault; нужен sudo на vpn-new)
+- [ ] Prod `kbadmin` — только после merge в `main`
