@@ -4,15 +4,21 @@ import logging
 import uuid
 from pathlib import Path
 
-from config import config
+from kb_app_api.vault_paths import resolve_kb_root
 
 logger = logging.getLogger(__name__)
 
 
-def voice_upload_path(session_id: int, safe_filename: str) -> Path:
-    kb_root = Path(config.LOCAL_KB_PATH)
-    kb_root.mkdir(parents=True, exist_ok=True)
-    upload_root = kb_root / ".kb_app_api_uploads" / str(session_id)
+def voice_upload_path(
+    session_id: int,
+    safe_filename: str,
+    *,
+    user: dict | None = None,
+    kb_root: Path | None = None,
+) -> Path:
+    root = Path(kb_root) if kb_root is not None else resolve_kb_root(user)
+    root.mkdir(parents=True, exist_ok=True)
+    upload_root = root / ".kb_app_api_uploads" / str(session_id)
     upload_root.mkdir(parents=True, exist_ok=True)
     return upload_root / f"{uuid.uuid4().hex[:10]}_{safe_filename}"
 

@@ -101,6 +101,7 @@ async def run_query_inline_or_job(
     on_chunk: Callable[[str], Awaitable[None]] | None,
     on_activity: Callable[[str], Awaitable[None]] | None,
     skip_pipeline: bool = False,
+    kb_path: Path | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Non-SSE path: either enqueue+wait via events (jobs enabled) or call QPS inline.
@@ -113,6 +114,14 @@ async def run_query_inline_or_job(
         return "", []
 
     if not config.KB_APP_QUERY_JOBS_ENABLED:
+        agent_kb = kb_path
+        if agent_kb is None:
+            from kb_app_api.vault_paths import resolve_agent_kb_root
+            from utils.db_helpers import get_db
+
+            db = await get_db()
+            user = await db.get_user_by_id(user_id)
+            agent_kb = resolve_agent_kb_root(user)
         qps = QueryProcessingService()
         return await qps.process_query_for_api(
             query_text,
@@ -124,6 +133,7 @@ async def run_query_inline_or_job(
             on_chunk=on_chunk,
             on_activity=on_activity,
             allow_structured_ui=allow_structured_ui,
+            kb_path=agent_kb,
         )
 
     service = QueryJobService()

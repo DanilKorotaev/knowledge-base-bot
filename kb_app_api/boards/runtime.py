@@ -6,8 +6,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from config import config
-
 from kb_app_api.boards import repository
 from kb_app_api.boards.providers import (
     remote_structured_ui,
@@ -16,12 +14,25 @@ from kb_app_api.boards.providers import (
     vault_json_daily_agg,
     vault_script,
 )
+from kb_app_api.vault_paths import kb_base, resolve_kb_root
 
 logger = logging.getLogger(__name__)
 
 
-def _kb_root() -> Path:
-    return Path(config.LOCAL_KB_PATH)
+def _kb_root(kb_root: Path | None = None) -> Path:
+    return Path(kb_root) if kb_root is not None else kb_base()
+
+
+async def _kb_root_for_user(user_id: int | None, kb_root: Path | None = None) -> Path:
+    if kb_root is not None:
+        return Path(kb_root)
+    if user_id is None:
+        return kb_base()
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    user = await db.get_user_by_id(user_id)
+    return resolve_kb_root(user) if user else kb_base()
 
 
 def _public_board(
@@ -68,13 +79,15 @@ async def _render_row(
     date_from: str | None = None,
     date_to: str | None = None,
     user_id: int | None = None,
+    kb_root: Path | None = None,
 ) -> dict[str, Any] | None:
     definition = row.get("definition") or {}
     provider = str(definition.get("provider") or "").strip()
+    root = await _kb_root_for_user(user_id, kb_root)
 
     if provider == vault_frontmatter_agg.PROVIDER_ID:
         return vault_frontmatter_agg.compute(
-            _kb_root(),
+            root,
             row,
             definition,
             period=period,
@@ -84,7 +97,7 @@ async def _render_row(
 
     if provider == vault_json_daily_agg.PROVIDER_ID:
         return vault_json_daily_agg.compute(
-            _kb_root(),
+            root,
             row,
             definition,
             period=period,
@@ -100,7 +113,7 @@ async def _render_row(
 
     if provider == vault_script.PROVIDER_ID:
         return vault_script.compute(
-            _kb_root(),
+            root,
             row,
             definition,
             period=period,
@@ -135,14 +148,16 @@ async def list_boards(
     *,
     include_disabled: bool = False,
     user_id: int | None = None,
+    kb_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     await repository.ensure_boards_schema()
     rows = await repository.list_board_rows(include_disabled=include_disabled)
+    root = await _kb_root_for_user(user_id, kb_root)
     boards: list[dict[str, Any]] = []
     for row in rows:
         if not include_disabled and not row.get("enabled", True):
             continue
-        rendered = await _render_row(row, user_id=user_id)
+        rendered = await _render_row(row, user_id=user_id, kb_root=root)
         if rendered is None:
             continue
         boards.append(deepcopy(rendered["board"]))
@@ -157,6 +172,7 @@ async def get_board_detail(
     date_from: str | None = None,
     date_to: str | None = None,
     user_id: int | None = None,
+    kb_root: Path | None = None,
 ) -> dict[str, Any] | None:
     await repository.ensure_boards_schema()
     row = await repository.get_board_row(board_id)
@@ -170,4 +186,5 @@ async def get_board_detail(
         date_from=date_from,
         date_to=date_to,
         user_id=user_id,
+        kb_root=await _kb_root_for_user(user_id, kb_root),
     )

@@ -507,8 +507,14 @@ class QueryProcessingService:
         self,
         session_id: int,
         changes: List[Dict[str, Any]],
+        *,
+        kb_path: Optional[Path] = None,
     ) -> None:
         """То же хранилище, что и для Telegram, без отправки в чат."""
+        if kb_path is not None:
+            from kb_app_api.vault_paths import localize_file_changes
+
+            changes = localize_file_changes(changes, kb_path)
         changes_info = await self._apply_file_changes_storage(session_id, changes)
         if changes_info:
             plain = re.sub(r"<[^>]+>", "", changes_info)
@@ -526,15 +532,18 @@ class QueryProcessingService:
         on_chunk: Optional[Callable[[str], Awaitable[None]]] = None,
         on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
         allow_structured_ui: bool = False,
+        kb_path: Optional[Path] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработка запроса для KB App API без Telegram UI (тот же Cursor CLI и синк, что у бота).
 
         При use_knowledge_base=False — без Cursor и без начального sync: короткий ответ в чате.
         При allow_structured_ui — после ответа может быть прикреплён structured_ui (если env включён).
+        kb_path — cwd Cursor (per-user vault или LOCAL_KB_PATH при cursor_isolation=host).
         """
         db = await self._get_db()
         session_messages = await db.get_session_messages(session_id)
+        agent_kb = Path(kb_path) if kb_path is not None else Path(app_config.LOCAL_KB_PATH)
 
         if not use_knowledge_base:
             if save_user_message:
@@ -580,7 +589,12 @@ class QueryProcessingService:
                 logger.info("KB App API: синхронизация заняла %.2fс", time.time() - sync_start)
 
             cursor_start = time.time()
-            cursor_service = self._get_cursor_service()
+            # Per-request CursorCLIService so cwd follows the user's vault.
+            cursor_service = (
+                CursorCLIService(kb_path=agent_kb)
+                if kb_path is not None
+                else self._get_cursor_service()
+            )
             session_data = await db.get_session(session_id)
             cursor_chat_id = session_data.get("cursor_chat_id") if session_data else None
 
@@ -623,7 +637,7 @@ class QueryProcessingService:
                     channel="app",
                 )
 
-            logger.info("KB App API: Cursor CLI за %.2fс", time.time() - cursor_start)
+            logger.info("KB App API: Cursor CLI за %.2fс cwd=%s", time.time() - cursor_start, agent_kb)
 
             await _stop_query_progress_timer(timer_stop, timer_task)
 
@@ -679,7 +693,7 @@ class QueryProcessingService:
                 reply_text=clean_reply,
             )
 
-            await self.handle_file_changes_for_api(session_id, changes)
+            await self.handle_file_changes_for_api(session_id, changes, kb_path=agent_kb)
 
             return response, changes
 

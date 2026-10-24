@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from kb_app_api.boards import repository, runtime
@@ -23,8 +24,13 @@ async def list_boards(
     *,
     include_disabled: bool = False,
     user_id: int | None = None,
+    kb_root: Path | None = None,
 ) -> list[dict[str, Any]]:
-    return await runtime.list_boards(include_disabled=include_disabled, user_id=user_id)
+    return await runtime.list_boards(
+        include_disabled=include_disabled,
+        user_id=user_id,
+        kb_root=kb_root,
+    )
 
 
 async def get_board_detail(
@@ -34,6 +40,7 @@ async def get_board_detail(
     date_from: str | None = None,
     date_to: str | None = None,
     user_id: int | None = None,
+    kb_root: Path | None = None,
 ) -> dict[str, Any] | None:
     return await runtime.get_board_detail(
         board_id,
@@ -41,6 +48,7 @@ async def get_board_detail(
         date_from=date_from,
         date_to=date_to,
         user_id=user_id,
+        kb_root=kb_root,
     )
 
 

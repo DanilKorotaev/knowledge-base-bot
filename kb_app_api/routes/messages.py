@@ -24,6 +24,7 @@ from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.query_jobs.sse_bridge import enqueue_and_bridge_pipeline, run_query_inline_or_job
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.vault_paths import resolve_agent_kb_root, resolve_kb_root
 from kb_app_api.voice_attachments import attach_voice_to_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
 
@@ -223,10 +224,7 @@ def _parse_use_kb(value: str) -> bool:
 
 
 def _session_upload_root(session_id: int, user: dict | None = None) -> Path:
-    if user and user.get("vault_root"):
-        kb_root = Path(user["vault_root"])
-    else:
-        kb_root = Path(config.LOCAL_KB_PATH)
+    kb_root = resolve_kb_root(user)
     kb_root.mkdir(parents=True, exist_ok=True)
     upload_root = kb_root / ".kb_app_api_uploads" / str(session_id)
     upload_root.mkdir(parents=True, exist_ok=True)
@@ -308,9 +306,10 @@ async def _persist_compose_uploads(
     file_uploads: list[UploadFile],
     audio_uploads: list[UploadFile],
     transcriptions: list[str],
+    user: dict | None = None,
 ) -> tuple[list[Path], list[Path]]:
     """Save multipart files/audio and link them to the user message. Returns (file_paths, audio_paths)."""
-    upload_root = _session_upload_root(session_id)
+    upload_root = _session_upload_root(session_id, user)
     file_paths: list[Path] = []
     audio_paths: list[Path] = []
 
@@ -340,7 +339,7 @@ async def _persist_compose_uploads(
         if not safe.lower().endswith((".m4a", ".mp4", ".ogg", ".wav", ".webm", ".mp3")):
             base = safe.rsplit(".", 1)[0] if "." in safe else safe
             safe = f"{base}.m4a"
-        dest = voice_upload_path(session_id, safe)
+        dest = voice_upload_path(session_id, safe, user=user)
         dest.write_bytes(data)
         audio_paths.append(dest)
         transcription = transcriptions[index] if index < len(transcriptions) else ""
@@ -366,6 +365,7 @@ async def _run_compose_pipeline(
     allow_structured_ui: bool = False,
     user_message_ack: dict[str, Any] | None = None,
     skip_pipeline: bool = False,
+    kb_path: Path | None = None,
 ) -> Response:
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -409,6 +409,7 @@ async def _run_compose_pipeline(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_structured_ui,
+                    kb_path=kb_path,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -441,6 +442,7 @@ async def _run_compose_pipeline(
                 on_chunk=None,
                 on_activity=None,
                 skip_pipeline=False,
+                kb_path=kb_path,
             )
         except RuntimeError as e:
             raise APIError("processing_error", str(e), status_code=500) from e
@@ -551,6 +553,7 @@ async def post_message(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
+                    kb_path=resolve_agent_kb_root(user),
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -580,6 +583,7 @@ async def post_message(
             allow_structured_ui=allow_sui,
             on_chunk=None,
             on_activity=None,
+            kb_path=resolve_agent_kb_root(user),
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -650,6 +654,7 @@ async def post_attachment(
             attached_files=[dest],
             save_user_message=False,
             allow_structured_ui=allow_sui,
+            kb_path=resolve_agent_kb_root(user),
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -691,7 +696,7 @@ async def post_voice_message(
         base = safe.rsplit(".", 1)[0] if "." in safe else safe
         safe = f"{base}.m4a"
 
-    dest = voice_upload_path(sid, safe)
+    dest = voice_upload_path(sid, safe, user=user)
     dest.write_bytes(data)
     file_size = len(data)
 
@@ -744,6 +749,7 @@ async def post_voice_message(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
+                    kb_path=resolve_agent_kb_root(user),
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -774,6 +780,7 @@ async def post_voice_message(
             allow_structured_ui=allow_sui,
             on_chunk=None,
             on_activity=None,
+            kb_path=resolve_agent_kb_root(user),
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -871,6 +878,7 @@ async def post_compose_message(
                 file_uploads,
                 audio_uploads,
                 transcriptions,
+                user=user,
             )
             saved_paths = file_paths + audio_paths
         except APIError:
@@ -897,6 +905,7 @@ async def post_compose_message(
             allow_structured_ui=allow_sui,
             user_message_ack=ack,
             skip_pipeline=skip_pipeline,
+            kb_path=resolve_agent_kb_root(user),
         )
     except APIError:
         raise

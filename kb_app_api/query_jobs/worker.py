@@ -46,6 +46,11 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             await service.append_event(job.id, "activity", label)
 
     attached = [Path(path) for path in job.attached_files if path]
+    db = await get_db()
+    user = await db.get_user_by_id(job.user_id)
+    from kb_app_api.vault_paths import resolve_agent_kb_root
+
+    agent_kb = resolve_agent_kb_root(user)
     qps = QueryProcessingService()
     try:
         reply, _changes = await qps.process_query_for_api(
@@ -58,6 +63,7 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             on_chunk=on_chunk,
             on_activity=on_activity,
             allow_structured_ui=job.allow_structured_ui,
+            kb_path=agent_kb,
         )
         current = await service.get_job(job.id)
         if current is None or current.status == "cancelled":

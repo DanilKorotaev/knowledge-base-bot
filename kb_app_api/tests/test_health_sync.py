@@ -100,7 +100,7 @@ class TestHealthSyncApi(unittest.TestCase):
         self.assertEqual(data["written"], ["daily/2026-01-01.json"])
         self.assertFalse(data["synced_to_nextcloud"])
 
-        written = Path(_kb_dir or "") / "HealthData" / "daily" / "2026-01-01.json"
+        written = Path(_kb_dir or "") / "users" / "healthuser" / "HealthData" / "daily" / "2026-01-01.json"
         self.assertTrue(written.is_file())
         self.assertEqual(json.loads(written.read_text(encoding="utf-8")), payload)
 
@@ -110,7 +110,7 @@ class TestHealthSyncApi(unittest.TestCase):
 
     def test_sync_state_returns_json(self) -> None:
         state = {"last_synced_at": "2026-01-01T00:00:00Z"}
-        state_path = Path(_kb_dir or "") / "HealthData" / "sync_state.json"
+        state_path = Path(_kb_dir or "") / "users" / "healthuser" / "HealthData" / "sync_state.json"
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
