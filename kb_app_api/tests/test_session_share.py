@@ -36,7 +36,8 @@ class TestSessionShare(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer smoke-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="t_" + cls.__name__[:20].lower())
 
     def _create_session_with_message(self) -> str:
         created = self.client.post(

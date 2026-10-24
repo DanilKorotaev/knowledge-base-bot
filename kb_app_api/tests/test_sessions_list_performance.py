@@ -29,8 +29,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "sessions-perf-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000099"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
     Path(_kb_dir).mkdir(parents=True, exist_ok=True)
@@ -51,7 +52,8 @@ class TestSessionsListPerformance(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer sessions-perf-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="sessperf")
 
     def test_list_sessions_message_count_without_loading_bodies(self) -> None:
         create = self.client.post(

@@ -28,8 +28,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "boards-test-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000003"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
@@ -110,9 +111,11 @@ class BoardsRouteTests(unittest.TestCase):
         import config as config_mod
         import kb_app_api.boards.repository as repo
 
-        os.environ["ACCESS_MODE"] = "open"
+    os.environ["ACCESS_MODE"] = "open"
         os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
-        config_mod.config.KB_APP_API_TOKEN = "boards-test-bearer"
+        config_mod.config.KB_APP_JWT_SECRET = "test-jwt-secret"
+        config_mod.config.KB_APP_OPEN_SIGNUP = True
+        config_mod.config.KB_APP_NC_PROVISION_ENABLED = False
         config_mod.config.KB_APP_API_TELEGRAM_ID = 9000000009000003
         config_mod.config.DB_TYPE = "sqlite"
         config_mod.config.ACCESS_MODE = "open"
@@ -128,7 +131,8 @@ class BoardsRouteTests(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer boards-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="boardsuser")
 
     def test_list_boards(self) -> None:
         response = self.client.get("/api/boards", headers=self.headers)

@@ -33,8 +33,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "structured-ui-test-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000002"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
@@ -339,7 +340,7 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
         # config / db singleton may already be loaded (other test modules) — force test env
         from config import config
 
-        config.KB_APP_API_TOKEN = os.environ["KB_APP_API_TOKEN"]
+        config.KB_APP_JWT_SECRET = os.environ.get("KB_APP_JWT_SECRET", "test-jwt-secret")
         config.KB_APP_API_TELEGRAM_ID = int(os.environ["KB_APP_API_TELEGRAM_ID"])
         config.ACCESS_MODE = "open"
         config.KB_APP_API_BYPASS_ACCESS_CHECK = True
@@ -358,7 +359,8 @@ class TestStructuredUIEventsHTTP(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer structured-ui-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="suiuser")
 
     def _create_session(self) -> str:
         response = self.client.post(

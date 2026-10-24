@@ -27,8 +27,9 @@ def setUpModule() -> None:
     _db_file = path
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "push-test-bearer"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000001"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
 
 
@@ -127,7 +128,8 @@ class TestDevicesRoutes(unittest.TestCase):
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
-        cls.headers = {"Authorization": "Bearer push-test-bearer"}
+        from kb_app_api.tests.auth_test_helpers import bearer_headers
+        cls.headers = bearer_headers(cls.client, login="pushuser")
 
     def test_register_and_unregister_device(self) -> None:
         body = {

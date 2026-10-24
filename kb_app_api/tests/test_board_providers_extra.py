@@ -26,8 +26,9 @@ def setUpModule() -> None:
     _kb_dir = tempfile.mkdtemp()
     os.environ["DB_TYPE"] = "sqlite"
     os.environ["DB_FILE"] = _db_file
-    os.environ["KB_APP_API_TOKEN"] = "boards-providers-test"
-    os.environ["KB_APP_API_TELEGRAM_ID"] = "9000000009000088"
+    os.environ["KB_APP_JWT_SECRET"] = "test-jwt-secret"
+    os.environ["KB_APP_OPEN_SIGNUP"] = "true"
+    os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["KB_APP_API_BYPASS_ACCESS_CHECK"] = "true"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
