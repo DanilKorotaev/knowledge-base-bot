@@ -13,6 +13,7 @@ from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.vault_paths import resolve_agent_kb_root
 from kb_app_api.voice_errors import transcription_user_message
 from services.openai_service import OpenAIService
 from services.query_processing_service import QueryProcessingService
@@ -136,6 +137,7 @@ async def voice_query(
             tid,
             use_knowledge_base=use_kb,
             allow_structured_ui=allow_sui,
+            kb_path=resolve_agent_kb_root(user),
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e

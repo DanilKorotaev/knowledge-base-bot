@@ -4,20 +4,18 @@ import base64
 import binascii
 import json
 import logging
-from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from config import config
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.health_paths import (
     resolve_health_file,
     validate_health_file_path,
-    vault_relative_path,
 )
+from kb_app_api.vault_paths import kb_base, resolve_kb_root
 from utils.db_helpers import get_db
 
 logger = logging.getLogger(__name__)
@@ -48,7 +46,8 @@ async def get_health_sync_state(
 ) -> dict[str, Any]:
     db = await get_db()
     health_root = await db.get_user_health_data_relative(user["id"])
-    state_path = resolve_health_file(config.LOCAL_KB_PATH, health_root, "sync_state.json")
+    kb_root = resolve_kb_root(user)
+    state_path = resolve_health_file(kb_root, health_root, "sync_state.json")
     if not state_path.is_file():
         raise APIError("not_found", "sync_state.json не найден", status_code=404)
     try:
@@ -69,6 +68,7 @@ async def upload_health_sync_files(
 ) -> SyncFilesResponse:
     db = await get_db()
     health_root = await db.get_user_health_data_relative(user["id"])
+    kb_root = resolve_kb_root(user)
     written_relative: list[str] = []
     vault_paths: list[str] = []
 
@@ -95,11 +95,14 @@ async def upload_health_sync_files(
                 f"Файл слишком большой (>{MAX_FILE_BYTES} bytes)",
                 detail=item.path,
             )
-        target = resolve_health_file(config.LOCAL_KB_PATH, health_root, relative_path)
+        target = resolve_health_file(kb_root, health_root, relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
         written_relative.append(relative_path)
-        vault_paths.append(vault_relative_path(health_root, relative_path))
+        try:
+            vault_paths.append(str(target.relative_to(kb_base())).replace("\\", "/"))
+        except ValueError:
+            vault_paths.append(f"{health_root}/{relative_path}")
 
     synced = False
     try:
@@ -120,7 +123,6 @@ async def upload_health_sync_files(
     try:
         from utils.health_pipeline import run_health_post_sync
 
-        kb_root = Path(config.LOCAL_KB_PATH).resolve()
         dates = {
             validate_health_file_path(item.path).split("/")[-1].replace(".json", "")[:10]
             for item in body.files

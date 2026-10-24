@@ -18,6 +18,7 @@ from kb_app_api.boards_catalog import (
 )
 from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
+from kb_app_api.vault_paths import resolve_kb_root
 
 router = APIRouter(prefix="/boards", tags=["boards"])
 
@@ -44,7 +45,10 @@ class BoardReorderBody(BaseModel):
 async def get_boards(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    boards = await list_boards(user_id=int(user["id"]))
+    boards = await list_boards(
+        user_id=int(user["id"]),
+        kb_root=resolve_kb_root(user),
+    )
     return {"boards": boards, "total": len(boards)}
 
 
@@ -122,6 +126,7 @@ async def get_board(
         date_from=date_from,
         date_to=date_to,
         user_id=int(user["id"]),
+        kb_root=resolve_kb_root(user),
     )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
@@ -175,6 +180,7 @@ async def refresh_board(
         date_from=date_from,
         date_to=date_to,
         user_id=int(user["id"]),
+        kb_root=resolve_kb_root(user),
     )
     if detail is None:
         raise APIError("not_found", "Board not found", status_code=404)
