@@ -18,8 +18,9 @@ cryptography>=41.0.0
 requests==2.31.0
 webdavclient3==3.14.6
 
-# MCP (Model Context Protocol) — для MCP серверов, запускаемых cursor-agent
-mcp>=1.0.0
+# MCP (Model Context Protocol) — для MCP серверов, запускаемых cursor-agent.
+# Keep <2: mcp 2.x triggers long pip backtracking with our FastAPI/sse pins.
+mcp>=1.0.0,<2
 
 # Utilities
 python-dotenv==1.0.0

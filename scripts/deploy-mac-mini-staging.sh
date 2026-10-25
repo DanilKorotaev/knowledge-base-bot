@@ -42,6 +42,7 @@ docker info >/dev/null 2>&1 || { echo "Docker not ready" >&2; exit 1; }
 mkdir -p logs-staging
 
 # Explicit project name — never the prod project "knowledge-base-bot".
+export DOCKER_BUILDKIT=1
 docker compose -p kb-staging \
   --env-file .env.staging \
   -f docker-compose.yml \
@@ -52,4 +53,13 @@ docker compose -p kb-staging \
 
 echo "Staging deploy OK: $(git rev-parse --short HEAD 2>/dev/null || echo unknown) dir=${STAGING_DIR}"
 echo "Health: curl -sS http://127.0.0.1:8191/health"
-curl -sfS http://127.0.0.1:8191/health || echo "WARN: staging /health not ready yet"
+# Container may still be booting right after recreate.
+for i in $(seq 1 30); do
+  if curl -sfS http://127.0.0.1:8191/health >/dev/null; then
+    curl -sfS http://127.0.0.1:8191/health
+    echo
+    break
+  fi
+  sleep 1
+done
+curl -sfS http://127.0.0.1:8191/health >/dev/null || echo "WARN: staging /health not ready yet"

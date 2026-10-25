@@ -10,12 +10,13 @@ on:
 
 concurrency:
   group: deploy-mac-mini-staging
-  cancel-in-progress: false
+  # Only the latest staging push matters; older queued builds just burn the 30–60m budget.
+  cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: [self-hosted, mac-mini]
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

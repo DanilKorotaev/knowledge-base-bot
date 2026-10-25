@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Копировать зависимости основного проекта (нужны для БД и конфигурации)
-COPY requirements.txt .
+# Slim deps only (full root requirements.txt caused 10–30+ min pip backtracking in CI).
+COPY miniapp/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Копировать весь код проекта (miniapp использует database, config, utils)
