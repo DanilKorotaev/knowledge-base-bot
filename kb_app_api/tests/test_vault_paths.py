@@ -41,6 +41,12 @@ class TestVaultPaths(unittest.TestCase):
         host_user = dict(user, cursor_isolation="host")
         self.assertEqual(resolve_agent_kb_root(host_user), Path(self._tmpdir).resolve())
 
+        from kb_app_api.vault_paths import is_per_user_vault_path
+
+        self.assertTrue(is_per_user_vault_path(vault))
+        self.assertFalse(is_per_user_vault_path(Path(self._tmpdir)))
+        self.assertFalse(is_per_user_vault_path(Path(self._tmpdir) / "users"))
+
         changes = localize_file_changes(
             [{"path": "HealthData/a.json", "type": "modified"}],
             vault,

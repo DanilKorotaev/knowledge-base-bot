@@ -58,6 +58,18 @@ def resolve_agent_kb_root(user: dict[str, Any] | None = None) -> Path:
     return resolve_kb_root(user)
 
 
+def is_per_user_vault_path(kb_path: Path | None) -> bool:
+    """True when path is ``LOCAL_KB_PATH/users/<login>[/...]`` (strict agent cwd)."""
+    if kb_path is None:
+        return False
+    try:
+        rel = Path(kb_path).resolve().relative_to(kb_base())
+    except ValueError:
+        return False
+    parts = rel.parts
+    return len(parts) >= 2 and parts[0] == "users" and bool(parts[1])
+
+
 def paths_relative_to_base(kb_path: Path, relative_paths: list[str]) -> list[str]:
     """Rewrite vault-relative paths to LOCAL_KB_PATH-relative (for SyncService / DB)."""
     base = kb_base()

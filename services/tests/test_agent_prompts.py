@@ -67,6 +67,27 @@ class ChannelPromptLoadTests(unittest.TestCase):
         self.assertNotIn("Документация/Задачи", text)
         self.assertNotIn("kb-automation", text)
 
+    def test_vault_isolation_prefix_only_for_user_vault(self) -> None:
+        from services.cursor_cli_service import CursorCLIService
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            vault = base / "users" / "alice"
+            vault.mkdir(parents=True)
+            with patch.dict(os.environ, {"LOCAL_KB_PATH": str(base)}, clear=False):
+                import config as config_mod
+
+                config_mod.config.LOCAL_KB_PATH = base
+                service = object.__new__(CursorCLIService)
+                service.kb_path = vault
+                wrapped = service._wrap_query_with_vault_isolation("what do you see?")
+                self.assertIn("Vault isolation", wrapped)
+                self.assertIn("what do you see?", wrapped)
+
+                service.kb_path = base
+                plain = service._wrap_query_with_vault_isolation("what do you see?")
+                self.assertEqual(plain, "what do you see?")
+
 
 if __name__ == "__main__":
     unittest.main()

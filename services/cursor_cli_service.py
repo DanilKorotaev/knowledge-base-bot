@@ -76,6 +76,7 @@ class CursorCLIService:
         
         # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
         self._ensure_cursor_rules()
+        self._ensure_vault_isolation_rule()
         
         # Загрузить системный промпт один раз при инициализации
         self.system_prompt = self._load_system_prompt()
@@ -268,6 +269,56 @@ class CursorCLIService:
         if not channel_file.exists() or channel_file.read_text(encoding="utf-8") != text:
             channel_file.write_text(text, encoding="utf-8")
             logger.info("Channel prompt (%s) written to .cursor/rules/channel-prompt.md", channel)
+
+    def _is_per_user_vault_cwd(self) -> bool:
+        """True when agent cwd is LOCAL_KB_PATH/users/<login> (strict isolation)."""
+        try:
+            from kb_app_api.vault_paths import is_per_user_vault_path
+
+            return is_per_user_vault_path(self.kb_path)
+        except Exception:
+            kb = Path(self.kb_path).resolve()
+            return "users" in kb.parts and kb.name != "users"
+
+    _VAULT_ISOLATION_RULE = """---
+description: Per-user vault isolation — stay inside this workspace
+alwaysApply: true
+---
+# Vault isolation
+
+You are confined to **this workspace** (the signed-in user's knowledge-base vault).
+
+Hard rules:
+- Do **not** list, read, write, or search paths outside this workspace root.
+- Do **not** `cd ..`, `ls ..`, `ls ../..`, or open sibling folders under `users/`.
+- Do **not** open absolute paths like `/var/knowledge-base-bot/kb`, `/var/knowledge-base-bot/kb/users`, or other users' vaults (`kbadmin`, `quickreg*`, etc.).
+- When asked what you can see or where you are running, describe **only** this workspace (OS may still report Linux in Docker — that is expected).
+- If a tool fails on an outside path, stop and answer from vault contents only.
+"""
+
+    _VAULT_ISOLATION_QUERY_PREFIX = (
+        "# Vault isolation (strict)\n"
+        "Workspace root is this user's vault only. Do not leave it "
+        "(no `..`, no `/var/knowledge-base-bot/kb/users`, no other logins). "
+        "Answer from files inside the workspace only.\n"
+    )
+
+    def _ensure_vault_isolation_rule(self) -> None:
+        """Write always-on isolation rule when cwd is a per-user vault."""
+        if not self._is_per_user_vault_cwd():
+            return
+        rules_dir = self.kb_path / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        path = rules_dir / "vault-isolation.mdc"
+        text = self._VAULT_ISOLATION_RULE
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
+            logger.info("Vault isolation rule written to %s", path)
+
+    def _wrap_query_with_vault_isolation(self, query: str) -> str:
+        if not self._is_per_user_vault_cwd():
+            return query
+        return f"{self._VAULT_ISOLATION_QUERY_PREFIX}\n---\n\n{query}"
 
     def _wrap_query_with_channel(self, query: str, channel: Optional[str]) -> str:
         """
@@ -970,6 +1021,11 @@ class CursorCLIService:
             # context in history; repeating it every message is wasteful.
             if not cursor_chat_id:
                 query = self._wrap_query_with_channel(query, channel)
+
+        # Soft vault jail: rule file always; query prefix on new Cursor chats only.
+        self._ensure_vault_isolation_rule()
+        if not cursor_chat_id:
+            query = self._wrap_query_with_vault_isolation(query)
         
         # Логировать прикрепленные файлы
         if attached_files:
@@ -1003,7 +1059,8 @@ class CursorCLIService:
         # Подготовить команду
         # -p: prompt mode (интерактивный режим)
         # --force: принудительное выполнение
-        cmd = ["cursor-agent", "-p", "--force"]
+        cmd = ["cursor-agent", "-p", "--force", "--trust"]
+        cmd.extend(["--workspace", str(self.kb_path)])
         
         # Добавить --resume, если есть cursor_chat_id
         if use_resume:
@@ -1036,8 +1093,13 @@ class CursorCLIService:
         master_fd: int | None = None
         try:
             # Выполнить команду в директории базы знаний
-            logger.info(f"Выполнение команды: {' '.join(cmd)}")
-            logger.info(f"Рабочая директория: {self.kb_path}")
+            isolation = "strict-vault" if self._is_per_user_vault_cwd() else "host-or-shared"
+            logger.info(f"Выполнение команды: {' '.join(cmd[:-1])} <query>")
+            logger.info(
+                "Рабочая директория: %s (cursor_isolation=%s)",
+                self.kb_path,
+                isolation,
+            )
             logger.info(f"Таймаут: {timeout} секунд")
             logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")
             
