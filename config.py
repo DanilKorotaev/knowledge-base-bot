@@ -140,6 +140,11 @@ class Config:
     KB_APP_NC_PROVISION_TIMEOUT_SEC: float = float(
         os.getenv("KB_APP_NC_PROVISION_TIMEOUT_SEC", "5") or "5"
     )
+    # Fernet key (or passphrase) for encrypting per-user Nextcloud App Passwords.
+    # If empty, derived from KB_APP_JWT_SECRET (ok for staging; set explicitly in prod).
+    KB_NC_TOKEN_KEY: Optional[str] = os.getenv("KB_NC_TOKEN_KEY")
+    # Default relative folder inside the user's NC home for the knowledge base.
+    KB_APP_DEFAULT_KB_FOLDER: str = (os.getenv("KB_APP_DEFAULT_KB_FOLDER") or "/").strip() or "/"
     # Bootstrap first admin if no login-users exist (staging/dev)
     KB_BOOTSTRAP_ADMIN_LOGIN: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_LOGIN")
     KB_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_PASSWORD")

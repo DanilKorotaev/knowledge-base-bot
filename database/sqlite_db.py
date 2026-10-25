@@ -238,6 +238,8 @@ class SQLiteDatabase(DatabaseInterface):
                 ("vault_root_relative", "TEXT"),
                 ("quota_bytes", "INTEGER"),
                 ("cursor_isolation", "TEXT DEFAULT 'strict'"),
+                ("nc_app_password_enc", "TEXT"),
+                ("kb_folder", "TEXT DEFAULT '/'"),
             ):
                 if col not in user_columns:
                     await db.execute(f"ALTER TABLE users ADD COLUMN {col} {decl}")
@@ -282,13 +284,15 @@ class SQLiteDatabase(DatabaseInterface):
             "quota_bytes": row[14],
             "cursor_isolation": row[15] or "strict",
             "health_data_relative": row[16] if len(row) > 16 else "HealthData",
+            "nc_app_password_enc": row[17] if len(row) > 17 else None,
+            "kb_folder": (row[18] if len(row) > 18 and row[18] else "/") or "/",
         }
 
     _USER_SELECT = """
         id, telegram_id, username, is_allowed, is_admin, created_at,
         login, password_hash, email, role, must_change_password, signup_source,
         nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-        health_data_relative
+        health_data_relative, nc_app_password_enc, kb_folder
     """
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
@@ -436,8 +440,8 @@ class SQLiteDatabase(DatabaseInterface):
                             telegram_id, username, login, password_hash, email, role,
                             must_change_password, signup_source, nextcloud_username,
                             vault_root_relative, quota_bytes, cursor_isolation,
-                            is_allowed, is_admin
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                            is_allowed, is_admin, kb_folder
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, '/')
                         """,
                         (
                             synthetic,
@@ -480,6 +484,26 @@ class SQLiteDatabase(DatabaseInterface):
                 (password_hash, 1 if must_change_password else 0, user_id),
             )
             await db.commit()
+
+    async def set_user_nc_app_password_enc(
+        self, user_id: int, nc_app_password_enc: Optional[str]
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE users SET nc_app_password_enc = ? WHERE id = ?",
+                (nc_app_password_enc, user_id),
+            )
+            await db.commit()
+
+    async def set_user_kb_folder(self, user_id: int, kb_folder: str) -> str:
+        folder = kb_folder or "/"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE users SET kb_folder = ? WHERE id = ?",
+                (folder, user_id),
+            )
+            await db.commit()
+        return folder
 
     async def create_refresh_session(
         self, user_id: int, token_hash: str, expires_at: datetime

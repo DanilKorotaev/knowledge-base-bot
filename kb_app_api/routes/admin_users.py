@@ -27,6 +27,8 @@ def _public(u: dict[str, Any]) -> dict[str, Any]:
         "vault_root_relative": u.get("vault_root_relative"),
         "nextcloud_username": u.get("nextcloud_username"),
         "quota_bytes": u.get("quota_bytes"),
+        "kb_folder": u.get("kb_folder") or "/",
+        "has_nc_app_password": bool(u.get("nc_app_password_enc")),
         "signup_source": u.get("signup_source"),
         "created_at": str(u.get("created_at") or ""),
     }

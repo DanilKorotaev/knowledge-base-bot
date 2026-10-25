@@ -29,6 +29,9 @@
 
 - Create user via OCS Provisioning (или `occ` на host) при register/admin create
 - Set quota; password sync только через наши ручки
+- Per-user App Password: mint via `GET …/ocs/v2.php/core/getapppassword` (login password), store encrypted (`nc_app_password_enc`, key `KB_NC_TOKEN_KEY`)
+- Remint on `change-password`; bot does **not** share all KBs — file access via user App Password + `kb_folder` (default `/`)
+- Soft-lock: смена пароля NC только через наш API (не через NC UI) — вне v1 UI
 
 ## Чеклист
 
@@ -39,9 +42,11 @@
 - [x] `get_api_user` из access token → real user
 - [x] Shared Bearer убран из deps; unit-тесты переведены на register/login
 - [x] Staging smoke: register + `kbadmin` login (2026-10-24)
+- [x] `nc_app_password_enc` + `kb_folder`; mint/rotate; `PATCH /api/auth/me`
 - [ ] Полный per-user `vault_root` во всех call sites (`health_sync`, `boards/runtime`, `voice_attachments`, `revert_helpers`) — частично (messages uploads)
+- [ ] WebDAV sync через per-user App Password (следующий шаг)
 - [ ] E2E iOS: login тестовым юзером вместо `KB_APP_API_TOKEN`
-- [x] Обновить `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md` (JWT auth v1.2)
+- [x] Обновить `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md` (JWT auth v1.2 + kb_folder)
 
 ## Вне скоупа здесь
 

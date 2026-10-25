@@ -14,9 +14,12 @@ from kb_app_api.jwt_tokens import (
     hash_refresh_token,
     new_refresh_token,
 )
+from kb_app_api.kb_folder import normalize_kb_folder
+from kb_app_api.nc_token_crypto import encrypt_nc_token
 from kb_app_api.nextcloud_provision import (
     NextcloudProvisionError,
     create_nextcloud_user,
+    mint_nextcloud_app_password,
     set_nextcloud_password,
 )
 from kb_app_api.passwords import hash_password, verify_password
@@ -37,6 +40,8 @@ def _public_user(user: dict[str, Any]) -> dict[str, Any]:
         "cursor_isolation": user.get("cursor_isolation") or "strict",
         "vault_root_relative": user.get("vault_root_relative"),
         "nextcloud_username": user.get("nextcloud_username"),
+        "kb_folder": user.get("kb_folder") or "/",
+        "has_nc_app_password": bool(user.get("nc_app_password_enc")),
     }
 
 
@@ -120,6 +125,7 @@ async def register_user(
         # Never block the API worker on Nextcloud OCS — run in background.
         asyncio.create_task(
             _provision_nc_user_background(
+                user_id=int(user["id"]),
                 login=login,
                 password=password,
                 email=email,
@@ -129,8 +135,14 @@ async def register_user(
     return user
 
 
+async def _store_minted_app_password(db: Any, user_id: int, app_password: str) -> None:
+    enc = encrypt_nc_token(app_password)
+    await db.set_user_nc_app_password_enc(user_id, enc)
+
+
 async def _provision_nc_user_background(
     *,
+    user_id: int,
     login: str,
     password: str,
     email: Optional[str],
@@ -145,8 +157,17 @@ async def _provision_nc_user_background(
             display_name=login,
             quota=quota,
         )
+        app_pw = await asyncio.to_thread(
+            mint_nextcloud_app_password,
+            userid=login,
+            password=password,
+        )
+        from utils.db_helpers import get_db
+
+        db = await get_db()
+        await _store_minted_app_password(db, user_id, app_pw)
     except NextcloudProvisionError as exc:
-        logger.warning("NC provision failed for %s: %s", login, exc)
+        logger.warning("NC provision/mint failed for %s: %s", login, exc)
     except Exception:
         logger.exception("NC provision unexpected error for %s", login)
 
@@ -222,7 +243,23 @@ async def change_password(
                 detail=str(exc),
                 status_code=502,
             ) from exc
+        try:
+            app_pw = mint_nextcloud_app_password(
+                userid=str(nc_user), password=new_password
+            )
+            await _store_minted_app_password(db, int(user["id"]), app_pw)
+        except NextcloudProvisionError as exc:
+            # Login password already synced; clear stale token so we do not keep a bad secret.
+            logger.warning("NC remint app password failed for %s: %s", nc_user, exc)
+            await db.set_user_nc_app_password_enc(int(user["id"]), None)
     await db.revoke_all_refresh_sessions(int(user["id"]))
+
+
+async def update_kb_folder(db: Any, *, user: dict[str, Any], kb_folder: str) -> dict[str, Any]:
+    folder = normalize_kb_folder(kb_folder)
+    await db.set_user_kb_folder(int(user["id"]), folder)
+    updated = await db.get_user_by_id(int(user["id"]))
+    return updated or {**user, "kb_folder": folder}
 
 
 async def maybe_bootstrap_admin(db: Any) -> None:

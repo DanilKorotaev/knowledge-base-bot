@@ -38,6 +38,10 @@ class ChangePasswordBody(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=200)
 
 
+class PatchMeBody(BaseModel):
+    kb_folder: Optional[str] = Field(default=None, max_length=512)
+
+
 @router.post("/register")
 async def register(body: RegisterBody) -> dict[str, Any]:
     if not config.KB_APP_OPEN_SIGNUP:
@@ -118,6 +122,20 @@ async def change_password(
 @router.get("/me")
 async def me(user: Annotated[dict[str, Any], Depends(get_api_user)]) -> dict[str, Any]:
     return {"user": auth_service._public_user(user)}
+
+
+@router.patch("/me")
+async def patch_me(
+    body: PatchMeBody,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    from utils.db_helpers import get_db
+
+    if body.kb_folder is None:
+        return {"user": auth_service._public_user(user)}
+    db = await get_db()
+    updated = await auth_service.update_kb_folder(db, user=user, kb_folder=body.kb_folder)
+    return {"user": auth_service._public_user(updated)}
 
 
 @router.get("/signup-status")

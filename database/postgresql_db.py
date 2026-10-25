@@ -278,6 +278,8 @@ class PostgreSQLDatabase(DatabaseInterface):
                 ("vault_root_relative", "VARCHAR(512)"),
                 ("quota_bytes", "BIGINT"),
                 ("cursor_isolation", "VARCHAR(32) DEFAULT 'strict'"),
+                ("nc_app_password_enc", "TEXT"),
+                ("kb_folder", "VARCHAR(512) DEFAULT '/'"),
             ]
             for name, typ in alter_specs:
                 if name not in existing:
@@ -321,9 +323,14 @@ class PostgreSQLDatabase(DatabaseInterface):
                 RETURNING id, telegram_id, username, is_allowed, is_admin, created_at,
                     login, password_hash, email, role, must_change_password, signup_source,
                     nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative
+                    health_data_relative, nc_app_password_enc, kb_folder
             """, telegram_id, username)
-            return dict(row)
+            return self._normalize_user(dict(row))
+
+    def _normalize_user(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        if not row.get("kb_folder"):
+            row["kb_folder"] = "/"
+        return row
 
     async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         async with self.pool.acquire() as conn:
@@ -332,12 +339,12 @@ class PostgreSQLDatabase(DatabaseInterface):
                 SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
                     login, password_hash, email, role, must_change_password, signup_source,
                     nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative
+                    health_data_relative, nc_app_password_enc, kb_folder
                 FROM users WHERE id = $1
                 """,
                 user_id,
             )
-            return dict(row) if row else None
+            return self._normalize_user(dict(row)) if row else None
 
     async def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
         async with self.pool.acquire() as conn:
@@ -346,12 +353,12 @@ class PostgreSQLDatabase(DatabaseInterface):
                 SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
                     login, password_hash, email, role, must_change_password, signup_source,
                     nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative
+                    health_data_relative, nc_app_password_enc, kb_folder
                 FROM users WHERE lower(login) = lower($1)
                 """,
                 login,
             )
-            return dict(row) if row else None
+            return self._normalize_user(dict(row)) if row else None
 
     async def count_login_users(self) -> int:
         async with self.pool.acquire() as conn:
@@ -364,7 +371,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
                     login, password_hash, email, role, must_change_password, signup_source,
                     nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative
+                    health_data_relative, nc_app_password_enc, kb_folder
                 FROM users
                 WHERE login IS NOT NULL
                 ORDER BY id ASC
@@ -373,7 +380,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 limit,
                 offset,
             )
-            return [dict(r) for r in rows]
+            return [self._normalize_user(dict(r)) for r in rows]
 
     async def update_app_user_fields(
         self,
@@ -433,17 +440,17 @@ class PostgreSQLDatabase(DatabaseInterface):
                     telegram_id, username, login, password_hash, email, role,
                     must_change_password, signup_source, nextcloud_username,
                     vault_root_relative, quota_bytes, cursor_isolation,
-                    is_allowed, is_admin
+                    is_allowed, is_admin, kb_folder
                 ) VALUES (
                     NULL, $1, $2, $3, $4, $5,
                     $6, $7, $8,
                     $9, $10, $11,
-                    TRUE, $12
+                    TRUE, $12, '/'
                 )
                 RETURNING id, telegram_id, username, is_allowed, is_admin, created_at,
                     login, password_hash, email, role, must_change_password, signup_source,
                     nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative
+                    health_data_relative, nc_app_password_enc, kb_folder
                 """,
                 login,
                 login,
@@ -458,7 +465,7 @@ class PostgreSQLDatabase(DatabaseInterface):
                 cursor_isolation,
                 is_admin,
             )
-            return dict(row)
+            return self._normalize_user(dict(row))
 
     async def update_user_password(
         self, user_id: int, password_hash: str, *, must_change_password: bool = False
@@ -474,6 +481,26 @@ class PostgreSQLDatabase(DatabaseInterface):
                 password_hash,
                 must_change_password,
             )
+
+    async def set_user_nc_app_password_enc(
+        self, user_id: int, nc_app_password_enc: Optional[str]
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET nc_app_password_enc = $2 WHERE id = $1",
+                user_id,
+                nc_app_password_enc,
+            )
+
+    async def set_user_kb_folder(self, user_id: int, kb_folder: str) -> str:
+        folder = kb_folder or "/"
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET kb_folder = $2 WHERE id = $1",
+                user_id,
+                folder,
+            )
+        return folder
 
     async def create_refresh_session(
         self, user_id: int, token_hash: str, expires_at: datetime

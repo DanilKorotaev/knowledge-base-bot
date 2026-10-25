@@ -33,6 +33,19 @@ def setUpModule() -> None:
     os.environ["KB_APP_NC_PROVISION_ENABLED"] = "false"
     os.environ["ACCESS_MODE"] = "open"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
+    # Config attributes are bound at import; force sqlite even if .env says postgresql.
+    from config import config
+
+    config.DB_TYPE = "sqlite"
+    config.DB_FILE = _db_file
+    config.KB_APP_JWT_SECRET = "auth-unit-jwt"
+    config.KB_APP_OPEN_SIGNUP = True
+    config.KB_APP_NC_PROVISION_ENABLED = False
+    config.ACCESS_MODE = "open"
+    config.LOCAL_KB_PATH = _kb_dir
+    import utils.db_helpers as db_helpers
+
+    db_helpers._db_instance = None
 
 
 def tearDownModule() -> None:
@@ -64,7 +77,18 @@ class TestAuth(unittest.TestCase):
         headers = {"Authorization": f"Bearer {body['access_token']}"}
         me = self.client.get("/api/auth/me", headers=headers)
         self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.json()["user"]["login"], "alice")
+        me_user = me.json()["user"]
+        self.assertEqual(me_user["login"], "alice")
+        self.assertEqual(me_user.get("kb_folder"), "/")
+        self.assertFalse(me_user.get("has_nc_app_password"))
+
+        patched = self.client.patch(
+            "/api/auth/me",
+            headers=headers,
+            json={"kb_folder": "KnowledgeBase"},
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        self.assertEqual(patched.json()["user"]["kb_folder"], "/KnowledgeBase")
 
         refreshed = self.client.post(
             "/api/auth/refresh",

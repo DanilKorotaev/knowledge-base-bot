@@ -1,7 +1,8 @@
-"""Create / update Nextcloud users via OCS Provisioning API."""
+"""Create / update Nextcloud users via OCS Provisioning API + App Password mint."""
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 import requests
@@ -20,6 +21,10 @@ def _enabled() -> bool:
     return bool(getattr(config, "KB_APP_NC_PROVISION_ENABLED", True)) and bool(
         config.NEXTCLOUD_URL and config.NEXTCLOUD_BOT_USERNAME and config.NEXTCLOUD_BOT_PASSWORD
     )
+
+
+def _nc_configured() -> bool:
+    return bool(config.NEXTCLOUD_URL)
 
 
 def _auth() -> HTTPBasicAuth:
@@ -133,3 +138,63 @@ def set_nextcloud_quota(userid: str, quota: str) -> None:
         raise NextcloudProvisionError(
             f"NC set quota failed HTTP {resp.status_code}: {resp.text[:300]}"
         )
+
+
+def mint_nextcloud_app_password(
+    *,
+    userid: str,
+    password: str,
+    retries: int = 4,
+    retry_delay_sec: float = 0.6,
+) -> str:
+    """
+    Mint a per-user App Password via OCS core/getapppassword.
+
+    Must authenticate with the user's *login password* (not an existing app password).
+    Retries briefly after user create (NC may need a moment).
+    """
+    if not _nc_configured() or not getattr(config, "KB_APP_NC_PROVISION_ENABLED", True):
+        raise NextcloudProvisionError("NC app-password mint skipped (disabled or NC not configured)")
+
+    url = config.NEXTCLOUD_URL.rstrip("/") + "/ocs/v2.php/core/getapppassword"
+    last_err: Optional[str] = None
+    for attempt in range(max(1, retries)):
+        try:
+            resp = requests.get(
+                url,
+                auth=HTTPBasicAuth(userid, password),
+                headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+                timeout=_timeout(),
+            )
+        except requests.RequestException as exc:
+            last_err = f"network: {exc}"
+            time.sleep(retry_delay_sec * (attempt + 1))
+            continue
+
+        if resp.status_code in (200, 201):
+            try:
+                data = resp.json()
+                app_pw = (
+                    data.get("ocs", {})
+                    .get("data", {})
+                    .get("apppassword")
+                )
+            except Exception:
+                app_pw = None
+            if app_pw:
+                logger.info("NC app password minted for %s", userid)
+                return str(app_pw)
+            last_err = f"empty apppassword in response: {resp.text[:200]}"
+        else:
+            last_err = f"HTTP {resp.status_code}: {resp.text[:300]}"
+            # 401 right after create — wait and retry
+            if resp.status_code in (401, 403, 404, 503):
+                time.sleep(retry_delay_sec * (attempt + 1))
+                continue
+            break
+
+        time.sleep(retry_delay_sec * (attempt + 1))
+
+    raise NextcloudProvisionError(
+        f"NC mint app password failed for {userid}: {last_err}"
+    )
