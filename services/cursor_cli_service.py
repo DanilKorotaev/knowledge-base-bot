@@ -637,14 +637,20 @@ class CursorCLIService:
         on_chunk: Optional[Callable[[str], Awaitable[None]]],
         on_activity: Optional[Callable[[str], Awaitable[None]]],
         process_start_time: Optional[float] = None,
-    ) -> bool:
-        """Returns True if line produced a recognized stream-json event."""
+    ) -> str | None:
+        """Parse one NDJSON event.
+
+        Returns:
+            ``None`` if unrecognized;
+            ``\"result\"`` for terminal stream-json result (agent done);
+            ``\"event\"`` for any other recognized event.
+        """
         event = parse_ndjson_line(line)
         if event is None:
-            return False
+            return None
+        etype = event.get("type") if isinstance(event, dict) else None
         # Timeline breadcrumbs for slow-run diagnosis (tool calls / result).
         try:
-            etype = event.get("type") if isinstance(event, dict) else None
             if etype == "tool_call":
                 subtype = event.get("subtype")
                 tool_obj = event.get("tool_call") if isinstance(event.get("tool_call"), dict) else {}
@@ -686,7 +692,7 @@ class CursorCLIService:
                 await on_activity(activity)
             except Exception as e:
                 logger.debug(f"Ошибка в on_activity callback: {e}")
-        return True
+        return "result" if etype == "result" else "event"
 
     async def _run_stdout_read_loop(
         self,
@@ -752,6 +758,7 @@ class CursorCLIService:
 
         # Slice long waits so slow runs emit heartbeats without changing overall deadlines.
         heartbeat_sec = 60.0
+        got_terminal_result = False
         try:
             while True:
                 if first_activity_time:
@@ -813,13 +820,14 @@ class CursorCLIService:
                         line, ndjson_buffer = ndjson_buffer.split("\n", 1)
                         if not line.strip():
                             continue
-                        if await self._process_ndjson_line(
+                        kind = await self._process_ndjson_line(
                             line,
                             accumulator=stream_accumulator,
                             on_chunk=on_chunk,
                             on_activity=on_activity,
                             process_start_time=process_start_time,
-                        ):
+                        )
+                        if kind:
                             if first_activity_time is None:
                                 first_activity_time = now
                                 logger.info(
@@ -827,6 +835,20 @@ class CursorCLIService:
                                     first_activity_time - process_start_time,
                                 )
                             last_activity_time = now
+                            if kind == "result":
+                                # Agent finished; cursor-agent often keeps stdout open /
+                                # leaves worker-server children — do not wait up to
+                                # CURSOR_CLI_TIMEOUT of silence after the terminal event.
+                                got_terminal_result = True
+                                logger.info(
+                                    "cursor_cli: terminal result received — ending stdout read "
+                                    "(alive=+%.1fs pid=%s)",
+                                    time.time() - process_start_time,
+                                    getattr(process, "pid", None),
+                                )
+                                break
+                    if got_terminal_result:
+                        break
                 else:
                     if decoded.strip():
                         if first_activity_time is None:
@@ -843,17 +865,25 @@ class CursorCLIService:
                             except Exception as e:
                                 logger.debug(f"Ошибка в on_chunk callback: {e}")
 
-            if use_stream_json and stream_accumulator is not None and ndjson_buffer.strip():
-                if await self._process_ndjson_line(
+            if (
+                not got_terminal_result
+                and use_stream_json
+                and stream_accumulator is not None
+                and ndjson_buffer.strip()
+            ):
+                kind = await self._process_ndjson_line(
                     ndjson_buffer,
                     accumulator=stream_accumulator,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     process_start_time=process_start_time,
-                ):
+                )
+                if kind:
                     last_activity_time = time.time()
                     if first_activity_time is None:
                         first_activity_time = last_activity_time
+                    if kind == "result":
+                        got_terminal_result = True
 
         except asyncio.TimeoutError:
             pass
