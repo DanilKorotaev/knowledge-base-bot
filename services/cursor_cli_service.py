@@ -96,11 +96,13 @@ class CursorCLIService:
         if proxy:
             pl = proxy.strip().lower()
             if pl.startswith("socks5://") or pl.startswith("socks://") or pl.startswith("socks5h://"):
+                http_connect = self._http_connect_proxy_url()
                 logger.warning(
-                    "CURSOR_CLI_PROXY is SOCKS (%s); using http://127.0.0.1:8118 for cursor-agent",
+                    "CURSOR_CLI_PROXY is SOCKS (%s); using %s for cursor-agent",
                     proxy,
+                    http_connect,
                 )
-                proxy = "http://127.0.0.1:8118"
+                proxy = http_connect
                 pl = proxy
             env["ALL_PROXY"] = proxy
             env["HTTPS_PROXY"] = proxy
@@ -111,6 +113,24 @@ class CursorCLIService:
         # Headless / SSH: login keychain часто locked — не ходим в него.
         env.setdefault("AGENT_CLI_CREDENTIAL_STORE", "file")
         return env
+
+    @staticmethod
+    def _http_connect_proxy_url() -> str:
+        """HTTP CONNECT for cursor-agent (Node cannot use SOCKS).
+
+        Host macOS: sing-box on 127.0.0.1:8118.
+        Docker/Linux: same proxy on the Mac/VPS host via host.docker.internal:8118.
+        Override with CURSOR_CLI_HTTP_PROXY when needed.
+        """
+        explicit = (os.getenv("CURSOR_CLI_HTTP_PROXY") or "").strip()
+        if explicit:
+            return explicit
+        in_docker = Path("/.dockerenv").exists() or os.getenv(
+            "KB_CURSOR_PROXY_VIA_DOCKER_HOST", ""
+        ).lower() in ("1", "true", "yes")
+        if in_docker:
+            return "http://host.docker.internal:8118"
+        return "http://127.0.0.1:8118"
 
     def _cmd_with_optional_stdbuf(self, cmd: list[str]) -> list[str]:
         """stdbuf есть в Linux (Docker); на macOS без GNU coreutils — запуск без обёртки."""

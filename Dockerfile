@@ -1,15 +1,17 @@
 FROM python:3.11-slim
 
-# Установить зависимости системы
-RUN apt-get update && apt-get install -y \
+# Dual-mode agent: Linux cursor-agent in this image; macOS host installs its own binary separately.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
     git \
     bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Установить Cursor CLI
-# Cursor CLI устанавливается через curl скрипт
-RUN curl https://cursor.com/install -fsS | bash || echo "Warning: Cursor CLI installation failed, but continuing..."
+# Cursor Agent CLI (linux/arm64|amd64). Must succeed — bot cannot answer without it in Docker.
+RUN curl -fsS https://cursor.com/install | bash \
+    && test -x /root/.local/bin/cursor-agent \
+    && /root/.local/bin/cursor-agent --version
 ENV PATH="/root/.local/bin:${PATH}"
 
 # Рабочая директория

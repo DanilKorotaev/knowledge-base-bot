@@ -759,13 +759,23 @@ dc-prod logs miniapp
 
 ### cursor-agent не найден
 
+Dual-mode:
+
+| Режим | Где бинарь | Установка |
+|-------|------------|-----------|
+| **Host (macOS)** | `~/.local/bin/cursor-agent` | `curl https://cursor.com/install \| bash` на mini |
+| **Docker / strict (Linux)** | `/root/.local/bin/cursor-agent` в образе | Dockerfile: тот же installer; macOS-бинарник **не** монтировать |
+
+В контейнере для Node нужен **HTTP CONNECT** на хосте (`CURSOR_CLI_PROXY=http://host.docker.internal:8118`), не SOCKS.
+
 ```bash
 # Cursor CLI устанавливается при сборке Docker-образа
 docker exec knowledge-base-bot which cursor-agent
+docker exec knowledge-base-bot cursor-agent --version
 
-# Если не установлен — пересоберите образ:
-dc-prod build --no-cache bot
-dc-prod up -d bot
+# Если не установлен — пересоберите образ (без `|| echo skipped`):
+dc-prod build --no-cache bot kb-app-api
+dc-prod up -d bot kb-app-api
 ```
 
 ### Проблемы с правами доступа к файлам

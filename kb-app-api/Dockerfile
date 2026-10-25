@@ -1,15 +1,23 @@
 # Сборка из корня репозитория: docker compose build kb-app-api
 # Нужны те же зависимости, что у бота (Cursor CLI, БД, сервисы).
+#
+# Dual-mode agent:
+# - container/Linux (strict): this image installs linux/arm64|amd64 cursor-agent
+# - host/macOS: install separately (`curl https://cursor.com/install | bash`) — never mount the macOS binary in
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
     git \
     bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Cursor CLI — как в основном Dockerfile бота (без него process_query_for_api не сможет вызывать агента).
-RUN curl https://cursor.com/install -fsS | bash || echo "cursor install skipped"
+# Linux Cursor Agent CLI (same installer as VPS Docker). Fail the build if missing —
+# silent `|| echo skipped` previously shipped images without cursor-agent.
+RUN curl -fsS https://cursor.com/install | bash \
+    && test -x /root/.local/bin/cursor-agent \
+    && /root/.local/bin/cursor-agent --version
 ENV PATH="/root/.local/bin:${PATH}"
 
 WORKDIR /app
