@@ -262,6 +262,87 @@ async def update_kb_folder(db: Any, *, user: dict[str, Any], kb_folder: str) -> 
     return updated or {**user, "kb_folder": folder}
 
 
+def _nc_folder_picker_payload(user: dict[str, Any], folders: list[dict[str, str]]) -> dict[str, Any]:
+    current = normalize_kb_folder(user.get("kb_folder"))
+    # Always offer NC home root
+    items: list[dict[str, str]] = [{"path": "/", "name": "/"}]
+    seen = {"/"}
+    for item in folders:
+        rel = (item.get("path") or "").strip().strip("/")
+        if not rel:
+            continue
+        path = normalize_kb_folder(rel)
+        if path in seen:
+            continue
+        seen.add(path)
+        items.append({"path": path, "name": item.get("name") or rel})
+    if current not in seen:
+        items.insert(1, {"path": current, "name": current.lstrip("/") or "/"})
+    return {
+        "current": current,
+        "has_nc_app_password": bool(user.get("nc_app_password_enc")),
+        "folders": items,
+    }
+
+
+async def list_nc_folders(user: dict[str, Any]) -> dict[str, Any]:
+    """Top-level folders in the user's NC home (for Settings picker)."""
+    from services.nextcloud_service import NextCloudService
+
+    nc = NextCloudService.for_user(user, at_home=True)
+    if nc is None or not nc.enabled:
+        raise APIError(
+            "nextcloud_unavailable",
+            "Nextcloud App Password недоступен — войдите снова или смените пароль в приложении",
+            status_code=503,
+        )
+    children = await nc.list_child_directories("")
+    return _nc_folder_picker_payload(user, children)
+
+
+async def create_nc_folder(
+    db: Any,
+    *,
+    user: dict[str, Any],
+    name: str,
+    select: bool = True,
+) -> dict[str, Any]:
+    """Create a top-level folder in NC home and optionally select it as kb_folder."""
+    from services.nextcloud_service import NextCloudService
+
+    raw = (name or "").strip().strip("/")
+    if not raw or "/" in raw or raw in (".", ".."):
+        raise APIError(
+            "validation_error",
+            "Имя папки: один сегмент без /",
+            detail="name",
+            status_code=422,
+        )
+    folder = normalize_kb_folder(raw)
+    nc = NextCloudService.for_user(user, at_home=True)
+    if nc is None or not nc.enabled:
+        raise APIError(
+            "nextcloud_unavailable",
+            "Nextcloud App Password недоступен",
+            status_code=503,
+        )
+    try:
+        await asyncio.to_thread(nc.create_directory, folder.lstrip("/"))
+    except Exception as exc:
+        logger.warning("NC create folder failed for %s: %s", user.get("login"), exc)
+        raise APIError(
+            "bad_gateway",
+            "Не удалось создать папку в Nextcloud",
+            detail=str(exc),
+            status_code=502,
+        ) from exc
+
+    if select:
+        user = await update_kb_folder(db, user=user, kb_folder=folder)
+    children = await nc.list_child_directories("")
+    return _nc_folder_picker_payload(user, children)
+
+
 async def maybe_bootstrap_admin(db: Any) -> None:
     login = (config.KB_BOOTSTRAP_ADMIN_LOGIN or "").strip()
     password = config.KB_BOOTSTRAP_ADMIN_PASSWORD or ""

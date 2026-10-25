@@ -19,6 +19,7 @@ docker compose up -d kb-app-api
 При `register` API создаёт NC-пользователя (OCS) и в фоне минтит **App Password** (`getapppassword`), шифрует Fernet (`KB_NC_TOKEN_KEY` или derive от JWT secret) в `users.nc_app_password_enc`.  
 `change-password` синхронизирует пароль в NC и перевыпускает App Password.  
 `kb_folder` (по умолчанию `/`) — корень KB внутри NC home; `PATCH /api/auth/me`.  
+Список/создание папок для Settings: `GET|POST /api/auth/nc-folders` (через App Password, в NC home).  
 В публичном API только `has_nc_app_password` + `kb_folder` (сам токен не отдаём).
 
 KB App sync/links (`health`, revert, query file changes, open/share-link) идут через **App Password пользователя** (`SyncService.for_user` / `NextCloudService.for_user`), не через bot share. Telegram-бот по-прежнему использует `NEXTCLOUD_BOT_*` для общей KB.

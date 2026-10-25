@@ -42,6 +42,11 @@ class PatchMeBody(BaseModel):
     kb_folder: Optional[str] = Field(default=None, max_length=512)
 
 
+class CreateNcFolderBody(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    select: bool = True
+
+
 @router.post("/register")
 async def register(body: RegisterBody) -> dict[str, Any]:
     if not config.KB_APP_OPEN_SIGNUP:
@@ -136,6 +141,37 @@ async def patch_me(
     db = await get_db()
     updated = await auth_service.update_kb_folder(db, user=user, kb_folder=body.kb_folder)
     return {"user": auth_service._public_user(updated)}
+
+
+@router.get("/nc-folders")
+async def list_nc_folders(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """List top-level folders in the user's Nextcloud home for kb_folder picker."""
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    full = await db.get_user_by_id(int(user["id"]))
+    if not full:
+        raise APIError("unauthorized", "Пользователь не найден", status_code=401)
+    return await auth_service.list_nc_folders(full)
+
+
+@router.post("/nc-folders")
+async def create_nc_folder(
+    body: CreateNcFolderBody,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """Create a folder in NC home; by default also sets it as kb_folder."""
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    full = await db.get_user_by_id(int(user["id"]))
+    if not full:
+        raise APIError("unauthorized", "Пользователь не найден", status_code=401)
+    return await auth_service.create_nc_folder(
+        db, user=full, name=body.name, select=body.select
+    )
 
 
 @router.get("/signup-status")

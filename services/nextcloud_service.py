@@ -122,12 +122,18 @@ class NextCloudService:
                 )
 
     @classmethod
-    def for_user(cls, user: Dict[str, Any]) -> Optional["NextCloudService"]:
+    def for_user(
+        cls,
+        user: Dict[str, Any],
+        *,
+        at_home: bool = False,
+    ) -> Optional["NextCloudService"]:
         """
         WebDAV client authenticated as the KB App user (App Password).
 
         Returns None when the user has no decryptable ``nc_app_password_enc``.
-        Remote root is ``kb_folder`` inside the user's NC home (default ``/``).
+        By default remote root is ``kb_folder`` inside the user's NC home.
+        Pass ``at_home=True`` to use the NC user home (for folder picker / create).
         """
         from kb_app_api.kb_folder import normalize_kb_folder
         from kb_app_api.nc_token_crypto import try_decrypt_nc_token
@@ -140,16 +146,156 @@ class NextCloudService:
         )
         if not username:
             return None
-        try:
-            folder = normalize_kb_folder(user.get("kb_folder"))
-        except Exception:
-            folder = "/"
+        if at_home:
+            base = ""
+        else:
+            try:
+                folder = normalize_kb_folder(user.get("kb_folder"))
+            except Exception:
+                folder = "/"
+            base = folder.lstrip("/")
         return cls(
             username=username,
             password=token,
-            base_path=folder.lstrip("/"),
+            base_path=base,
             deeplink_username=username,
         )
+
+    async def list_child_directories(self, remote_path: str = "") -> List[Dict[str, Any]]:
+        """
+        Immediate child folders under ``remote_path`` (relative to ``base_path``).
+
+        Unlike ``list_files``, includes directories and excludes the root entry itself.
+        Each item: ``{path, name}`` where ``path`` is relative to ``base_path``.
+        """
+        if not self.enabled:
+            return []
+
+        try:
+            headers = {
+                "Depth": "1",
+                "Content-Type": "application/xml",
+            }
+            propfind_body = """<?xml version="1.0"?>
+            <d:propfind xmlns:d="DAV:">
+                <d:prop>
+                    <d:resourcetype/>
+                    <d:displayname/>
+                </d:prop>
+            </d:propfind>"""
+            url = self._get_webdav_url(remote_path)
+            auth = HTTPBasicAuth(self.username, self.password)
+            response = requests.request(
+                method="PROPFIND",
+                url=url,
+                auth=auth,
+                data=propfind_body,
+                headers=headers,
+                timeout=30,
+            )
+            response.raise_for_status()
+            return self._parse_propfind_directories(response.text, remote_path)
+        except Exception as e:
+            logger.error("Failed to list NC directories under %s: %s", remote_path, e)
+            return []
+
+    def _parse_propfind_directories(
+        self, xml_content: str, remote_path: str = ""
+    ) -> List[Dict[str, Any]]:
+        folders: List[Dict[str, Any]] = []
+        try:
+            root = ET.fromstring(xml_content)
+            namespaces = {"d": "DAV:"}
+            webdav_prefix = f"/remote.php/dav/files/{self.username}/"
+            base_norm = (self.base_path or "").lstrip("/").rstrip("/")
+            request_rel = (remote_path or "").strip().strip("/")
+
+            for response in root.findall(".//d:response", namespaces):
+                href_elem = response.find("d:href", namespaces)
+                if href_elem is None:
+                    continue
+                href = unquote(href_elem.text or "")
+                if webdav_prefix in href:
+                    full_path = href.split(webdav_prefix, 1)[1].rstrip("/")
+                else:
+                    full_path = href.lstrip("/").rstrip("/")
+
+                relative_path = full_path
+                if base_norm:
+                    if relative_path == base_norm:
+                        relative_path = ""
+                    elif relative_path.startswith(base_norm + "/"):
+                        relative_path = relative_path[len(base_norm) + 1 :]
+                    else:
+                        continue
+
+                # Skip the listed directory itself
+                if relative_path == request_rel or (
+                    not relative_path and not request_rel
+                ):
+                    continue
+                # Only immediate children
+                if request_rel:
+                    prefix = request_rel + "/"
+                    if not relative_path.startswith(prefix):
+                        continue
+                    child = relative_path[len(prefix) :]
+                else:
+                    child = relative_path
+                if not child or "/" in child:
+                    continue
+
+                propstat = response.find("d:propstat", namespaces)
+                if propstat is None:
+                    continue
+                prop = propstat.find("d:prop", namespaces)
+                if prop is None:
+                    continue
+                resource_type = prop.find("d:resourcetype", namespaces)
+                if resource_type is None:
+                    continue
+                if resource_type.find("d:collection", namespaces) is None:
+                    continue
+
+                display = prop.find("d:displayname", namespaces)
+                name = (
+                    (display.text or "").strip()
+                    if display is not None and display.text
+                    else child
+                )
+                folders.append({"path": relative_path, "name": name or child})
+        except ET.ParseError as e:
+            logger.error("PROPFIND directories XML parse error: %s", e)
+        except Exception as e:
+            logger.error("PROPFIND directories parse error: %s", e, exc_info=True)
+        folders.sort(key=lambda x: (x.get("name") or "").lower())
+        return folders
+
+    def create_directory(self, remote_dir_path: str) -> None:
+        """Create directory (and parents) relative to base_path. Raises on hard failure."""
+        if not self.enabled:
+            raise RuntimeError("Nextcloud client disabled")
+        path = (remote_dir_path or "").strip().strip("/")
+        if not path:
+            return
+        parts = Path(path).parts
+        current_path = ""
+        for part in parts:
+            current_path = f"{current_path}/{part}".lstrip("/")
+            url = self._get_webdav_url(current_path)
+            auth = HTTPBasicAuth(self.username, self.password)
+            response = requests.request(
+                method="MKCOL",
+                url=url,
+                auth=auth,
+                timeout=15,
+            )
+            if response.status_code in (201, 405):
+                continue
+            raise RuntimeError(
+                f"MKCOL {current_path} failed HTTP {response.status_code}: {response.text[:200]}"
+            )
+
     
     def _get_full_path(self, relative_path: str) -> str:
         """Получить полный путь в NextCloud"""

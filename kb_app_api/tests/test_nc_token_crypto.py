@@ -94,5 +94,59 @@ class TestMintAppPassword(unittest.TestCase):
             self.assertEqual(kwargs["auth"].username, "alice")
 
 
+class TestNcFolderPicker(unittest.TestCase):
+    def test_parse_child_directories(self) -> None:
+        from services.nextcloud_service import NextCloudService
+
+        nc = NextCloudService(
+            username="alice",
+            password="pw",
+            base_path="",
+            url="https://nc.example",
+        )
+        xml = """<?xml version="1.0"?>
+        <d:multistatus xmlns:d="DAV:">
+          <d:response>
+            <d:href>/remote.php/dav/files/alice/</d:href>
+            <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
+          </d:response>
+          <d:response>
+            <d:href>/remote.php/dav/files/alice/Documents/</d:href>
+            <d:propstat><d:prop>
+              <d:resourcetype><d:collection/></d:resourcetype>
+              <d:displayname>Documents</d:displayname>
+            </d:prop></d:propstat>
+          </d:response>
+          <d:response>
+            <d:href>/remote.php/dav/files/alice/note.md</d:href>
+            <d:propstat><d:prop><d:resourcetype/></d:prop></d:propstat>
+          </d:response>
+          <d:response>
+            <d:href>/remote.php/dav/files/alice/KnowledgeBase/</d:href>
+            <d:propstat><d:prop>
+              <d:resourcetype><d:collection/></d:resourcetype>
+              <d:displayname>KnowledgeBase</d:displayname>
+            </d:prop></d:propstat>
+          </d:response>
+        </d:multistatus>
+        """
+        folders = nc._parse_propfind_directories(xml, "")
+        paths = {f["path"] for f in folders}
+        self.assertEqual(paths, {"Documents", "KnowledgeBase"})
+
+    def test_picker_payload_includes_home_and_current(self) -> None:
+        from kb_app_api.auth_service import _nc_folder_picker_payload
+
+        user = {"kb_folder": "/Custom", "nc_app_password_enc": "x"}
+        payload = _nc_folder_picker_payload(
+            user, [{"path": "Documents", "name": "Documents"}]
+        )
+        paths = [f["path"] for f in payload["folders"]]
+        self.assertEqual(payload["current"], "/Custom")
+        self.assertIn("/", paths)
+        self.assertIn("/Documents", paths)
+        self.assertIn("/Custom", paths)
+
+
 if __name__ == "__main__":
     unittest.main()
