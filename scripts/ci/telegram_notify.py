@@ -9,6 +9,7 @@ Secrets (GitHub Actions repository secrets or env on self-hosted runner):
 Optional:
   TELEGRAM_NOTIFY_DISABLED=1
   TELEGRAM_NOTIFY_PROXY=socks5://127.0.0.1:1080  (for api.telegram.org from RU)
+  KB_DEPLOY_ENV=staging|production  (or --environment)
 """
 
 from __future__ import annotations
@@ -55,6 +56,34 @@ def git_short_sha() -> str:
     return os.environ.get("GITHUB_SHA", "")[:7] or "?"
 
 
+def git_commit_subject() -> str | None:
+    try:
+        proc = subprocess.run(
+            ["git", "log", "-1", "--pretty=%s"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode == 0:
+            subject = proc.stdout.strip()
+            return subject or None
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def resolve_environment(explicit: str | None) -> str:
+    if explicit in ("staging", "production"):
+        return explicit
+    env = (os.environ.get("KB_DEPLOY_ENV") or "").strip().lower()
+    if env in ("staging", "production", "prod"):
+        return "staging" if env == "staging" else "production"
+    ref = (os.environ.get("GITHUB_REF_NAME") or "").strip().lower()
+    if ref == "staging":
+        return "staging"
+    return "production"
+
+
 def ci_context_lines() -> list[str]:
     lines: list[str] = []
     ref = os.environ.get("GITHUB_REF_NAME", "").strip()
@@ -64,6 +93,10 @@ def ci_context_lines() -> list[str]:
     if event:
         lines.append(f"Событие: <code>{html_escape(event)}</code>")
     lines.append(f"Коммит: <code>{html_escape(git_short_sha())}</code>")
+    subject = git_commit_subject()
+    if subject:
+        # Keep one line; Telegram HTML is fine with escaped text.
+        lines.append(f"Сообщение: {html_escape(subject)}")
     url = github_run_url()
     if url:
         lines.append(f'<a href="{html_escape(url)}">Workflow run</a>')
@@ -142,8 +175,8 @@ def send_telegram(text: str) -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
-        print("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skip notify")
-        return
+        print("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set; skip notify", file=sys.stderr)
+        sys.exit(1)
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     data = _telegram_form_data(chat_id, text)
@@ -159,16 +192,29 @@ def send_telegram(text: str) -> None:
         sys.exit(1)
 
 
-def build_deploy_message(outcome: str) -> str:
+def build_deploy_message(outcome: str, environment: str) -> str:
     success = outcome == "success"
-    title = (
-        "✅ <b>Knowledge Base Bot — deploy на Mac mini</b>"
-        if success
-        else "❌ <b>Knowledge Base Bot — deploy не удался</b>"
-    )
+    if environment == "staging":
+        title = (
+            "🧪 <b>KB staging — deploy на Mac mini</b>"
+            if success
+            else "❌ <b>KB staging — deploy не удался</b>"
+        )
+        ok_body = (
+            "Docker <code>kb-staging</code> обновлён (API :8191).\n"
+            "Публично: <code>https://kbapp.staging.example.com</code>"
+        )
+    else:
+        title = (
+            "✅ <b>KB production — deploy на Mac mini</b>"
+            if success
+            else "❌ <b>KB production — deploy не удался</b>"
+        )
+        ok_body = "Runtime обновлён: бот и KB App API на хосте, Docker-сервисы перезапущены."
+
     lines = [title, "", *ci_context_lines()]
     if success:
-        lines.extend(["", "Runtime обновлён: бот и KB App API на хосте, Docker-сервисы перезапущены."])
+        lines.extend(["", ok_body])
     else:
         lines.extend(["", "См. логи workflow на GitHub."])
     return "\n".join(lines)
@@ -183,13 +229,20 @@ def main() -> None:
         choices=["success", "failure", "cancelled", "skipped"],
         help="GitHub Actions step outcome",
     )
+    parser.add_argument(
+        "--environment",
+        choices=["staging", "production"],
+        default=None,
+        help="Deploy target (default: KB_DEPLOY_ENV or branch)",
+    )
     args = parser.parse_args()
+    environment = resolve_environment(args.environment)
 
     if args.event == "deploy":
-        message = build_deploy_message(args.outcome)
+        message = build_deploy_message(args.outcome, environment)
 
     send_telegram(message)
-    print("Telegram notification sent.")
+    print(f"Telegram notification sent ({environment}, outcome={args.outcome}).")
 
 
 if __name__ == "__main__":

@@ -28,10 +28,10 @@ jobs:
       - name: Pull and deploy production runtime
         id: deploy
         env:
-          KB_RUNTIME_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
+          KB_RUNTIME_DIR: ${{ vars.KB_RUNTIME_DIR }}
         run: |
           set -euo pipefail
-          RUNTIME="${KB_RUNTIME_DIR}"
+          RUNTIME="${KB_RUNTIME_DIR:-$HOME/Projects/knowledge-base-bot}"
           cd "${RUNTIME}"
 
           if [[ ! -d .git ]]; then
@@ -58,5 +58,12 @@ jobs:
 
       - name: Notify Telegram (deploy prod)
         if: always()
-        working-directory: /Users/danilkorotaev/Projects/knowledge-base-bot
-        run: python3 scripts/ci/telegram_notify.py deploy --outcome ${{ steps.deploy.outcome }}
+        env:
+          KB_RUNTIME_DIR: ${{ vars.KB_RUNTIME_DIR }}
+          KB_DEPLOY_ENV: production
+        run: |
+          set -euo pipefail
+          cd "${KB_RUNTIME_DIR:-$HOME/Projects/knowledge-base-bot}"
+          python3 scripts/ci/telegram_notify.py deploy \
+            --environment production \
+            --outcome "${{ steps.deploy.outcome }}"

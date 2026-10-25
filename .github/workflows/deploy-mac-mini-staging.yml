@@ -25,13 +25,13 @@ jobs:
       - name: Pull staging checkout and redeploy kb-staging
         id: deploy
         env:
-          # Separate from prod runtime (~/Projects/knowledge-base-bot on main).
-          KB_STAGING_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot-staging
-          KB_PROD_DIR: /Users/danilkorotaev/Projects/knowledge-base-bot
+          # Override via repo vars if needed; default is under the runner $HOME (no hardcoded user path).
+          KB_STAGING_DIR: ${{ vars.KB_STAGING_DIR }}
+          KB_PROD_DIR: ${{ vars.KB_PROD_DIR }}
         run: |
           set -euo pipefail
-          STAGING="${KB_STAGING_DIR}"
-          PROD="${KB_PROD_DIR}"
+          STAGING="${KB_STAGING_DIR:-$HOME/Projects/knowledge-base-bot-staging}"
+          PROD="${KB_PROD_DIR:-$HOME/Projects/knowledge-base-bot}"
 
           if [[ ! -d "${STAGING}/.git" ]]; then
             echo "Bootstrapping staging clone at ${STAGING}"
@@ -78,7 +78,18 @@ jobs:
 
       - name: Notify Telegram (deploy staging)
         if: always()
-        working-directory: /Users/danilkorotaev/Projects/knowledge-base-bot
+        env:
+          KB_STAGING_DIR: ${{ vars.KB_STAGING_DIR }}
+          KB_DEPLOY_ENV: staging
         run: |
-          python3 scripts/ci/telegram_notify.py deploy --outcome ${{ steps.deploy.outcome }} \
-            || echo "notify skipped/failed"
+          set -euo pipefail
+          STAGING="${KB_STAGING_DIR:-$HOME/Projects/knowledge-base-bot-staging}"
+          # Prefer just-deployed staging checkout (has the latest notify script).
+          if [[ -f "${STAGING}/scripts/ci/telegram_notify.py" ]]; then
+            cd "${STAGING}"
+          else
+            cd "${HOME}/Projects/knowledge-base-bot"
+          fi
+          python3 scripts/ci/telegram_notify.py deploy \
+            --environment staging \
+            --outcome "${{ steps.deploy.outcome }}"
