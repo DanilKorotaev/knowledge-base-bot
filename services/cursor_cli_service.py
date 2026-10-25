@@ -636,11 +636,45 @@ class CursorCLIService:
         accumulator: StreamJsonAccumulator,
         on_chunk: Optional[Callable[[str], Awaitable[None]]],
         on_activity: Optional[Callable[[str], Awaitable[None]]],
+        process_start_time: Optional[float] = None,
     ) -> bool:
         """Returns True if line produced a recognized stream-json event."""
         event = parse_ndjson_line(line)
         if event is None:
             return False
+        # Timeline breadcrumbs for slow-run diagnosis (tool calls / result).
+        try:
+            etype = event.get("type") if isinstance(event, dict) else None
+            if etype == "tool_call":
+                subtype = event.get("subtype")
+                tool_obj = event.get("tool_call") if isinstance(event.get("tool_call"), dict) else {}
+                tool_name = next(iter(tool_obj.keys()), "?") if tool_obj else "?"
+                elapsed = (
+                    f"{time.time() - process_start_time:.1f}s"
+                    if process_start_time is not None
+                    else "?"
+                )
+                logger.info(
+                    "cursor_cli: tool_call %s name=%s at+%s",
+                    subtype or "?",
+                    tool_name,
+                    elapsed,
+                )
+            elif etype == "result" and isinstance(event, dict):
+                elapsed = (
+                    f"{time.time() - process_start_time:.1f}s"
+                    if process_start_time is not None
+                    else "?"
+                )
+                logger.info(
+                    "cursor_cli: result subtype=%s duration_ms=%s is_error=%s at+%s",
+                    event.get("subtype"),
+                    event.get("duration_ms"),
+                    event.get("is_error"),
+                    elapsed,
+                )
+        except Exception:
+            pass
         chunk, activity = accumulator.consume(event)
         if on_chunk and chunk:
             try:
@@ -716,26 +750,50 @@ class CursorCLIService:
 
             cancel_task = asyncio.create_task(watch_cancel())
 
+        # Slice long waits so slow runs emit heartbeats without changing overall deadlines.
+        heartbeat_sec = 60.0
         try:
             while True:
                 if first_activity_time:
                     # stream-json: tool calls (e.g. swift test) may run minutes without new events
-                    read_timeout = timeout if use_stream_json else idle_timeout
+                    quiet_limit = float(timeout if use_stream_json else idle_timeout)
                 else:
-                    read_timeout = timeout
+                    quiet_limit = float(timeout)
+                quiet_so_far = 0.0
+                if first_activity_time:
+                    quiet_so_far = time.time() - (last_activity_time or first_activity_time)
+                elif process_start_time:
+                    quiet_so_far = time.time() - process_start_time
+                remaining = max(0.1, quiet_limit - quiet_so_far)
+                read_timeout = min(heartbeat_sec, remaining)
                 try:
                     chunk = await asyncio.wait_for(
                         self._read_process_stdout_chunk(process, master_fd, 4096),
                         timeout=read_timeout,
                     )
                 except asyncio.TimeoutError:
+                    quiet_elapsed = (
+                        time.time() - (last_activity_time or first_activity_time)
+                        if first_activity_time
+                        else time.time() - process_start_time
+                    )
+                    if quiet_elapsed + 0.01 < quiet_limit:
+                        logger.info(
+                            "cursor_cli: heartbeat quiet=%.0fs limit=%.0fs "
+                            "alive=+%.0fs pid=%s stream_json=%s",
+                            quiet_elapsed,
+                            quiet_limit,
+                            time.time() - process_start_time,
+                            getattr(process, "pid", None),
+                            use_stream_json,
+                        )
+                        continue
                     if first_activity_time and stdout_chunks:
-                        idle_elapsed = time.time() - (last_activity_time or first_activity_time)
                         logger.info(
                             "cursor_cli: idle %.1f с после последней активности "
-                            "(CURSOR_CLI_IDLE_TIMEOUT=%s) — завершаем чтение",
-                            idle_elapsed,
-                            idle_timeout,
+                            "(limit=%s) — завершаем чтение",
+                            quiet_elapsed,
+                            int(quiet_limit),
                         )
                         break
                     timed_out_before_activity = True
@@ -760,6 +818,7 @@ class CursorCLIService:
                             accumulator=stream_accumulator,
                             on_chunk=on_chunk,
                             on_activity=on_activity,
+                            process_start_time=process_start_time,
                         ):
                             if first_activity_time is None:
                                 first_activity_time = now
@@ -790,6 +849,7 @@ class CursorCLIService:
                     accumulator=stream_accumulator,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
+                    process_start_time=process_start_time,
                 ):
                     last_activity_time = time.time()
                     if first_activity_time is None:
