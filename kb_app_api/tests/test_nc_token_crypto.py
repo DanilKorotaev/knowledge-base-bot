@@ -134,18 +134,28 @@ class TestNcFolderPicker(unittest.TestCase):
         paths = {f["path"] for f in folders}
         self.assertEqual(paths, {"Documents", "KnowledgeBase"})
 
-    def test_picker_payload_includes_home_and_current(self) -> None:
-        from kb_app_api.auth_service import _nc_folder_picker_payload
+    def test_picker_payload_browse_children_only(self) -> None:
+        from kb_app_api.auth_service import _nc_folder_picker_payload, _parent_path
 
         user = {"kb_folder": "/Custom", "nc_app_password_enc": "x"}
         payload = _nc_folder_picker_payload(
-            user, [{"path": "Documents", "name": "Documents"}]
+            user, [{"path": "Documents", "name": "Documents"}], browse_path="/"
         )
         paths = [f["path"] for f in payload["folders"]]
         self.assertEqual(payload["current"], "/Custom")
-        self.assertIn("/", paths)
+        self.assertEqual(payload["browse_path"], "/")
+        self.assertIsNone(payload["parent_path"])
+        self.assertNotIn("/", paths)
         self.assertIn("/Documents", paths)
-        self.assertIn("/Custom", paths)
+        self.assertEqual(_parent_path("/kb/notes"), "/kb")
+        nested = _nc_folder_picker_payload(
+            user,
+            [{"path": "kb/notes", "name": "notes"}],
+            browse_path="/kb",
+        )
+        self.assertEqual(nested["browse_path"], "/kb")
+        self.assertEqual(nested["parent_path"], "/")
+        self.assertEqual(nested["folders"][0]["path"], "/kb/notes")
 
 
 if __name__ == "__main__":

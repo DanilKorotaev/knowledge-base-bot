@@ -44,6 +44,7 @@ class PatchMeBody(BaseModel):
 
 class CreateNcFolderBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
+    parent: Optional[str] = Field(default="/", max_length=512)
     select: bool = True
 
 
@@ -146,15 +147,16 @@ async def patch_me(
 @router.get("/nc-folders")
 async def list_nc_folders(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
+    path: str = "/",
 ) -> dict[str, Any]:
-    """List top-level folders in the user's Nextcloud home for kb_folder picker."""
+    """List child folders under ``path`` in the user's Nextcloud home (kb_folder picker)."""
     from utils.db_helpers import get_db
 
     db = await get_db()
     full = await db.get_user_by_id(int(user["id"]))
     if not full:
         raise APIError("unauthorized", "Пользователь не найден", status_code=401)
-    return await auth_service.list_nc_folders(full)
+    return await auth_service.list_nc_folders(full, path=path)
 
 
 @router.post("/nc-folders")
@@ -162,7 +164,7 @@ async def create_nc_folder(
     body: CreateNcFolderBody,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    """Create a folder in NC home; by default also sets it as kb_folder."""
+    """Create a folder under ``parent``; by default also sets it as kb_folder."""
     from utils.db_helpers import get_db
 
     db = await get_db()
@@ -170,7 +172,11 @@ async def create_nc_folder(
     if not full:
         raise APIError("unauthorized", "Пользователь не найден", status_code=401)
     return await auth_service.create_nc_folder(
-        db, user=full, name=body.name, select=body.select
+        db,
+        user=full,
+        name=body.name,
+        parent=body.parent or "/",
+        select=body.select,
     )
 
 

@@ -262,11 +262,24 @@ async def update_kb_folder(db: Any, *, user: dict[str, Any], kb_folder: str) -> 
     return updated or {**user, "kb_folder": folder}
 
 
-def _nc_folder_picker_payload(user: dict[str, Any], folders: list[dict[str, str]]) -> dict[str, Any]:
+def _parent_path(path: str) -> str | None:
+    folder = normalize_kb_folder(path)
+    if folder == "/":
+        return None
+    parent = "/".join(folder.rstrip("/").split("/")[:-1])
+    return parent if parent else "/"
+
+
+def _nc_folder_picker_payload(
+    user: dict[str, Any],
+    folders: list[dict[str, str]],
+    *,
+    browse_path: str = "/",
+) -> dict[str, Any]:
     current = normalize_kb_folder(user.get("kb_folder"))
-    # Always offer NC home root
-    items: list[dict[str, str]] = [{"path": "/", "name": "/"}]
-    seen = {"/"}
+    browse = normalize_kb_folder(browse_path)
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
     for item in folders:
         rel = (item.get("path") or "").strip().strip("/")
         if not rel:
@@ -275,20 +288,24 @@ def _nc_folder_picker_payload(user: dict[str, Any], folders: list[dict[str, str]
         if path in seen:
             continue
         seen.add(path)
-        items.append({"path": path, "name": item.get("name") or rel})
-    if current not in seen:
-        items.insert(1, {"path": current, "name": current.lstrip("/") or "/"})
+        name = (item.get("name") or "").strip() or path.rsplit("/", 1)[-1]
+        items.append({"path": path, "name": name})
     return {
         "current": current,
+        "browse_path": browse,
+        "parent_path": _parent_path(browse),
         "has_nc_app_password": bool(user.get("nc_app_password_enc")),
         "folders": items,
     }
 
 
-async def list_nc_folders(user: dict[str, Any]) -> dict[str, Any]:
-    """Top-level folders in the user's NC home (for Settings picker)."""
+async def list_nc_folders(
+    user: dict[str, Any], *, path: str = "/"
+) -> dict[str, Any]:
+    """List child folders under ``path`` in the user's NC home (Settings picker)."""
     from services.nextcloud_service import NextCloudService
 
+    browse = normalize_kb_folder(path)
     nc = NextCloudService.for_user(user, at_home=True)
     if nc is None or not nc.enabled:
         raise APIError(
@@ -296,8 +313,9 @@ async def list_nc_folders(user: dict[str, Any]) -> dict[str, Any]:
             "Nextcloud App Password недоступен — войдите снова или смените пароль в приложении",
             status_code=503,
         )
-    children = await nc.list_child_directories("")
-    return _nc_folder_picker_payload(user, children)
+    remote = "" if browse == "/" else browse.lstrip("/")
+    children = await nc.list_child_directories(remote)
+    return _nc_folder_picker_payload(user, children, browse_path=browse)
 
 
 async def create_nc_folder(
@@ -305,9 +323,10 @@ async def create_nc_folder(
     *,
     user: dict[str, Any],
     name: str,
+    parent: str = "/",
     select: bool = True,
 ) -> dict[str, Any]:
-    """Create a top-level folder in NC home and optionally select it as kb_folder."""
+    """Create a folder under ``parent`` in NC home; optionally select it as kb_folder."""
     from services.nextcloud_service import NextCloudService
 
     raw = (name or "").strip().strip("/")
@@ -318,7 +337,10 @@ async def create_nc_folder(
             detail="name",
             status_code=422,
         )
-    folder = normalize_kb_folder(raw)
+    parent_path = normalize_kb_folder(parent)
+    folder = normalize_kb_folder(
+        f"{parent_path.rstrip('/')}/{raw}" if parent_path != "/" else f"/{raw}"
+    )
     nc = NextCloudService.for_user(user, at_home=True)
     if nc is None or not nc.enabled:
         raise APIError(
@@ -339,8 +361,9 @@ async def create_nc_folder(
 
     if select:
         user = await update_kb_folder(db, user=user, kb_folder=folder)
-    children = await nc.list_child_directories("")
-    return _nc_folder_picker_payload(user, children)
+    # Stay inside the new folder so nested create/browse continues naturally.
+    children = await nc.list_child_directories(folder.lstrip("/"))
+    return _nc_folder_picker_payload(user, children, browse_path=folder)
 
 
 async def maybe_bootstrap_admin(db: Any) -> None:
