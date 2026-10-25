@@ -118,13 +118,16 @@ async def create_file_open_link(
     """Authenticated web URL + optional nextcloud:// deep link (no public share)."""
     change_id = _parse_change_id(body.file_id, body.file_id)
     change = await _authorized_file_change(change_id, user["id"])
-    remote_path = change["file_path"]
+    stored_path = change["file_path"]
+    from kb_app_api.vault_paths import to_vault_relative
 
-    nextcloud = NextCloudService()
-    if not nextcloud.enabled:
+    remote_path = to_vault_relative(user, stored_path)
+
+    nextcloud = NextCloudService.for_user(user)
+    if nextcloud is None or not nextcloud.enabled:
         raise APIError(
             "nextcloud_unavailable",
-            "Nextcloud не настроен, ссылка на файл недоступна",
+            "Nextcloud App Password недоступен для пользователя",
             status_code=503,
         )
 
@@ -140,7 +143,7 @@ async def create_file_open_link(
     return {
         "web_url": web_url,
         "nextcloud_deeplink": links.get("nextcloud_deeplink"),
-        "path": remote_path,
+        "path": stored_path,
         "change_id": str(change_id),
     }
 
@@ -152,13 +155,16 @@ async def create_file_share_link(
 ) -> dict[str, Any]:
     change_id = _parse_change_id(body.file_id, body.file_id)
     change = await _authorized_file_change(change_id, user["id"])
-    remote_path = change["file_path"]
+    stored_path = change["file_path"]
+    from kb_app_api.vault_paths import to_vault_relative
 
-    nextcloud = NextCloudService()
-    if not nextcloud.enabled:
+    remote_path = to_vault_relative(user, stored_path)
+
+    nextcloud = NextCloudService.for_user(user)
+    if nextcloud is None or not nextcloud.enabled:
         raise APIError(
             "nextcloud_unavailable",
-            "Nextcloud не настроен, ссылка на файл недоступна",
+            "Nextcloud App Password недоступен для пользователя",
             status_code=503,
         )
 
@@ -173,6 +179,6 @@ async def create_file_share_link(
 
     return {
         "url": url,
-        "path": remote_path,
+        "path": stored_path,
         "change_id": str(change_id),
     }

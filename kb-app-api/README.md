@@ -21,4 +21,6 @@ docker compose up -d kb-app-api
 `kb_folder` (по умолчанию `/`) — корень KB внутри NC home; `PATCH /api/auth/me`.  
 В публичном API только `has_nc_app_password` + `kb_folder` (сам токен не отдаём).
 
+KB App sync/links (`health`, revert, query file changes, open/share-link) идут через **App Password пользователя** (`SyncService.for_user` / `NextCloudService.for_user`), не через bot share. Telegram-бот по-прежнему использует `NEXTCLOUD_BOT_*` для общей KB.
+
 Продакшен: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` — сервис `kb-app-api` слушает `127.0.0.1:8091`; снаружи — nginx + HTTPS (конфиг **только на сервере**, не в git). См. заметку Nextcloud «Продакшен-сервер — SSH и статус бота».

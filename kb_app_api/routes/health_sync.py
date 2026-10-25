@@ -100,6 +100,7 @@ async def upload_health_sync_files(
         target.write_bytes(payload)
         written_relative.append(relative_path)
         try:
+            # LOCAL_KB-relative (boards invalidate / post-sync)
             vault_paths.append(str(target.relative_to(kb_base())).replace("\\", "/"))
         except ValueError:
             vault_paths.append(f"{health_root}/{relative_path}")
@@ -108,10 +109,13 @@ async def upload_health_sync_files(
     try:
         from services.sync_service import SyncService
 
-        sync = SyncService()
+        sync = SyncService.for_user(user)
         if sync.enabled:
             for vault_path in vault_paths:
-                ok = await sync.sync_file(vault_path, direction="to")
+                from kb_app_api.vault_paths import to_vault_relative
+
+                remote_rel = to_vault_relative(user, vault_path)
+                ok = await sync.sync_file(remote_rel, direction="to")
                 if not ok:
                     logger.warning("Health sync upload to Nextcloud failed for %s", vault_path)
             synced = True

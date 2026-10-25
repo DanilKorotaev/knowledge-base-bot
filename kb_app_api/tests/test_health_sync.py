@@ -38,6 +38,18 @@ def setUpModule() -> None:
     os.environ["ACCESS_MODE"] = "open"
     os.environ["LOCAL_KB_PATH"] = _kb_dir
     Path(_kb_dir).mkdir(parents=True, exist_ok=True)
+    from config import config
+
+    config.DB_TYPE = "sqlite"
+    config.DB_FILE = _db_file
+    config.KB_APP_JWT_SECRET = "test-jwt-secret"
+    config.KB_APP_OPEN_SIGNUP = True
+    config.KB_APP_NC_PROVISION_ENABLED = False
+    config.ACCESS_MODE = "open"
+    config.LOCAL_KB_PATH = Path(_kb_dir)
+    import utils.db_helpers as db_helpers
+
+    db_helpers._db_instance = None
 
 
 def tearDownModule() -> None:

@@ -426,10 +426,15 @@ class QueryProcessingService:
         self,
         session_id: int,
         changes: List[Dict[str, Any]],
+        *,
+        api_user: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         Залогировать изменения в БД, Health hook, синхронизация с Nextcloud.
         Возвращает HTML-текст для уведомления или None, если changes пуст.
+
+        api_user: KB App user → per-user WebDAV (App Password + vault).
+        None → legacy bot SyncService (Telegram shared KB).
         """
         if not changes:
             return None
@@ -439,7 +444,14 @@ class QueryProcessingService:
             return None
 
         db = await self._get_db()
-        sync_service = self._get_sync_service()
+        if api_user is not None:
+            sync_service = SyncService.for_user(api_user)
+            from kb_app_api.vault_paths import changes_to_vault_relative
+
+            sync_payload = changes_to_vault_relative(api_user, changes)
+        else:
+            sync_service = self._get_sync_service()
+            sync_payload = changes
 
         from utils.file_helpers import sanitize_file_change_text
 
@@ -468,24 +480,33 @@ class QueryProcessingService:
         except Exception as e:
             logger.warning("Boards invalidate after file changes: %s", e, exc_info=True)
 
-        sync_success = await sync_service.sync_changes(changes)
+        sync_success = await sync_service.sync_changes(sync_payload)
 
         file_urls: Optional[Dict[str, str]] = None
         link_mode = getattr(app_config, "NEXTCLOUD_LINK_MODE", "disabled")
 
         if link_mode != "disabled" and sync_success:
-            nc_service = self._get_nextcloud_service()
-            if nc_service.enabled:
+            if api_user is not None:
+                nc_service = NextCloudService.for_user(api_user)
+            else:
+                nc_service = self._get_nextcloud_service()
+            if nc_service and nc_service.enabled:
                 file_urls = {}
 
                 async def get_link_for_change(change: Dict[str, Any]) -> tuple[str, Optional[str]]:
-                    path = change.get("path", "")
+                    # Public/notify keys stay LOCAL_KB-relative; NC uses vault-relative when api_user.
+                    display_path = change.get("path", "")
+                    remote_path = display_path
+                    if api_user is not None:
+                        from kb_app_api.vault_paths import to_vault_relative
+
+                        remote_path = to_vault_relative(api_user, display_path)
                     try:
-                        url = await nc_service.get_file_link(path)
-                        return path, url
+                        url = await nc_service.get_file_link(remote_path)
+                        return display_path, url
                     except Exception as e:
-                        logger.debug("Не удалось получить ссылку для %s: %s", path, e)
-                        return path, None
+                        logger.debug("Не удалось получить ссылку для %s: %s", display_path, e)
+                        return display_path, None
 
                 results = await asyncio.gather(
                     *[get_link_for_change(ch) for ch in changes],
@@ -509,13 +530,16 @@ class QueryProcessingService:
         changes: List[Dict[str, Any]],
         *,
         kb_path: Optional[Path] = None,
+        api_user: Optional[Dict[str, Any]] = None,
     ) -> None:
         """То же хранилище, что и для Telegram, без отправки в чат."""
         if kb_path is not None:
             from kb_app_api.vault_paths import localize_file_changes
 
             changes = localize_file_changes(changes, kb_path)
-        changes_info = await self._apply_file_changes_storage(session_id, changes)
+        changes_info = await self._apply_file_changes_storage(
+            session_id, changes, api_user=api_user
+        )
         if changes_info:
             plain = re.sub(r"<[^>]+>", "", changes_info)
             logger.info("KB App API: изменения файлов\n%s", plain[:4000])
@@ -545,6 +569,13 @@ class QueryProcessingService:
         session_messages = await db.get_session_messages(session_id)
         agent_kb = Path(kb_path) if kb_path is not None else Path(app_config.LOCAL_KB_PATH)
 
+        api_user: Optional[Dict[str, Any]] = None
+        session_meta = await db.get_session(session_id)
+        if session_meta and session_meta.get("user_id"):
+            api_user = await db.get_user_by_id(int(session_meta["user_id"]))
+            if api_user and not api_user.get("login"):
+                api_user = None
+
         if not use_knowledge_base:
             if save_user_message:
                 await db.add_message(session_id, str(MessageRole.USER), query)
@@ -571,7 +602,11 @@ class QueryProcessingService:
                 await db.add_message(session_id, str(MessageRole.USER), query)
                 save_user_message = False
 
-            sync_service = self._get_sync_service()
+            sync_service = (
+                SyncService.for_user(api_user)
+                if api_user is not None
+                else self._get_sync_service()
+            )
             sync_start = time.time()
             if sync_service.enabled:
                 try:
@@ -693,7 +728,9 @@ class QueryProcessingService:
                 reply_text=clean_reply,
             )
 
-            await self.handle_file_changes_for_api(session_id, changes, kb_path=agent_kb)
+            await self.handle_file_changes_for_api(
+                session_id, changes, kb_path=agent_kb, api_user=api_user
+            )
 
             return response, changes
 

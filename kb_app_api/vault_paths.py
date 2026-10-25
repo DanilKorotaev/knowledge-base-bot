@@ -93,3 +93,42 @@ def localize_file_changes(changes: list[dict[str, Any]], kb_path: Path) -> list[
         item["path"] = new_path
         out.append(item)
     return out
+
+
+def vault_prefix_for_user(user: dict[str, Any]) -> str:
+    rel = (user.get("vault_root_relative") or "").strip().lstrip("/")
+    if rel:
+        return rel
+    login = (user.get("login") or "").strip()
+    if login:
+        return vault_relative_for_login(login)
+    return ""
+
+
+def to_vault_relative(user: dict[str, Any], path: str) -> str:
+    """
+    Strip ``users/{login}/`` (or vault_root_relative) from a LOCAL_KB_PATH-relative path.
+
+    Paths already under the vault (or outside it) are returned stripped of leading ``/``.
+    """
+    raw = (path or "").strip().lstrip("/")
+    prefix = vault_prefix_for_user(user)
+    if not prefix or not raw:
+        return raw
+    if raw == prefix:
+        return ""
+    if raw.startswith(prefix + "/"):
+        return raw[len(prefix) + 1 :]
+    return raw
+
+
+def changes_to_vault_relative(
+    user: dict[str, Any], changes: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Rewrite change ``path`` fields for SyncService.for_user (vault-relative)."""
+    out: list[dict[str, Any]] = []
+    for change in changes:
+        item = dict(change)
+        item["path"] = to_vault_relative(user, str(change.get("path") or ""))
+        out.append(item)
+    return out

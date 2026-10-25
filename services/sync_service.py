@@ -20,25 +20,52 @@ logger = logging.getLogger(__name__)
 
 class SyncService:
     """Сервис синхронизации с NextCloud"""
-    
-    def __init__(self, local_kb_path: Optional[Path] = None):
+
+    def __init__(
+        self,
+        local_kb_path: Optional[Path] = None,
+        nextcloud_service: Optional[NextCloudService] = None,
+    ):
         self.local_kb_path = local_kb_path or config.LOCAL_KB_PATH
-        self.nextcloud_service = NextCloudService()
+        self.nextcloud_service = nextcloud_service or NextCloudService()
         self.enabled = config.ENABLE_SYNC and self.nextcloud_service.enabled
         self.sync_interval = config.SYNC_INTERVAL
         self._sync_task: Optional[asyncio.Task] = None
-        
+
         # Callback для уведомлений о синхронизации
         # Формат: async def notify(message: str, is_important: bool = False)
         self.notify_callback: Optional[Callable[[str, bool], Awaitable[None]]] = None
-        
+
         # Callback для прогресса синхронизации
         # Формат: async def progress(stage: str, current: int, total: int)
         self.progress_callback: Optional[Callable[[str, int, int], Awaitable[None]]] = None
-        
+
         # Защита от спама уведомлений
         self._last_notify_time: Optional[datetime] = None
         self._notify_cooldown = timedelta(seconds=30)  # Минимум 30 секунд между уведомлениями
+
+    @classmethod
+    def for_user(cls, user: Dict[str, Any]) -> "SyncService":
+        """
+        Per-user sync: local vault root ↔ NC home/kb_folder via user's App Password.
+
+        If the user has no App Password, returns a disabled SyncService (does not
+        fall back to the bot account).
+        """
+        from kb_app_api.vault_paths import absolute_vault_root
+
+        vault = absolute_vault_root(user)
+        nc = NextCloudService.for_user(user)
+        if nc is None:
+            logger.info(
+                "Per-user NC sync disabled (no app password) for %s",
+                user.get("login") or user.get("id"),
+            )
+            return cls(
+                local_kb_path=vault,
+                nextcloud_service=NextCloudService(username="", password=""),
+            )
+        return cls(local_kb_path=vault, nextcloud_service=nc)
     
     def set_notify_callback(self, callback: Callable[[str, bool], Awaitable[None]]) -> None:
         """Установить callback для уведомлений о синхронизации"""

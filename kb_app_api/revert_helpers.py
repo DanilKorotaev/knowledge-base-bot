@@ -58,12 +58,23 @@ async def revert_file_change_or_raise(change_id: int, user_internal_id: int) -> 
             detail=str(e),
         ) from e
 
-    sync_service = SyncService()
-    if sync_service.enabled:
-        try:
-            await sync_service.sync_to_nextcloud()
-        except Exception as e:
-            logger.warning("Синхронизация после отката: %s", e)
+    if user and user.get("login"):
+        sync_service = SyncService.for_user(user)
+        if sync_service.enabled:
+            try:
+                from kb_app_api.vault_paths import to_vault_relative
+
+                remote_rel = to_vault_relative(user, rel)
+                await sync_service.sync_file(remote_rel, direction="to")
+            except Exception as e:
+                logger.warning("Синхронизация после отката: %s", e)
+    else:
+        sync_service = SyncService()
+        if sync_service.enabled:
+            try:
+                await sync_service.sync_to_nextcloud()
+            except Exception as e:
+                logger.warning("Синхронизация после отката: %s", e)
 
     return {
         "ok": True,

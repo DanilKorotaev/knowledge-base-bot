@@ -43,8 +43,8 @@
 - [x] Shared Bearer убран из deps; unit-тесты переведены на register/login
 - [x] Staging smoke: register + `kbadmin` login (2026-10-24)
 - [x] `nc_app_password_enc` + `kb_folder`; mint/rotate; `PATCH /api/auth/me`
-- [ ] Полный per-user `vault_root` во всех call sites (`health_sync`, `boards/runtime`, `voice_attachments`, `revert_helpers`) — частично (messages uploads)
-- [ ] WebDAV sync через per-user App Password (следующий шаг)
+- [x] WebDAV sync через per-user App Password (`NextCloudService.for_user` / `SyncService.for_user`)
+- [ ] Полный per-user `vault_root` во всех call sites (`boards/runtime`, `voice_attachments`) — частично
 - [ ] E2E iOS: login тестовым юзером вместо `KB_APP_API_TOKEN`
 - [x] Обновить `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md` (JWT auth v1.2 + kb_folder)
 

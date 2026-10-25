@@ -60,43 +60,96 @@ def rewrite_public_nextcloud_url(candidate: str, public_base: Optional[str]) -> 
 
 class NextCloudService:
     """Сервис для работы с NextCloud через WebDAV и OCS API"""
-    
-    def __init__(self):
+
+    def __init__(
+        self,
+        *,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        base_path: Optional[str] = None,
+        deeplink_username: Optional[str] = None,
+        url: Optional[str] = None,
+    ):
         # API base (sync / OCS) — может быть localhost
-        self.url = config.NEXTCLOUD_URL
-        self.username = config.NEXTCLOUD_BOT_USERNAME
-        self.password = config.NEXTCLOUD_BOT_PASSWORD
-        self.base_path = config.NEXTCLOUD_KNOWLEDGE_BASE_PATH
-        
+        self.url = (url if url is not None else config.NEXTCLOUD_URL) or ""
+        self.username = (
+            username if username is not None else config.NEXTCLOUD_BOT_USERNAME
+        ) or ""
+        self.password = (
+            password if password is not None else config.NEXTCLOUD_BOT_PASSWORD
+        ) or ""
+        if base_path is not None:
+            self.base_path = base_path
+        else:
+            self.base_path = config.NEXTCLOUD_KNOWLEDGE_BASE_PATH or ""
+
         # Публичная база ссылок — может совпадать с url или быть доменом
-        self.web_url = getattr(config, 'NEXTCLOUD_WEB_URL', None) or self.url
-        self.link_mode = getattr(config, 'NEXTCLOUD_LINK_MODE', 'disabled')
-        self.share_expiration_hours = getattr(config, 'NEXTCLOUD_SHARE_EXPIRATION_HOURS', 24)
-        self.deeplink_username = (
-            getattr(config, "NEXTCLOUD_DEEPLINK_USERNAME", None) or self.username
+        self.web_url = getattr(config, "NEXTCLOUD_WEB_URL", None) or self.url
+        self.link_mode = getattr(config, "NEXTCLOUD_LINK_MODE", "disabled")
+        self.share_expiration_hours = getattr(
+            config, "NEXTCLOUD_SHARE_EXPIRATION_HOURS", 24
         )
-        
+        self.deeplink_username = (
+            deeplink_username
+            if deeplink_username is not None
+            else (getattr(config, "NEXTCLOUD_DEEPLINK_USERNAME", None) or self.username)
+        )
+
         if not self.url or not self.username or not self.password:
-            logger.warning("NextCloud не настроен. Синхронизация будет отключена.")
+            if username is None and password is None:
+                logger.warning("NextCloud не настроен. Синхронизация будет отключена.")
             self.enabled = False
+            self.webdav_url = ""
+            self.ocs_share_url = ""
+            self.base_path = (self.base_path or "").lstrip("/")
         else:
             self.enabled = True
             # Убрать trailing slash из URL
-            self.url = self.url.rstrip('/')
+            self.url = self.url.rstrip("/")
             if self.web_url:
-                self.web_url = self.web_url.rstrip('/')
+                self.web_url = self.web_url.rstrip("/")
             # WebDAV base URL (всегда через NEXTCLOUD_URL)
             self.webdav_url = f"{self.url}/remote.php/dav/files/{self.username}"
             # OCS Share API (создание share — тоже через NEXTCLOUD_URL; публичный URL в ответе)
             self.ocs_share_url = f"{self.url}/ocs/v2.php/apps/files_sharing/api/v1/shares"
-            # Убрать leading slash из base_path
-            self.base_path = self.base_path.lstrip('/')
+            # Убрать leading slash из base_path ("/" → "" = NC user home)
+            self.base_path = (self.base_path or "").lstrip("/")
             if self.web_url != self.url:
                 logger.info(
                     "NextCloud API=%s public_web=%s (split URLs)",
                     self.url,
                     self.web_url,
                 )
+
+    @classmethod
+    def for_user(cls, user: Dict[str, Any]) -> Optional["NextCloudService"]:
+        """
+        WebDAV client authenticated as the KB App user (App Password).
+
+        Returns None when the user has no decryptable ``nc_app_password_enc``.
+        Remote root is ``kb_folder`` inside the user's NC home (default ``/``).
+        """
+        from kb_app_api.kb_folder import normalize_kb_folder
+        from kb_app_api.nc_token_crypto import try_decrypt_nc_token
+
+        token = try_decrypt_nc_token(user.get("nc_app_password_enc"))
+        if not token:
+            return None
+        username = (
+            (user.get("nextcloud_username") or user.get("login") or "").strip()
+        )
+        if not username:
+            return None
+        try:
+            folder = normalize_kb_folder(user.get("kb_folder"))
+        except Exception:
+            folder = "/"
+        return cls(
+            username=username,
+            password=token,
+            base_path=folder.lstrip("/"),
+            deeplink_username=username,
+        )
     
     def _get_full_path(self, relative_path: str) -> str:
         """Получить полный путь в NextCloud"""

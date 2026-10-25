@@ -47,6 +47,84 @@ class TestVaultPaths(unittest.TestCase):
         )
         self.assertEqual(changes[0]["path"], "users/alice/HealthData/a.json")
 
+    def test_to_vault_relative(self) -> None:
+        from kb_app_api.vault_paths import (
+            changes_to_vault_relative,
+            to_vault_relative,
+            vault_relative_for_login,
+        )
+
+        user = {
+            "login": "alice",
+            "vault_root_relative": vault_relative_for_login("alice"),
+        }
+        self.assertEqual(
+            to_vault_relative(user, "users/alice/HealthData/a.json"),
+            "HealthData/a.json",
+        )
+        self.assertEqual(to_vault_relative(user, "users/alice"), "")
+        self.assertEqual(to_vault_relative(user, "notes/x.md"), "notes/x.md")
+        mapped = changes_to_vault_relative(
+            user, [{"path": "users/alice/a.md", "type": "modified"}]
+        )
+        self.assertEqual(mapped[0]["path"], "a.md")
+
+
+class TestNextCloudForUser(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["KB_APP_JWT_SECRET"] = "vault-nc-jwt"
+        os.environ["NEXTCLOUD_URL"] = "https://nc.example"
+        os.environ.pop("KB_NC_TOKEN_KEY", None)
+        import config as config_mod
+
+        config_mod.config.KB_APP_JWT_SECRET = "vault-nc-jwt"
+        config_mod.config.KB_NC_TOKEN_KEY = None
+        config_mod.config.NEXTCLOUD_URL = "https://nc.example"
+        config_mod.config.NEXTCLOUD_BOT_USERNAME = "bot"
+        config_mod.config.NEXTCLOUD_BOT_PASSWORD = "botpw"
+
+    def test_for_user_uses_app_password_and_kb_folder(self) -> None:
+        from kb_app_api.nc_token_crypto import encrypt_nc_token
+        from services.nextcloud_service import NextCloudService
+        from services.sync_service import SyncService
+
+        enc = encrypt_nc_token("user-app-pw")
+        user = {
+            "id": 1,
+            "login": "alice",
+            "nextcloud_username": "alice",
+            "nc_app_password_enc": enc,
+            "kb_folder": "/KnowledgeBase",
+            "vault_root_relative": "users/alice",
+        }
+        nc = NextCloudService.for_user(user)
+        self.assertIsNotNone(nc)
+        assert nc is not None
+        self.assertTrue(nc.enabled)
+        self.assertEqual(nc.username, "alice")
+        self.assertEqual(nc.password, "user-app-pw")
+        self.assertEqual(nc.base_path, "KnowledgeBase")
+        self.assertIn("/dav/files/alice", nc.webdav_url)
+
+        sync = SyncService.for_user(user)
+        self.assertTrue(sync.enabled)
+        self.assertEqual(sync.nextcloud_service.username, "alice")
+        self.assertEqual(sync.nextcloud_service.base_path, "KnowledgeBase")
+
+    def test_for_user_without_token_disables_sync(self) -> None:
+        from services.nextcloud_service import NextCloudService
+        from services.sync_service import SyncService
+
+        user = {
+            "id": 2,
+            "login": "bob",
+            "vault_root_relative": "users/bob",
+            "nc_app_password_enc": None,
+        }
+        self.assertIsNone(NextCloudService.for_user(user))
+        sync = SyncService.for_user(user)
+        self.assertFalse(sync.enabled)
+
 
 if __name__ == "__main__":
     unittest.main()
