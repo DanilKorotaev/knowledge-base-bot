@@ -3,7 +3,7 @@
 **Статус:** ✅ Done (2026-10-26)  
 **Приоритет:** 🔴 Высокий  
 **Категория:** Documentation  
-**Эпик доков:** [../pending/task-epic-documentation-refresh.md](../pending/task-epic-documentation-refresh.md)
+**Эпик доков:** [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md)
 
 ## Что хотели добиться
 

@@ -4,24 +4,26 @@
 `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md`.  
 Обзор архитектуры: [../ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**Статус инвентаря:** draft (2026-10-26). Гайды пишутся итеративно — [задача](../tasks/pending/task-doc-kb-app-api-feature-guides.md).
+**Статус:** guides filled 2026-10-26 — [задача](../tasks/completed/task-doc-kb-app-api-feature-guides.md).
 
-## Routes → planned guides
+## Guides
 
 | Guide | Routes / packages | Status |
 |-------|-------------------|--------|
-| [auth.md](auth.md) | `routes/auth`, `routes/me`, `auth_service`, NC provision | 🚧 stub |
-| sessions-messages | `sessions`, `messages`, `attachments`, `compose`, `share` | 📋 missing |
-| voice-jobs | `voice`, `query_jobs/` | 📋 missing |
-| boards-presets | `boards/`, `routes/boards` | 📋 missing |
-| structured-ui | `structured_ui/`, `ui_events`, `remote_ui` | 📋 missing |
-| push | `devices`, `apns_push_service`, `push_dispatch` | 📋 missing |
-| vault-isolation | `vault_paths`, cursor soft-jail, env scrub | 📋 missing |
-| health-sync | `routes/health_sync`, health-sync-api | 📋 missing |
-| admin | `routes/admin_users` | 📋 missing |
-| ops-metrics | `health`, `metrics` | 📋 missing |
+| [auth.md](auth.md) | `routes/auth`, `routes/me`, NC provision | ✅ |
+| [sessions-messages.md](sessions-messages.md) | sessions, messages, attachments, share, files | ✅ |
+| [voice-jobs.md](voice-jobs.md) | `voice`, `query_jobs/`, `/api/jobs` | ✅ |
+| [boards-presets.md](boards-presets.md) | `boards/`, presets | ✅ |
+| [structured-ui.md](structured-ui.md) | `structured_ui/`, ui-events, remote-ui | ✅ |
+| [push.md](push.md) | devices, APNs | ✅ |
+| [vault-isolation.md](vault-isolation.md) | vault_paths, soft-jail, env scrub | ✅ |
+| [health-sync.md](health-sync.md) | `/api/health/sync` | ✅ |
+| [admin.md](admin.md) | `/api/admin/users` | ✅ |
+| [ops-metrics.md](ops-metrics.md) | `/health`, metrics | ✅ |
 
 ## Принцип
 
 Guide = **зачем и как** (потоки, ограничения, ссылки на тесты).  
 Схемы полей — в contract / OpenAPI, не копипастить сюда целиком.
+
+При смене поведения API — обновить guide в том же изменении (`.cursor/rules/docs-keep-current.mdc`).

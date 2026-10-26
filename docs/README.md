@@ -3,16 +3,17 @@
 Продукт репозитория — **Knowledge Base App backend** (`kb_app_api`).  
 Telegram-бот и Mini App — **deprecated**; revival: [tasks/pending/task-epic-telegram-multiuser.md](tasks/pending/task-epic-telegram-multiuser.md).
 
-Обновление док-базы: [tasks/pending/task-epic-documentation-refresh.md](tasks/pending/task-epic-documentation-refresh.md).
+Эпик доков (закрыт): [tasks/completed/task-epic-documentation-refresh.md](tasks/completed/task-epic-documentation-refresh.md).
 
 ## KB App (актуально)
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — multi-user API, vault, isolation, runtime
-- [OPS.md](OPS.md) — prod/staging deploy map (актуально)
-- [kb-app-api/README.md](kb-app-api/README.md) — feature guides index (+ [auth.md](kb-app-api/auth.md))
+- [OPS.md](OPS.md) — prod/staging deploy map
+- [kb-app-api/README.md](kb-app-api/README.md) — feature guides index
 - [../kb-app-api/README.md](../kb-app-api/README.md) — Docker / health / auth notes
 - [DEVELOPMENT.md](DEVELOPMENT.md) — разработка (+ правило docs-keep-current)
 - [GIT_FLOW.md](GIT_FLOW.md), [RELEASES.md](RELEASES.md) — ветки/релизы
+- [archive/bot-era/](archive/bot-era/README.md) — legacy VPS/bot docs
 - [todo.md](todo.md) / [completed.md](completed.md)
 
 Контракт HTTP/JSON: `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md`.

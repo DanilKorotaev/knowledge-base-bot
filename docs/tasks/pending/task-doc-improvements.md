@@ -1,6 +1,6 @@
 # Дополнительные улучшения документации
 
-> **Superseded** → [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md)
+> **Superseded** → [../completed/task-epic-documentation-refresh.md](../completed/task-epic-documentation-refresh.md)
 > (README / relocate / architecture / deploy audit).  
 > Не вести этот файл дальше; закрыть при выполнении эпика доков.
 

@@ -14,8 +14,8 @@ When you change user-facing or ops-facing behavior:
    - `docs/kb-app-api/*` (when that tree exists)
    - Deploy / CI docs you touched operationally
    - iOS `KB_APP_API_CONTRACT.md` if the HTTP/JSON contract changed
-2. If the right guide **does not exist yet**, add or check a follow-up under
-   `docs/tasks/pending/task-doc-kb-app-api-feature-guides.md` — do not silently skip.
+2. If the right guide **does not exist yet**, add it under `docs/kb-app-api/`
+   (see index README) or a short follow-up task — do not silently skip.
 3. Telegram / Mini App material belongs under `docs/telegram/` (legacy). Do **not**
    revive bot-primary wording in the root README. Revival work is tracked only via
    `docs/tasks/pending/task-epic-telegram-multiuser.md`.

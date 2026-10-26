@@ -106,5 +106,6 @@
 
 - [../README.md](../README.md) — лицо репо
 - [../kb-app-api/README.md](../kb-app-api/README.md) — Docker API
-- [DEPLOYMENT.md](DEPLOYMENT.md) / [GITHUB_ACTIONS_DEPLOY.md](GITHUB_ACTIONS_DEPLOY.md) — ops (аудит в эпике доков)
+- [OPS.md](OPS.md) — актуальный деплой; stubs/archive bot-era
+- [kb-app-api/](kb-app-api/README.md) — feature guides
 - [todo.md](todo.md) — задачи

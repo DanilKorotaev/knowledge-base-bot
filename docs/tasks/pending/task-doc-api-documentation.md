@@ -1,7 +1,7 @@
 # Создать API документацию
 
-> **Superseded** → [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md) /
-> [task-doc-kb-app-api-feature-guides.md](task-doc-kb-app-api-feature-guides.md).  
+> **Superseded** → [../completed/task-epic-documentation-refresh.md](../completed/task-epic-documentation-refresh.md) /
+> [../completed/task-doc-kb-app-api-feature-guides.md](../completed/task-doc-kb-app-api-feature-guides.md).  
 > Не вести этот файл дальше; закрыть при выполнении эпика доков.
 
 **Статус**: ⛔ Superseded  

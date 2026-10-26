@@ -1,6 +1,6 @@
 # Auth & Nextcloud identity
 
-**Status:** stub — дополнять по мере изменений.  
+**Status:** current (2026-10).  
 **Code:** `kb_app_api/auth_service.py`, `jwt_tokens.py`, `routes/auth.py`, `routes/me.py`, `nextcloud_provision.py`, `nc_token_crypto.py`
 
 ## Модель

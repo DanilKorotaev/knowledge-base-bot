@@ -52,7 +52,7 @@ docker compose up -d kb-app-api
 ```
 
 Подробнее: [kb-app-api/README.md](kb-app-api/README.md), [docs/QUICK_START_DOCKER.md](docs/QUICK_START_DOCKER.md).  
-Deploy / host vs staging: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/GITHUB_ACTIONS_DEPLOY.md](docs/GITHUB_ACTIONS_DEPLOY.md) (аудит — [задача](docs/tasks/pending/task-doc-deploy-and-releases-audit.md)).
+Deploy / host vs staging: [docs/OPS.md](docs/OPS.md).
 
 ## Документация
 
@@ -64,7 +64,7 @@ Deploy / host vs staging: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/GITHUB
 | Ops / deploy | [docs/OPS.md](docs/OPS.md) |
 | API guides | [docs/kb-app-api/](docs/kb-app-api/README.md) |
 | Задачи | [docs/todo.md](docs/todo.md) |
-| Эпик доков | [task-epic-documentation-refresh.md](docs/tasks/pending/task-epic-documentation-refresh.md) |
+| Эпик доков | [task-epic-documentation-refresh.md](docs/tasks/completed/task-epic-documentation-refresh.md) ✅ |
 | Эпик web-клиентов | [task-epic-web-kb-clients.md](docs/tasks/pending/task-epic-web-kb-clients.md) |
 
 ## Структура (кратко)

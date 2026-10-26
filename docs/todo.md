@@ -70,16 +70,16 @@
 - [ ] [Интеграция с Google Calendar](tasks/pending/task-feature-google-calendar-integration.md)
 - [ ] [Скачивание видео из различных сервисов](tasks/pending/task-feature-video-download.md)
 
-### Документация (эпик refresh)
+### Документация (эпик refresh) ✅
 
-Единая точка: [task-epic-documentation-refresh.md](tasks/pending/task-epic-documentation-refresh.md)
+Единая точка: [task-epic-documentation-refresh.md](tasks/completed/task-epic-documentation-refresh.md)
 
 - [x] [README: KB App primary, Telegram deprecated](tasks/completed/task-doc-readme-kb-app-primary.md) ✅
 - [x] [Relocate Telegram/Mini App docs → docs/telegram/](tasks/completed/task-doc-relocate-telegram-legacy.md) ✅
 - [x] [ARCHITECTURE multi-user](tasks/completed/task-doc-architecture-kb-app.md) ✅
-- [🚧] [Deploy / CI / releases audit](tasks/pending/task-doc-deploy-and-releases-audit.md) — OPS.md есть
-- [🚧] [KB App API feature guides](tasks/pending/task-doc-kb-app-api-feature-guides.md) — индекс + auth stub
-- [x] [Rule: docs stay current](tasks/pending/task-rule-docs-must-stay-current.md) ✅
+- [x] [Deploy / CI / releases audit](tasks/completed/task-doc-deploy-and-releases-audit.md) ✅
+- [x] [KB App API feature guides](tasks/completed/task-doc-kb-app-api-feature-guides.md) ✅
+- [x] [Rule: docs stay current](tasks/completed/task-rule-docs-must-stay-current.md) ✅
 - [ ] [Видео-инструкции](tasks/pending/task-doc-video-tutorials.md) — later
 - ~~API documentation / doc improvements~~ → superseded эпиком выше
 
