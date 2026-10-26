@@ -182,6 +182,20 @@ async def login_user(db: Any, *, login: str, password: str) -> dict[str, Any]:
     if config.ACCESS_MODE == "restricted" and not user.get("is_allowed"):
         if not config.KB_APP_API_BYPASS_ACCESS_CHECK:
             raise APIError("forbidden", "Пользователь не разрешён", status_code=403)
+    # First login / cutover: mint NC App Password if missing (login password = NC password).
+    if not user.get("nc_app_password_enc") and config.KB_APP_NC_PROVISION_ENABLED:
+        nc_user = (user.get("nextcloud_username") or user.get("login") or "").strip()
+        if nc_user:
+            try:
+                app_pw = await asyncio.to_thread(
+                    mint_nextcloud_app_password,
+                    userid=nc_user,
+                    password=password,
+                )
+                await _store_minted_app_password(db, int(user["id"]), app_pw)
+                user = await db.get_user_by_id(int(user["id"])) or user
+            except NextcloudProvisionError as exc:
+                logger.warning("NC mint on login failed for %s: %s", nc_user, exc)
     return await issue_tokens(db, user)
 
 
