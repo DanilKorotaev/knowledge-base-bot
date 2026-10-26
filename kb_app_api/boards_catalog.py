@@ -60,13 +60,9 @@ async def upsert_board(
     """Create or replace a board definition, then return rendered detail."""
     board_id = validate_board_id(str(payload.get("id") or ""))
     await repository.ensure_boards_schema()
+    if user_id is None:
+        raise ValueError("user_id is required to upsert a board")
     existing = await repository.get_board_row(board_id, user_id=user_id)
-    if existing is None and user_id is not None:
-        # Another user may own this global id — do not overwrite.
-        foreign = await repository.get_board_row(board_id)
-        if foreign is not None and foreign.get("user_id") is not None:
-            if int(foreign["user_id"]) != int(user_id):
-                raise ValueError(f"board id already owned by another user: {board_id}")
 
     raw_sort = payload.get("sort_order")
     if existing is None:
@@ -142,7 +138,7 @@ async def archive_board(
     board_id = validate_board_id(board_id)
     if await repository.get_board_row(board_id, user_id=user_id) is None:
         return None
-    row = await repository.set_board_enabled(board_id, enabled=False)
+    row = await repository.set_board_enabled(board_id, enabled=False, user_id=user_id)
     if row is None:
         return None
     return runtime.public_board_from_row(row)
@@ -159,7 +155,9 @@ async def restore_board(
     if existing is None:
         return None
     sort_order = await repository.next_sort_order(user_id=user_id)
-    row = await repository.set_board_enabled(board_id, enabled=True, sort_order=sort_order)
+    row = await repository.set_board_enabled(
+        board_id, enabled=True, sort_order=sort_order, user_id=user_id
+    )
     if row is None:
         return None
     return runtime.public_board_from_row(row)
@@ -169,4 +167,52 @@ async def delete_board(board_id: str, *, user_id: int | None = None) -> bool:
     await repository.ensure_boards_schema()
     if await repository.get_board_row(board_id, user_id=user_id) is None:
         return False
-    return await repository.delete_board_row(board_id)
+    return await repository.delete_board_row(board_id, user_id=user_id)
+
+
+async def list_presets_for_user(*, user_id: int) -> list[dict[str, Any]]:
+    from kb_app_api.boards.presets import list_preset_catalog
+
+    await repository.ensure_boards_schema()
+    installed = {
+        str(b["id"])
+        for b in await repository.list_board_rows(include_disabled=True, user_id=user_id)
+    }
+    out: list[dict[str, Any]] = []
+    for preset in list_preset_catalog():
+        item = dict(preset)
+        item["installed"] = preset["id"] in installed
+        out.append(item)
+    return out
+
+
+async def install_preset(*, user_id: int, preset_id: str) -> dict[str, Any]:
+    from kb_app_api.boards.presets import get_preset, preset_to_board_row
+
+    preset = get_preset(preset_id)
+    if preset is None:
+        raise ValueError(f"unknown preset: {preset_id}")
+    await repository.ensure_boards_schema()
+    existing = await repository.get_board_row(preset["id"], user_id=user_id)
+    if existing is not None:
+        return await get_board_detail(preset["id"], user_id=user_id) or {
+            "board": runtime.public_board_from_row(existing)
+        }
+    row = preset_to_board_row(preset, user_id=user_id)
+    if int(row.get("sort_order") or 0) <= 0:
+        row["sort_order"] = await repository.next_sort_order(user_id=user_id)
+    await repository.upsert_board_row(row)
+    detail = await get_board_detail(preset["id"], user_id=user_id)
+    if detail is None:
+        stored = await repository.get_board_row(preset["id"], user_id=user_id)
+        assert stored is not None
+        return {"board": runtime.public_board_from_row(stored)}
+    return detail
+
+
+async def uninstall_preset(*, user_id: int, preset_id: str) -> bool:
+    from kb_app_api.boards.presets import get_preset
+
+    if get_preset(preset_id) is None:
+        raise ValueError(f"unknown preset: {preset_id}")
+    return await delete_board(preset_id, user_id=user_id)

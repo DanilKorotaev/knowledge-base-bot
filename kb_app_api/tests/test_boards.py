@@ -45,13 +45,17 @@ def tearDownModule() -> None:
             pass
 
 
-async def _seed_examples() -> None:
+async def _seed_examples(*, user_id: int = 1) -> None:
+    from copy import deepcopy
+
     from kb_app_api.boards import repository as repo
     from kb_app_api.tests.fixtures.board_definitions import EXAMPLE_DEMO_JOBS, EXAMPLE_DEMO_KPI
 
     await repo.ensure_boards_schema()
-    await repo.upsert_board_row(EXAMPLE_DEMO_KPI)
-    await repo.upsert_board_row(EXAMPLE_DEMO_JOBS)
+    for base in (EXAMPLE_DEMO_KPI, EXAMPLE_DEMO_JOBS):
+        row = deepcopy(base)
+        row["user_id"] = int(user_id)
+        await repo.upsert_board_row(row)
 
 
 class BoardsCatalogTests(unittest.IsolatedAsyncioTestCase):
@@ -126,13 +130,19 @@ class BoardsRouteTests(unittest.TestCase):
             config_mod.config.LOCAL_KB_PATH = Path(_kb_dir)
         repo._SCHEMA_READY = False  # noqa: SLF001
 
-        asyncio.run(_seed_examples())
+        asyncio.run(_seed_examples(user_id=1))
 
         from kb_app_api.main import app
 
         cls.client = TestClient(app)
         from kb_app_api.tests.auth_test_helpers import bearer_headers
         cls.headers = bearer_headers(cls.client, login="boardsuser")
+        me = cls.client.get("/api/auth/me", headers=cls.headers)
+        assert me.status_code == 200, me.text
+        me_body = me.json()
+        user = me_body.get("user") if isinstance(me_body.get("user"), dict) else me_body
+        uid = int(user["id"])
+        asyncio.run(_seed_examples(user_id=uid))
 
     def test_list_boards(self) -> None:
         response = self.client.get("/api/boards", headers=self.headers)
@@ -238,6 +248,35 @@ class BoardsRouteTests(unittest.TestCase):
         self.assertEqual(ids[-1], "archive-me")
 
         self.client.delete("/api/boards/archive-me", headers=self.headers)
+
+    def test_presets_list_install_uninstall(self) -> None:
+        listed = self.client.get("/api/boards/presets", headers=self.headers)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        presets = listed.json()["presets"]
+        self.assertGreaterEqual(len(presets), 1)
+        preset_id = "active-jobs"
+        self.assertTrue(any(p["id"] == preset_id for p in presets))
+
+        # Ensure clean slate for this user.
+        self.client.delete(f"/api/boards/presets/{preset_id}", headers=self.headers)
+
+        install = self.client.post(
+            f"/api/boards/presets/{preset_id}/install", headers=self.headers
+        )
+        self.assertEqual(install.status_code, 200, install.text)
+        self.assertEqual(install.json()["board"]["id"], preset_id)
+
+        boards = self.client.get("/api/boards", headers=self.headers)
+        self.assertIn(preset_id, [b["id"] for b in boards.json()["boards"]])
+
+        again = self.client.get("/api/boards/presets", headers=self.headers)
+        installed_flag = next(p["installed"] for p in again.json()["presets"] if p["id"] == preset_id)
+        self.assertTrue(installed_flag)
+
+        removed = self.client.delete(f"/api/boards/presets/{preset_id}", headers=self.headers)
+        self.assertEqual(removed.status_code, 200, removed.text)
+        boards2 = self.client.get("/api/boards", headers=self.headers)
+        self.assertNotIn(preset_id, [b["id"] for b in boards2.json()["boards"]])
 
 
 if __name__ == "__main__":

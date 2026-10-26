@@ -83,6 +83,7 @@ EXAMPLE_WORKOUTS: dict[str, Any] = {
 
 EXAMPLE_DEMO_KPI: dict[str, Any] = {
     "id": "demo-kpi",
+    "user_id": 1,
     "title": "Demo: summary",
     "subtitle": "Sample metrics and table",
     "icon": "chart.bar",
@@ -149,6 +150,7 @@ EXAMPLE_DEMO_KPI: dict[str, Any] = {
 
 EXAMPLE_DEMO_JOBS: dict[str, Any] = {
     "id": "demo-active-jobs",
+    "user_id": 1,
     "title": "Demo: active jobs",
     "subtitle": "System board preview",
     "icon": "bolt.horizontal.circle",

@@ -63,8 +63,8 @@ async def ensure_boards_schema() -> None:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS kb_app_boards (
-                    id TEXT PRIMARY KEY,
-                    user_id INTEGER,
+                    id TEXT NOT NULL,
+                    user_id INTEGER NOT NULL,
                     title TEXT NOT NULL,
                     subtitle TEXT,
                     icon TEXT,
@@ -75,10 +75,13 @@ async def ensure_boards_schema() -> None:
                     list_cell_json TEXT,
                     rendered_document_json TEXT,
                     rendered_at TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, id)
                 )
                 """
             )
+            # Migrate legacy id-only PK tables if present.
+            await _migrate_sqlite_composite_pk(conn)
             await conn.commit()
     elif isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
@@ -86,7 +89,7 @@ async def ensure_boards_schema() -> None:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS kb_app_boards (
-                    id TEXT PRIMARY KEY,
+                    id TEXT NOT NULL,
                     user_id INTEGER,
                     title TEXT NOT NULL,
                     subtitle TEXT,
@@ -98,24 +101,104 @@ async def ensure_boards_schema() -> None:
                     list_cell_json TEXT,
                     rendered_document_json TEXT,
                     rendered_at TEXT,
-                    updated_at TIMESTAMP DEFAULT NOW()
+                    updated_at TIMESTAMP DEFAULT NOW(),
+                    PRIMARY KEY (id)
                 )
                 """
             )
+            await _migrate_postgres_composite_pk(conn)
     else:
         raise RuntimeError(f"unsupported db type for boards: {type(db)}")
     await seed_default_boards_if_empty()
     _SCHEMA_READY = True
 
 
+async def _migrate_postgres_composite_pk(conn: Any) -> None:
+    """Switch PRIMARY KEY from ``id`` to ``(user_id, id)`` when needed."""
+    pk_cols = await conn.fetch(
+        """
+        SELECT a.attname
+        FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = 'kb_app_boards'::regclass AND i.indisprimary
+        ORDER BY a.attnum
+        """
+    )
+    names = [r["attname"] for r in pk_cols]
+    if names == ["user_id", "id"]:
+        return
+    # Drop shared/orphan rows without owner — cannot participate in composite PK.
+    await conn.execute("DELETE FROM kb_app_boards WHERE user_id IS NULL")
+    await conn.execute("ALTER TABLE kb_app_boards DROP CONSTRAINT IF EXISTS kb_app_boards_pkey")
+    await conn.execute("ALTER TABLE kb_app_boards ALTER COLUMN user_id SET NOT NULL")
+    await conn.execute(
+        "ALTER TABLE kb_app_boards ADD CONSTRAINT kb_app_boards_pkey PRIMARY KEY (user_id, id)"
+    )
+    logger.info("kb_app_boards primary key migrated to (user_id, id)")
+
+
+async def _migrate_sqlite_composite_pk(conn: Any) -> None:
+    row = await conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='kb_app_boards'")
+    meta = await row.fetchone()
+    sql = (meta[0] if meta else "") or ""
+    if "PRIMARY KEY (user_id, id)" in sql.replace(" ", ""):
+        return
+    if "PRIMARY KEY" not in sql.upper():
+        return
+    # Rebuild table with composite PK.
+    await conn.execute("DELETE FROM kb_app_boards WHERE user_id IS NULL")
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS kb_app_boards_v2 (
+            id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            subtitle TEXT,
+            icon TEXT,
+            kind TEXT NOT NULL DEFAULT 'cached_view',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            definition_json TEXT NOT NULL DEFAULT '{}',
+            list_cell_json TEXT,
+            rendered_document_json TEXT,
+            rendered_at TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, id)
+        )
+        """
+    )
+    await conn.execute(
+        """
+        INSERT OR IGNORE INTO kb_app_boards_v2 (
+            id, user_id, title, subtitle, icon, kind, sort_order, enabled,
+            definition_json, list_cell_json, rendered_document_json, rendered_at, updated_at
+        )
+        SELECT id, user_id, title, subtitle, icon, kind, sort_order, enabled,
+               definition_json, list_cell_json, rendered_document_json, rendered_at, updated_at
+        FROM kb_app_boards
+        WHERE user_id IS NOT NULL
+        """
+    )
+    await conn.execute("DROP TABLE kb_app_boards")
+    await conn.execute("ALTER TABLE kb_app_boards_v2 RENAME TO kb_app_boards")
+    logger.info("kb_app_boards sqlite primary key migrated to (user_id, id)")
+
+
 async def seed_default_boards_if_empty() -> None:
+    """Legacy hook — DEFAULT_BOARDS is empty; presets are install-on-demand."""
+    if not DEFAULT_BOARDS:
+        return
     existing = await list_board_rows(include_disabled=True)
-    existing_ids = {b["id"] for b in existing}
+    existing_ids = {(b.get("user_id"), b["id"]) for b in existing}
     for seed in DEFAULT_BOARDS:
-        if seed["id"] in existing_ids:
+        if seed.get("user_id") is None:
+            logger.warning("skip seed board %s: missing user_id", seed.get("id"))
+            continue
+        key = (seed.get("user_id"), seed["id"])
+        if key in existing_ids:
             continue
         await upsert_board_row(seed)
-        logger.info("seeded board %s", seed["id"])
+        logger.info("seeded board %s for user %s", seed["id"], seed.get("user_id"))
 
 
 def _board_visible_to_user(row: dict[str, Any], user_id: int | None) -> bool:
@@ -215,13 +298,32 @@ async def get_board_row(
 
         async with aiosqlite.connect(db.db_path) as conn:
             conn.row_factory = aiosqlite.Row
-            cursor = await conn.execute("SELECT * FROM kb_app_boards WHERE id = ?", (board_id,))
+            if user_id is not None:
+                cursor = await conn.execute(
+                    "SELECT * FROM kb_app_boards WHERE id = ? AND user_id = ?",
+                    (board_id, int(user_id)),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT * FROM kb_app_boards WHERE id = ? LIMIT 1",
+                    (board_id,),
+                )
             row = await cursor.fetchone()
             board = _row_to_board(dict(row)) if row else None
     elif isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
         async with db.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM kb_app_boards WHERE id = $1", board_id)
+            if user_id is not None:
+                row = await conn.fetchrow(
+                    "SELECT * FROM kb_app_boards WHERE id = $1 AND user_id = $2",
+                    board_id,
+                    int(user_id),
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT * FROM kb_app_boards WHERE id = $1 LIMIT 1",
+                    board_id,
+                )
             board = _row_to_board(dict(row)) if row else None
     else:
         return None
@@ -229,7 +331,6 @@ async def get_board_row(
         return None
     if user_id is not None and not _board_visible_to_user(board, user_id):
         return None
-    # Owned-only policy: NULL user_id not visible to authenticated multi-user callers
     if user_id is not None and board.get("user_id") is None:
         return None
     return board
@@ -248,11 +349,15 @@ async def set_board_enabled(
     *,
     enabled: bool,
     sort_order: int | None = None,
+    user_id: int | None = None,
 ) -> dict[str, Any] | None:
     """Toggle ``enabled`` (and optionally ``sort_order``). Returns updated row or None."""
     await ensure_boards_schema()
-    existing = await get_board_row(board_id)
+    existing = await get_board_row(board_id, user_id=user_id)
     if existing is None:
+        return None
+    owner = int(existing["user_id"]) if existing.get("user_id") is not None else None
+    if owner is None:
         return None
 
     enabled_int = 1 if enabled else 0
@@ -267,12 +372,12 @@ async def set_board_enabled(
                 """
                 UPDATE kb_app_boards
                 SET enabled = ?, sort_order = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = ? AND user_id = ?
                 """,
-                (enabled_int, new_sort, board_id),
+                (enabled_int, new_sort, board_id, owner),
             )
             await conn.commit()
-        return await get_board_row(board_id)
+        return await get_board_row(board_id, user_id=owner)
 
     if isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
@@ -281,13 +386,14 @@ async def set_board_enabled(
                 """
                 UPDATE kb_app_boards
                 SET enabled = $1, sort_order = $2, updated_at = NOW()
-                WHERE id = $3
+                WHERE id = $3 AND user_id = $4
                 """,
                 bool(enabled),
                 new_sort,
                 board_id,
+                owner,
             )
-        return await get_board_row(board_id)
+        return await get_board_row(board_id, user_id=owner)
 
     raise RuntimeError(f"unsupported db type for boards: {type(db)}")
 
@@ -323,14 +429,24 @@ async def set_board_sort_orders(
 
         async with aiosqlite.connect(db.db_path) as conn:
             for index, board_id in enumerate(cleaned):
-                await conn.execute(
-                    """
-                    UPDATE kb_app_boards
-                    SET sort_order = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                    """,
-                    ((index + 1) * 10, board_id),
-                )
+                if user_id is not None:
+                    await conn.execute(
+                        """
+                        UPDATE kb_app_boards
+                        SET sort_order = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND user_id = ?
+                        """,
+                        ((index + 1) * 10, board_id, int(user_id)),
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE kb_app_boards
+                        SET sort_order = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                        """,
+                        ((index + 1) * 10, board_id),
+                    )
             await conn.commit()
         return
 
@@ -338,15 +454,27 @@ async def set_board_sort_orders(
         assert db.pool is not None
         async with db.pool.acquire() as conn:
             for index, board_id in enumerate(cleaned):
-                await conn.execute(
-                    """
-                    UPDATE kb_app_boards
-                    SET sort_order = $1, updated_at = NOW()
-                    WHERE id = $2
-                    """,
-                    (index + 1) * 10,
-                    board_id,
-                )
+                if user_id is not None:
+                    await conn.execute(
+                        """
+                        UPDATE kb_app_boards
+                        SET sort_order = $1, updated_at = NOW()
+                        WHERE id = $2 AND user_id = $3
+                        """,
+                        (index + 1) * 10,
+                        board_id,
+                        int(user_id),
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE kb_app_boards
+                        SET sort_order = $1, updated_at = NOW()
+                        WHERE id = $2
+                        """,
+                        (index + 1) * 10,
+                        board_id,
+                    )
         return
 
     raise RuntimeError(f"unsupported db type for boards: {type(db)}")
@@ -356,7 +484,9 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
     db = await get_db()
     board_id = str(payload["id"])
     owner = payload.get("user_id")
-    owner_int = int(owner) if owner is not None else None
+    if owner is None:
+        raise ValueError("user_id is required for board upsert")
+    owner_int = int(owner)
     title = str(payload.get("title") or board_id)
     subtitle = payload.get("subtitle")
     icon = payload.get("icon")
@@ -378,8 +508,7 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
                     id, user_id, title, subtitle, icon, kind, sort_order, enabled,
                     definition_json, list_cell_json, rendered_document_json, rendered_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    user_id=COALESCE(excluded.user_id, kb_app_boards.user_id),
+                ON CONFLICT(user_id, id) DO UPDATE SET
                     title=excluded.title,
                     subtitle=excluded.subtitle,
                     icon=excluded.icon,
@@ -419,8 +548,7 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
                     id, user_id, title, subtitle, icon, kind, sort_order, enabled,
                     definition_json, list_cell_json, rendered_document_json, rendered_at
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-                ON CONFLICT (id) DO UPDATE SET
-                    user_id=COALESCE(EXCLUDED.user_id, kb_app_boards.user_id),
+                ON CONFLICT (user_id, id) DO UPDATE SET
                     title=EXCLUDED.title,
                     subtitle=EXCLUDED.subtitle,
                     icon=EXCLUDED.icon,
@@ -448,21 +576,29 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
             )
 
 
-async def delete_board_row(board_id: str) -> bool:
+async def delete_board_row(board_id: str, *, user_id: int | None = None) -> bool:
     """Remove a board row. Returns True if a row was deleted."""
+    if user_id is None:
+        return False
     db = await get_db()
     if isinstance(db, SQLiteDatabase):
         import aiosqlite
 
         async with aiosqlite.connect(db.db_path) as conn:
-            cursor = await conn.execute("DELETE FROM kb_app_boards WHERE id = ?", (board_id,))
+            cursor = await conn.execute(
+                "DELETE FROM kb_app_boards WHERE id = ? AND user_id = ?",
+                (board_id, int(user_id)),
+            )
             await conn.commit()
             return cursor.rowcount > 0
     if isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
         async with db.pool.acquire() as conn:
-            result = await conn.execute("DELETE FROM kb_app_boards WHERE id = $1", board_id)
-            # asyncpg: "DELETE N"
+            result = await conn.execute(
+                "DELETE FROM kb_app_boards WHERE id = $1 AND user_id = $2",
+                board_id,
+                int(user_id),
+            )
             try:
                 return int(str(result).split()[-1]) > 0
             except (ValueError, IndexError):

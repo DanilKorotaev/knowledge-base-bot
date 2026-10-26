@@ -10,10 +10,13 @@ from kb_app_api.boards_catalog import (
     archive_board,
     delete_board,
     get_board_detail,
+    install_preset,
     list_archived_boards,
     list_boards,
+    list_presets_for_user,
     reorder_boards,
     restore_board,
+    uninstall_preset,
     upsert_board,
 )
 from kb_app_api.deps import get_api_user
@@ -50,6 +53,41 @@ async def get_boards(
         kb_root=resolve_kb_root(user),
     )
     return {"boards": boards, "total": len(boards)}
+
+
+@router.get("/presets")
+async def get_board_presets(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """Installable Overview/Actions presets (empty by default until installed)."""
+    presets = await list_presets_for_user(user_id=int(user["id"]))
+    return {"presets": presets, "total": len(presets)}
+
+
+@router.post("/presets/{preset_id}/install")
+async def post_install_preset(
+    preset_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    try:
+        detail = await install_preset(user_id=int(user["id"]), preset_id=preset_id)
+    except ValueError as exc:
+        raise APIError("invalid_request", str(exc), status_code=400) from exc
+    return {"ok": True, **detail}
+
+
+@router.delete("/presets/{preset_id}")
+async def delete_uninstall_preset(
+    preset_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    try:
+        removed = await uninstall_preset(user_id=int(user["id"]), preset_id=preset_id)
+    except ValueError as exc:
+        raise APIError("invalid_request", str(exc), status_code=400) from exc
+    if not removed:
+        raise APIError("not_found", "Preset not installed", status_code=404)
+    return {"ok": True, "id": preset_id}
 
 
 @router.put("/order")
