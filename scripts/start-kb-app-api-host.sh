@@ -47,9 +47,11 @@ export CURSOR_CLI_USE_STDBUF="${CURSOR_CLI_USE_STDBUF:-false}"
 export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 # Prefer background query worker for Cursor (survives API redeploy; SSE still streams via job events).
 export KB_APP_QUERY_JOBS_ENABLED="${KB_APP_QUERY_JOBS_ENABLED:-true}"
-# Public share viewer / API URLs (override in .env if the public hostname changes).
-# Real public URL must come from the host env / LaunchAgent — never a prod FQDN default in git.
-export KB_APP_PUBLIC_BASE_URL="${KB_APP_PUBLIC_BASE_URL:-}"
+# Public share viewer / API URLs: set in host `.env` or LaunchAgent (never commit real FQDNs).
+# Do not export an empty value here — that blocks python-dotenv from reading `.env`.
+if [[ -n "${KB_APP_PUBLIC_BASE_URL:-}" ]]; then
+  export KB_APP_PUBLIC_BASE_URL
+fi
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {
