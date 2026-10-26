@@ -118,14 +118,50 @@ async def seed_default_boards_if_empty() -> None:
         logger.info("seeded board %s", seed["id"])
 
 
-async def list_board_rows(*, include_disabled: bool = False) -> list[dict[str, Any]]:
+def _board_visible_to_user(row: dict[str, Any], user_id: int | None) -> bool:
+    """Per-user boards: only owner sees them. Legacy NULL user_id = shared (deprecated)."""
+    if user_id is None:
+        return True
+    owner = row.get("user_id")
+    if owner is None:
+        return True
+    try:
+        return int(owner) == int(user_id)
+    except (TypeError, ValueError):
+        return False
+
+
+async def list_board_rows(
+    *,
+    include_disabled: bool = False,
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
     db = await get_db()
     if isinstance(db, SQLiteDatabase):
         import aiosqlite
 
         async with aiosqlite.connect(db.db_path) as conn:
             conn.row_factory = aiosqlite.Row
-            if include_disabled:
+            if user_id is not None:
+                if include_disabled:
+                    cursor = await conn.execute(
+                        """
+                        SELECT * FROM kb_app_boards
+                        WHERE user_id = ?
+                        ORDER BY sort_order ASC, id ASC
+                        """,
+                        (int(user_id),),
+                    )
+                else:
+                    cursor = await conn.execute(
+                        """
+                        SELECT * FROM kb_app_boards
+                        WHERE enabled = 1 AND user_id = ?
+                        ORDER BY sort_order ASC, id ASC
+                        """,
+                        (int(user_id),),
+                    )
+            elif include_disabled:
                 cursor = await conn.execute(
                     "SELECT * FROM kb_app_boards ORDER BY sort_order ASC, id ASC"
                 )
@@ -138,7 +174,27 @@ async def list_board_rows(*, include_disabled: bool = False) -> list[dict[str, A
     if isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
         async with db.pool.acquire() as conn:
-            if include_disabled:
+            if user_id is not None:
+                # Owned boards only (empty Overview for users with no boards yet).
+                if include_disabled:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM kb_app_boards
+                        WHERE user_id = $1
+                        ORDER BY sort_order ASC, id ASC
+                        """,
+                        int(user_id),
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM kb_app_boards
+                        WHERE enabled = TRUE AND user_id = $1
+                        ORDER BY sort_order ASC, id ASC
+                        """,
+                        int(user_id),
+                    )
+            elif include_disabled:
                 rows = await conn.fetch("SELECT * FROM kb_app_boards ORDER BY sort_order ASC, id ASC")
             else:
                 rows = await conn.fetch(
@@ -148,7 +204,11 @@ async def list_board_rows(*, include_disabled: bool = False) -> list[dict[str, A
     return []
 
 
-async def get_board_row(board_id: str) -> dict[str, Any] | None:
+async def get_board_row(
+    board_id: str,
+    *,
+    user_id: int | None = None,
+) -> dict[str, Any] | None:
     db = await get_db()
     if isinstance(db, SQLiteDatabase):
         import aiosqlite
@@ -157,18 +217,27 @@ async def get_board_row(board_id: str) -> dict[str, Any] | None:
             conn.row_factory = aiosqlite.Row
             cursor = await conn.execute("SELECT * FROM kb_app_boards WHERE id = ?", (board_id,))
             row = await cursor.fetchone()
-            return _row_to_board(dict(row)) if row else None
-    if isinstance(db, PostgreSQLDatabase):
+            board = _row_to_board(dict(row)) if row else None
+    elif isinstance(db, PostgreSQLDatabase):
         assert db.pool is not None
         async with db.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM kb_app_boards WHERE id = $1", board_id)
-            return _row_to_board(dict(row)) if row else None
-    return None
+            board = _row_to_board(dict(row)) if row else None
+    else:
+        return None
+    if board is None:
+        return None
+    if user_id is not None and not _board_visible_to_user(board, user_id):
+        return None
+    # Owned-only policy: NULL user_id not visible to authenticated multi-user callers
+    if user_id is not None and board.get("user_id") is None:
+        return None
+    return board
 
 
-async def next_sort_order() -> int:
+async def next_sort_order(*, user_id: int | None = None) -> int:
     """Return sort_order for a newly appended board (after current max)."""
-    rows = await list_board_rows(include_disabled=True)
+    rows = await list_board_rows(include_disabled=True, user_id=user_id)
     if not rows:
         return 10
     return max(int(r.get("sort_order") or 0) for r in rows) + 10
@@ -223,10 +292,18 @@ async def set_board_enabled(
     raise RuntimeError(f"unsupported db type for boards: {type(db)}")
 
 
-async def set_board_sort_orders(ordered_ids: list[str]) -> None:
+async def set_board_sort_orders(
+    ordered_ids: list[str],
+    *,
+    user_id: int | None = None,
+) -> None:
     """Assign sort_order = 10, 20, … in the given order (enabled boards only)."""
     await ensure_boards_schema()
-    enabled = [b for b in await list_board_rows(include_disabled=False) if b.get("enabled", True)]
+    enabled = [
+        b
+        for b in await list_board_rows(include_disabled=False, user_id=user_id)
+        if b.get("enabled", True)
+    ]
     enabled_ids = {str(b["id"]) for b in enabled}
     cleaned = [str(i).strip() for i in ordered_ids if str(i).strip()]
     if not cleaned:
@@ -278,6 +355,8 @@ async def set_board_sort_orders(ordered_ids: list[str]) -> None:
 async def upsert_board_row(payload: dict[str, Any]) -> None:
     db = await get_db()
     board_id = str(payload["id"])
+    owner = payload.get("user_id")
+    owner_int = int(owner) if owner is not None else None
     title = str(payload.get("title") or board_id)
     subtitle = payload.get("subtitle")
     icon = payload.get("icon")
@@ -296,10 +375,11 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
             await conn.execute(
                 """
                 INSERT INTO kb_app_boards (
-                    id, title, subtitle, icon, kind, sort_order, enabled,
+                    id, user_id, title, subtitle, icon, kind, sort_order, enabled,
                     definition_json, list_cell_json, rendered_document_json, rendered_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    user_id=COALESCE(excluded.user_id, kb_app_boards.user_id),
                     title=excluded.title,
                     subtitle=excluded.subtitle,
                     icon=excluded.icon,
@@ -314,6 +394,7 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
                 """,
                 (
                     board_id,
+                    owner_int,
                     title,
                     subtitle,
                     icon,
@@ -335,10 +416,11 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
             await conn.execute(
                 """
                 INSERT INTO kb_app_boards (
-                    id, title, subtitle, icon, kind, sort_order, enabled,
+                    id, user_id, title, subtitle, icon, kind, sort_order, enabled,
                     definition_json, list_cell_json, rendered_document_json, rendered_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                 ON CONFLICT (id) DO UPDATE SET
+                    user_id=COALESCE(EXCLUDED.user_id, kb_app_boards.user_id),
                     title=EXCLUDED.title,
                     subtitle=EXCLUDED.subtitle,
                     icon=EXCLUDED.icon,
@@ -352,6 +434,7 @@ async def upsert_board_row(payload: dict[str, Any]) -> None:
                     updated_at=NOW()
                 """,
                 board_id,
+                owner_int,
                 title,
                 subtitle,
                 icon,

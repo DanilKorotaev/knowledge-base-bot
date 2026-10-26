@@ -58,9 +58,8 @@ async def put_boards_order(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     """Persist Overview tab order (drag-and-drop). ``ordered_ids`` = enabled boards."""
-    _ = user
     try:
-        boards = await reorder_boards(body.ordered_ids)
+        boards = await reorder_boards(body.ordered_ids, user_id=int(user["id"]))
     except ValueError as exc:
         raise APIError("invalid_request", str(exc), status_code=400) from exc
     return {"boards": boards, "total": len(boards)}
@@ -71,8 +70,7 @@ async def get_archived_boards(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     """Boards hidden from Overview (``enabled=false``)."""
-    _ = user
-    boards = await list_archived_boards()
+    boards = await list_archived_boards(user_id=int(user["id"]))
     return {"boards": boards, "total": len(boards)}
 
 
@@ -82,9 +80,8 @@ async def post_archive_board(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     """Hide board from Overview without deleting its definition."""
-    _ = user
     try:
-        board = await archive_board(board_id)
+        board = await archive_board(board_id, user_id=int(user["id"]))
     except ValueError as exc:
         raise APIError("invalid_request", str(exc), status_code=400) from exc
     if board is None:
@@ -98,9 +95,8 @@ async def post_restore_board(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     """Return an archived board to Overview (appended at end)."""
-    _ = user
     try:
-        board = await restore_board(board_id)
+        board = await restore_board(board_id, user_id=int(user["id"]))
     except ValueError as exc:
         raise APIError("invalid_request", str(exc), status_code=400) from exc
     if board is None:
@@ -140,11 +136,10 @@ async def put_board(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
     """Create or replace a board definition (used by MCP / agents)."""
-    _ = user
     payload = body.model_dump()
     payload["id"] = board_id
     try:
-        return await upsert_board(payload)
+        return await upsert_board(payload, user_id=int(user["id"]))
     except ValueError as exc:
         raise APIError("invalid_request", str(exc), status_code=400) from exc
 
@@ -154,8 +149,7 @@ async def remove_board(
     board_id: str,
     user: Annotated[dict[str, Any], Depends(get_api_user)],
 ) -> dict[str, Any]:
-    _ = user
-    deleted = await delete_board(board_id)
+    deleted = await delete_board(board_id, user_id=int(user["id"]))
     if not deleted:
         raise APIError("not_found", "Board not found", status_code=404)
     return {"ok": True, "id": board_id}

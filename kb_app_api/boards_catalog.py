@@ -52,17 +52,27 @@ async def get_board_detail(
     )
 
 
-async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
+async def upsert_board(
+    payload: dict[str, Any],
+    *,
+    user_id: int | None = None,
+) -> dict[str, Any]:
     """Create or replace a board definition, then return rendered detail."""
     board_id = validate_board_id(str(payload.get("id") or ""))
     await repository.ensure_boards_schema()
-    existing = await repository.get_board_row(board_id)
+    existing = await repository.get_board_row(board_id, user_id=user_id)
+    if existing is None and user_id is not None:
+        # Another user may own this global id — do not overwrite.
+        foreign = await repository.get_board_row(board_id)
+        if foreign is not None and foreign.get("user_id") is not None:
+            if int(foreign["user_id"]) != int(user_id):
+                raise ValueError(f"board id already owned by another user: {board_id}")
 
     raw_sort = payload.get("sort_order")
     if existing is None:
         # New boards append to the end unless an explicit positive order is given.
         if raw_sort is None or int(raw_sort or 0) <= 0:
-            sort_order = await repository.next_sort_order()
+            sort_order = await repository.next_sort_order(user_id=user_id)
         else:
             sort_order = int(raw_sort)
     elif raw_sort is None:
@@ -72,6 +82,7 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
 
     row = {
         "id": board_id,
+        "user_id": user_id if user_id is not None else (existing or {}).get("user_id"),
         "title": payload.get("title") or board_id,
         "subtitle": payload.get("subtitle"),
         "icon": payload.get("icon"),
@@ -84,9 +95,9 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
         "rendered_at": payload.get("rendered_at"),
     }
     await repository.upsert_board_row(row)
-    detail = await runtime.get_board_detail(board_id)
+    detail = await runtime.get_board_detail(board_id, user_id=user_id)
     if detail is None:
-        stored = await repository.get_board_row(board_id)
+        stored = await repository.get_board_row(board_id, user_id=user_id)
         assert stored is not None
         return {
             "board": {
@@ -107,39 +118,55 @@ async def upsert_board(payload: dict[str, Any]) -> dict[str, Any]:
     return detail
 
 
-async def reorder_boards(ordered_ids: list[str]) -> list[dict[str, Any]]:
+async def reorder_boards(
+    ordered_ids: list[str],
+    *,
+    user_id: int | None = None,
+) -> list[dict[str, Any]]:
     """Persist Overview list order; returns refreshed board list."""
-    await repository.set_board_sort_orders(ordered_ids)
-    return await runtime.list_boards(include_disabled=False)
+    await repository.set_board_sort_orders(ordered_ids, user_id=user_id)
+    return await runtime.list_boards(include_disabled=False, user_id=user_id)
 
 
-async def list_archived_boards() -> list[dict[str, Any]]:
+async def list_archived_boards(*, user_id: int | None = None) -> list[dict[str, Any]]:
     """Boards with ``enabled=false`` — metadata + last ``list_cell`` (no recompute)."""
-    return await runtime.list_archived_boards()
+    return await runtime.list_archived_boards(user_id=user_id)
 
 
-async def archive_board(board_id: str) -> dict[str, Any] | None:
+async def archive_board(
+    board_id: str,
+    *,
+    user_id: int | None = None,
+) -> dict[str, Any] | None:
     """Hide board from Overview (``enabled=false``). Keeps definition."""
     board_id = validate_board_id(board_id)
+    if await repository.get_board_row(board_id, user_id=user_id) is None:
+        return None
     row = await repository.set_board_enabled(board_id, enabled=False)
     if row is None:
         return None
     return runtime.public_board_from_row(row)
 
 
-async def restore_board(board_id: str) -> dict[str, Any] | None:
+async def restore_board(
+    board_id: str,
+    *,
+    user_id: int | None = None,
+) -> dict[str, Any] | None:
     """Bring board back to Overview at the end of the list."""
     board_id = validate_board_id(board_id)
-    existing = await repository.get_board_row(board_id)
+    existing = await repository.get_board_row(board_id, user_id=user_id)
     if existing is None:
         return None
-    sort_order = await repository.next_sort_order()
+    sort_order = await repository.next_sort_order(user_id=user_id)
     row = await repository.set_board_enabled(board_id, enabled=True, sort_order=sort_order)
     if row is None:
         return None
     return runtime.public_board_from_row(row)
 
 
-async def delete_board(board_id: str) -> bool:
+async def delete_board(board_id: str, *, user_id: int | None = None) -> bool:
     await repository.ensure_boards_schema()
+    if await repository.get_board_row(board_id, user_id=user_id) is None:
+        return False
     return await repository.delete_board_row(board_id)

@@ -59,10 +59,10 @@ def public_board_from_row(row: dict[str, Any]) -> dict[str, Any]:
     return _public_board(row)
 
 
-async def list_archived_boards() -> list[dict[str, Any]]:
+async def list_archived_boards(*, user_id: int | None = None) -> list[dict[str, Any]]:
     """Disabled boards for the Archive screen (cached list_cell only)."""
     await repository.ensure_boards_schema()
-    rows = await repository.list_board_rows(include_disabled=True)
+    rows = await repository.list_board_rows(include_disabled=True, user_id=user_id)
     boards = [
         _public_board(row)
         for row in rows
@@ -151,7 +151,10 @@ async def list_boards(
     kb_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     await repository.ensure_boards_schema()
-    rows = await repository.list_board_rows(include_disabled=include_disabled)
+    rows = await repository.list_board_rows(
+        include_disabled=include_disabled,
+        user_id=user_id,
+    )
     root = await _kb_root_for_user(user_id, kb_root)
     boards: list[dict[str, Any]] = []
     for row in rows:
@@ -175,7 +178,7 @@ async def get_board_detail(
     kb_root: Path | None = None,
 ) -> dict[str, Any] | None:
     await repository.ensure_boards_schema()
-    row = await repository.get_board_row(board_id)
+    row = await repository.get_board_row(board_id, user_id=user_id)
     if row is None:
         return None
     if not row.get("enabled", True):
