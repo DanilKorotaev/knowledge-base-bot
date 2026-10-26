@@ -93,9 +93,53 @@ class CursorCLIService:
         # Загрузить системный промпт один раз при инициализации
         self.system_prompt = self._load_system_prompt()
     
+    # Host API secrets must not leak into cursor-agent (multi-user can `env`/`printenv`).
+    _CURSOR_ENV_DROP_SUBSTRINGS = (
+        "PASSWORD",
+        "SECRET",
+        "TOKEN",
+        "API_KEY",
+        "APP_PASSWORD",
+        "PRIVATE_KEY",
+        "NC_TOKEN",
+        "JWT",
+        "CREDENTIAL",
+    )
+
     def _prepare_env(self) -> dict:
-        """Подготовить окружение для subprocess: API ключи"""
-        env = os.environ.copy()
+        """Minimal env for cursor-agent: PATH/proxy/locale + CURSOR_API_KEY; strip host secrets."""
+        keep_exact = {
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TERM",
+            "COLORTERM",
+            "TZ",
+            "XPC_SERVICE_NAME",
+            "SSH_AUTH_SOCK",
+            "NODE_OPTIONS",
+            "AGENT_CLI_CREDENTIAL_STORE",
+        }
+        env: dict[str, str] = {}
+        for key, val in os.environ.items():
+            if key in keep_exact or key.startswith("LC_"):
+                env[key] = val
+                continue
+            # Allow non-secret Cursor CLI knobs (model/timeouts/format), drop *KEY*/*TOKEN*
+            upper = key.upper()
+            if any(s in upper for s in self._CURSOR_ENV_DROP_SUBSTRINGS):
+                continue
+            if upper.startswith("CURSOR_") or upper.startswith("KB_CURSOR"):
+                env[key] = val
+
         env["CURSOR_API_KEY"] = self.api_key
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
@@ -116,7 +160,6 @@ class CursorCLIService:
                     http_connect,
                 )
                 proxy = http_connect
-                pl = proxy
             env["ALL_PROXY"] = proxy
             env["HTTPS_PROXY"] = proxy
             env["HTTP_PROXY"] = proxy
@@ -125,6 +168,22 @@ class CursorCLIService:
             env["NODE_USE_ENV_PROXY"] = "1"
         # Headless / SSH: login keychain часто locked — не ходим в него.
         env.setdefault("AGENT_CLI_CREDENTIAL_STORE", "file")
+        # Do not advertise host multi-user layout / defaults to the agent.
+        for drop in (
+            "KB_BOT_VAULT_RELATIVE",
+            "LOCAL_KB_PATH",
+            "LOCAL_KB_HOST_PATH",
+            "NEXTCLOUD_DEEPLINK_USERNAME",
+            "KB_APP_DEFAULT_CURSOR_ISOLATION",
+            "KB_APP_JWT_SECRET",
+            "KB_NC_TOKEN_KEY",
+            "KB_APP_API_TOKEN",
+            "NEXTCLOUD_BOT_PASSWORD",
+            "NEXTCLOUD_BOT_USERNAME",
+            "DB_PASSWORD",
+            "TELEGRAM_TOKEN",
+        ):
+            env.pop(drop, None)
         return env
 
     @staticmethod
