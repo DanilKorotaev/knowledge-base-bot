@@ -1,158 +1,110 @@
-# Архитектура проекта
+# Архитектура — Knowledge Base App backend
 
-## Общая архитектура
+Актуальная схема продукта. Legacy Telegram Bot / Mini App: [telegram/](telegram/README.md)  
+(revival: [task-epic-telegram-multiuser.md](tasks/pending/task-epic-telegram-multiuser.md)).
+
+## Общая картина
 
 ```
-┌─────────────────┐
-│  Telegram User  │
-└────────┬────────┘
-         │
-         ├──────────────────────────────────┐
-         │                                  │
-         ▼                                  ▼
-┌─────────────────┐              ┌──────────────────┐
-│  Telegram Bot   │              │  Mini App        │
-│   (aiogram)     │              │  (FastAPI)       │
-└────────┬────────┘              └────────┬─────────┘
-         │                                │
-         ├──────────┬──────────┐          │
-         │          │          │          │
-         ▼          ▼          ▼          ▼
-┌────────────┐ ┌──────────┐ ┌──────────────┐
-│ Cursor CLI │ │ Local KB │ │  PostgreSQL  │
-│(subprocess)│ │  Copy    │ │    (БД)      │
-└─────┬──────┘ └────┬─────┘ └──────────────┘
-      │              │
-      │              │ Sync (WebDAV)
-      │              ▼
-      │      ┌─────────────────┐
-      │      │   NextCloud     │
-      │      └─────────────────┘
-      ▼
-┌──────────────┐
-│  OpenAI API  │
-│ (GPT+Whisper)│
-└──────────────┘
+┌──────────────────┐     ┌───────────────────┐
+│  iOS KB App      │     │  (later) Web /    │
+│  JWT + offline │     │  Mini App / TG    │
+└────────┬─────────┘     └─────────┬─────────┘
+         │  HTTPS Bearer           │
+         ▼                         ▼
+┌────────────────────────────────────────────┐
+│              kb_app_api (FastAPI)           │
+│  auth · sessions · messages · voice · jobs │
+│  boards · structured UI · push · files     │
+└───────┬──────────────┬───────────┬─────────┘
+        │              │           │
+        ▼              ▼           ▼
+┌──────────────┐ ┌──────────┐ ┌────────────┐
+│  PostgreSQL  │ │ Cursor   │ │ Nextcloud  │
+│  (users,     │ │ CLI      │ │ WebDAV     │
+│   sessions,  │ │ (agent)  │ │ per-user   │
+│   boards…)   │ │          │ │ App Pass   │
+└──────────────┘ └────┬─────┘ └─────▲──────┘
+                      │             │
+                      ▼             │
+               ┌──────────────┐     │
+               │ Local vault  │─────┘ sync
+               │ users/<login>│
+               └──────────────┘
 ```
 
-## Компоненты
+Отдельно: **health-sync-api** (webhook Apple Health → линковка заметок) — [../health-sync-api/README.md](../health-sync-api/README.md).
 
-### 1. Telegram Bot (aiogram)
-- Обработка сообщений от пользователей через handlers
-- Координация работы сервисов
-- Отправка ответов пользователям
+## Идентичность и доступ
 
-### 2. Handlers Layer
-- `handlers/messages.py` - обработка текстовых сообщений
-- `handlers/voice.py` - обработка голосовых сообщений
-- `handlers/callbacks.py` - обработка inline-кнопок
-- `handlers/commands.py` - обработка команд
-- `handlers/media.py` - обработка медиа-файлов
+| Было (deprecated) | Сейчас |
+|-------------------|--------|
+| Shared Bearer / `KB_APP_API_TELEGRAM_ID` | JWT access + refresh, `users.login` |
+| Whitelist `telegram_id` как primary | App user; `telegram_id` nullable (link later) |
+| Один `LOCAL_KB_PATH` на всех | `LOCAL_KB_PATH/users/<login>/` (`vault_root_relative`) |
+| Bot Nextcloud share (`NEXTCLOUD_BOT_*`) | Per-user App Password + `kb_folder` |
 
-### 3. Services Layer (бизнес-логика)
+Контракт HTTP/JSON для клиента: iOS `docs/KB_APP_API_CONTRACT.md` (репозиторий knowledge-base-app-ios).
 
-#### QueryProcessingService
-- Обработка запросов пользователей через Cursor CLI
-- Управление контекстом сессий
-- Обработка изменений файлов
+## Vault и Cursor isolation
 
-#### SessionService
-- Управление сессиями пользователей
-- Создание и активация сессий
-- Деактивация сессий
+- **Vault root** — `kb_app_api/vault_paths.py`: `users/<login>/` под `LOCAL_KB_PATH`.
+- **`cursor_isolation`**
+  - `strict` — soft-jail: агент видит только vault пользователя
+  - `host` — cwd = vault, без soft-jail (операторский режим)
+- Env scrub для `cursor-agent`: не светить host secrets процессу агента.
+- Относительный путь vault для бота/legacy: `KB_BOT_VAULT_RELATIVE` / cutover docs (ops).
 
-#### SyncService
-- Синхронизация локальной копии БЗ с NextCloud
-- Отображение прогресса синхронизации
-- Обработка конфликтов
+## Runtime: где крутится API
 
-#### CursorCLIService
-- Вызов Cursor CLI через subprocess
-- Обработка запросов с контекстом базы знаний
-- Отслеживание изменений файлов
+| Среда | Как |
+|-------|-----|
+| **Prod (Mac mini)** | LaunchAgent `com.coredan.kb-app-api-host` (uvicorn). Push на `main`/`develop` → CI → redeploy; **не** `kickstart -k` mid-agent (см. `.cursor/rules`). |
+| **Staging** | Docker Compose (`kb-staging-kb-app-api` и др.) |
+| **Local** | `uvicorn kb_app_api.main:app` или `docker compose up kb-app-api` |
 
-#### TranscriptionService
-- Транскрибация голосовых сообщений через OpenAI Whisper API
+Безопасный рестарт host: `scripts/safe-restart-kb-app-api-host.sh`.
 
-### 4. Utils Layer (утилиты)
+## Компоненты `kb_app_api`
 
-#### error_helpers.py
-- Стандартизированная обработка ошибок
-- Унифицированное логирование
+| Область | Модули (уровень пакета) | Назначение |
+|---------|-------------------------|------------|
+| Entry | `main.py`, `deps.py`, `errors.py` | App, JWT user, ошибки |
+| Auth | `auth_service`, `jwt_tokens`, `passwords`, `routes/auth.py`, `routes/me.py` | Register/login/refresh, `/me`, NC folders |
+| NC provision | `nextcloud_provision`, `nc_token_crypto`, `kb_folder` | NC user + App Password |
+| Chat | `routes/sessions`, `messages`, `attachments`, `voice`, `share` | Сессии, compose, голос, шаринг |
+| Jobs | `query_jobs/` | Фоновый Cursor, SSE |
+| Boards | `boards/`, `boards_catalog`, `routes/boards` | Overview/Actions, presets |
+| UI | `structured_ui/`, `routes/ui_events`, `remote_ui` | Remote structured screens |
+| Push | `routes/devices`, `apns_push_service`, `push_dispatch` | APNs |
+| Metrics | `metrics.py`, `routes/health` | `/health`, Prometheus |
+| Admin | `routes/admin_users` | Admin users (по мере готовности) |
 
-#### session_helpers.py
-- Форматирование списков сессий
-- Пагинация сессий
+Общие слои репо, которыми пользуется и API, и legacy bot: `database/`, `services/` (Cursor, sync, sessions), `config.py`, `agent/` (system + channel prompts).
 
-#### message_helpers.py
-- Форматирование и отправка сообщений
-- Fallback для разных форматов (HTML → Markdown V2 → Plain text)
+## Поток: сообщение из iOS
 
-#### telegram_helpers.py
-- Вспомогательные классы (FakeMessage)
-- Утилиты для работы с Telegram API
+1. Клиент: `Authorization: Bearer <access>`; при 401 — refresh.
+2. `POST …/messages` или compose / voice → создаётся / продолжается session.
+3. Тяжёлый Cursor уходит в **query job** (не блокирует HTTP worker).
+4. Ответ: SSE и/или push; изменения файлов в vault пользователя; sync в NC через App Password.
+5. Boards / Structured UI читают тот же vault + метаданные в Postgres (`kb_app_boards` с PK `(user_id, id)`).
 
-#### constants.py
-- Константы проекта (SessionType, SessionStatus, MessageRole, ChangeType)
+## Boards
 
-### 5. Mini App (Telegram Web App)
-- Отдельный FastAPI-сервис (`miniapp/`)
-- Управление сессиями: список, переключение, завершение, удаление
-- Просмотр истории сообщений с вложениями (фото, голосовые, документы)
-- Файловый браузер базы знаний
-- Аутентификация через Telegram initData (HMAC-SHA256)
-- Уведомления в чат через Telegram Bot API
-- Подробнее: [MINIAPP.md](MINIAPP.md)
+- По умолчанию у нового пользователя Overview/Actions **пустые**.
+- Пресеты (`active-jobs`, `actions-presets`, …): `GET/POST/DELETE /api/boards/presets…`.
+- Каталог и install: `kb_app_api/boards/presets.py`.
 
-### 6. Database Layer
-- PostgreSQL для продакшена
-- SQLite для локальной разработки
-- Абстракция через DatabaseInterface
+## Legacy Telegram (кратко)
 
-### 7. NextCloud Integration
-- Синхронизация локальной копии с NextCloud
-- WebDAV API для работы с файлами
+Код: `bot.py`, `handlers/`, `miniapp/`.  
+Доки: [telegram/](telegram/README.md).  
+Не описывать здесь whitelist/handlers детально — см. [telegram/ARCHITECTURE_BOT.md](telegram/ARCHITECTURE_BOT.md).
 
-### 8. Middleware
+## Связанные доки
 
-#### AccessControlMiddleware
-- Проверка доступа пользователей
-- Контроль режима доступа (open/restricted)
-
-#### AdminMiddleware (декоратор)
-- Декоратор `@require_admin` для проверки прав администратора
-
-## Поток данных
-
-### Обработка текстового запроса
-
-1. Пользователь отправляет запрос в Telegram
-2. Handler (`messages.py`) получает сообщение
-3. `SessionService` создает/получает активную сессию
-4. `QueryProcessingService` обрабатывает запрос:
-   - Загружает историю сессии из БД
-   - Синхронизирует БЗ с NextCloud (если включено)
-   - Вызывает `CursorCLIService` для обработки запроса
-   - Получает ответ и список изменений
-5. `QueryProcessingService` сохраняет сообщения в БД
-6. `QueryProcessingService` обрабатывает изменения файлов:
-   - Логирует изменения в БД
-   - Синхронизирует с NextCloud через `SyncService`
-   - Уведомляет пользователя об изменениях
-7. `QueryProcessingService` отправляет ответ пользователю через `message_helpers.send_formatted_message()`
-
-### Обработка голосового сообщения
-
-1. Пользователь отправляет голосовое сообщение
-2. Handler (`voice.py`) получает сообщение
-3. `SessionService` создает/получает активную сессию
-4. `TranscriptionService` транскрибирует голосовое сообщение
-5. Транскрипция обрабатывается как текстовый запрос (см. выше)
-
-### Административные действия
-
-1. Пользователь нажимает административную кнопку
-2. Декоратор `@require_admin` проверяет права
-3. Handler выполняет административное действие
-4. При ошибке используется `error_helpers.send_error_message()`
-
+- [../README.md](../README.md) — лицо репо
+- [../kb-app-api/README.md](../kb-app-api/README.md) — Docker API
+- [DEPLOYMENT.md](DEPLOYMENT.md) / [GITHUB_ACTIONS_DEPLOY.md](GITHUB_ACTIONS_DEPLOY.md) — ops (аудит в эпике доков)
+- [todo.md](todo.md) — задачи

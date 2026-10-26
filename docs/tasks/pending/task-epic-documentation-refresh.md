@@ -19,11 +19,11 @@
 | # | Задача | Исход |
 |---|--------|--------|
 | 1 | [README primary](../completed/task-doc-readme-kb-app-primary.md) ✅ | Лицо репо |
-| 2 | [Relocate Telegram docs](task-doc-relocate-telegram-legacy.md) | Не потерять историю |
-| 3 | [ARCHITECTURE refresh](task-doc-architecture-kb-app.md) | Схема multi-user |
-| 4 | [Deploy / CI / releases audit](task-doc-deploy-and-releases-audit.md) | Ops правда |
-| 5 | [KB App API feature guides](task-doc-kb-app-api-feature-guides.md) | Детали по фичам |
-| 6 | [Cursor rule: docs stay current](task-rule-docs-must-stay-current.md) | Процесс |
+| 2 | [Relocate Telegram docs](../completed/task-doc-relocate-telegram-legacy.md) ✅ | Не потерять историю |
+| 3 | [ARCHITECTURE refresh](../completed/task-doc-architecture-kb-app.md) ✅ | Схема multi-user |
+| 4 | [Deploy / CI / releases audit](task-doc-deploy-and-releases-audit.md) 🚧 | Ops правда — OPS.md |
+| 5 | [KB App API feature guides](task-doc-kb-app-api-feature-guides.md) 🚧 | Индекс + auth stub |
+| 6 | [Cursor rule: docs stay current](task-rule-docs-must-stay-current.md) ✅ | Процесс |
 
 Старые: `task-doc-api-documentation.md`, `task-doc-improvements.md` — **superseded** этим эпиком (закрыть со ссылкой сюда при выполнении #1).
 

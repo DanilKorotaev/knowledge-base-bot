@@ -1,10 +1,10 @@
 # Doc: KB App API feature guides (detailed)
 
-**Статус:** 📋 Planned  
+**Статус:** 🚧 In progress (индекс + auth stub)  
 **Приоритет:** 🟡 Средний  
 **Категория:** Documentation  
 **Эпик:** [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md)  
-**Depends on:** [task-doc-architecture-kb-app.md](task-doc-architecture-kb-app.md) (индекс)
+**Depends on:** [../completed/task-doc-architecture-kb-app.md](../completed/task-doc-architecture-kb-app.md)
 
 ## Что хотим добиться
 
@@ -27,14 +27,15 @@
 
 ## Чеклист (фаза 1 — инвентарь)
 
-- [ ] Пройти `kb_app_api/routes/*` → список фич
+- [x] Пройти `kb_app_api/routes/*` → список фич (таблица в индексе)
 - [ ] Сверить с iOS `KB_APP_API_CONTRACT.md` (дыры)
-- [ ] Создать `docs/kb-app-api/README.md` со статусом «draft / missing»
-- [ ] Закрыть/перенаправить старый `task-doc-api-documentation.md`
+- [x] Создать `docs/kb-app-api/README.md` со статусом «draft / missing»
+- [x] Старый `task-doc-api-documentation.md` — superseded
 
 ## Чеклист (фаза 2+ — писать guides)
 
-- [ ] auth + vault-isolation (критично)
+- [x] auth stub (`docs/kb-app-api/auth.md`)
+- [ ] vault-isolation
 - [ ] sessions-messages + query jobs
 - [ ] boards-presets
 - [ ] остальные по приоритету продукта

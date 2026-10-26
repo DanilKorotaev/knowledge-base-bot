@@ -1,6 +1,6 @@
 # Doc: audit deploy / CI / releases docs
 
-**Статус:** 📋 Planned  
+**Статус:** 🚧 In progress (OPS.md + stubs на DEPLOYMENT / GHA; archive VPS docs — осталось)  
 **Приоритет:** 🟡 Средний  
 **Категория:** Documentation / Ops  
 **Эпик:** [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md)
@@ -19,10 +19,11 @@ Ops-доки описывают **как реально катим сейчас*
 
 ## Чеклист
 
-- [ ] Таблица «что куда деплоится» (staging compose vs host LaunchAgent)
-- [ ] Устаревшие файлы: stub «superseded by X» или перенос в `docs/archive/`
-- [ ] RELEASES / CHANGELOG: кто пишет (CI vs вручную)
-- [ ] Telegram: только CI notify; user bot paused
+- [x] Таблица «что куда деплоится» → [OPS.md](../../OPS.md)
+- [x] Stub устаревших DEPLOYMENT.md / GITHUB_ACTIONS_DEPLOY.md
+- [ ] DEPLOYMENT_SERVER.md / NEXT_STEPS / PUSH_TO_GITHUB — archive или stub
+- [ ] RELEASES / CHANGELOG: кто пишет (CI vs вручную) — сверить с prepare_release
+- [x] Telegram: CI notify ≠ user bot (отмечено в OPS + telegram/)
 
 ## Критерий
 

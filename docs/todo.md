@@ -75,10 +75,10 @@
 Единая точка: [task-epic-documentation-refresh.md](tasks/pending/task-epic-documentation-refresh.md)
 
 - [x] [README: KB App primary, Telegram deprecated](tasks/completed/task-doc-readme-kb-app-primary.md) ✅
-- [ ] [Relocate Telegram/Mini App docs → docs/telegram/](tasks/pending/task-doc-relocate-telegram-legacy.md)
-- [ ] [ARCHITECTURE multi-user](tasks/pending/task-doc-architecture-kb-app.md)
-- [ ] [Deploy / CI / releases audit](tasks/pending/task-doc-deploy-and-releases-audit.md)
-- [ ] [KB App API feature guides](tasks/pending/task-doc-kb-app-api-feature-guides.md)
+- [x] [Relocate Telegram/Mini App docs → docs/telegram/](tasks/completed/task-doc-relocate-telegram-legacy.md) ✅
+- [x] [ARCHITECTURE multi-user](tasks/completed/task-doc-architecture-kb-app.md) ✅
+- [🚧] [Deploy / CI / releases audit](tasks/pending/task-doc-deploy-and-releases-audit.md) — OPS.md есть
+- [🚧] [KB App API feature guides](tasks/pending/task-doc-kb-app-api-feature-guides.md) — индекс + auth stub
 - [x] [Rule: docs stay current](tasks/pending/task-rule-docs-must-stay-current.md) ✅
 - [ ] [Видео-инструкции](tasks/pending/task-doc-video-tutorials.md) — later
 - ~~API documentation / doc improvements~~ → superseded эпиком выше

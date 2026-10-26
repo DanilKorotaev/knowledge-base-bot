@@ -22,7 +22,7 @@
 
 CI/build **уведомления** в Telegram — отдельно: alerts only, это не user-facing бот.
 
-Документация по старому боту/Mini App пока в корне `docs/` (MINIAPP, SETUP_*); перенос в `docs/telegram/` — [задача](docs/tasks/pending/task-doc-relocate-telegram-legacy.md).
+Документация по старому боту/Mini App: **[docs/telegram/](docs/telegram/README.md)**.
 
 ## Быстрый старт (API)
 
@@ -60,7 +60,9 @@ Deploy / host vs staging: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/GITHUB
 
 | | |
 |--|--|
-| Архитектура | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — refresh: [задача](docs/tasks/pending/task-doc-architecture-kb-app.md) |
+| Архитектура | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Ops / deploy | [docs/OPS.md](docs/OPS.md) |
+| API guides | [docs/kb-app-api/](docs/kb-app-api/README.md) |
 | Задачи | [docs/todo.md](docs/todo.md) |
 | Эпик доков | [task-epic-documentation-refresh.md](docs/tasks/pending/task-epic-documentation-refresh.md) |
 | Эпик web-клиентов | [task-epic-web-kb-clients.md](docs/tasks/pending/task-epic-web-kb-clients.md) |
