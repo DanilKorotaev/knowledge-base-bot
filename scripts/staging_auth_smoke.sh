@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Live auth smoke against staging (or BASE_URL). No secrets in git.
+# Live auth smoke against staging (or BASE_URL). No secrets / real FQDNs in git.
 # Usage:
 #   BASE_URL=https://kbapp-staging.example.com ./scripts/staging_auth_smoke.sh
 #   BASE_URL=http://127.0.0.1:8191 ./scripts/staging_auth_smoke.sh
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://kbapp-staging.example.com}"
+BASE_URL="${BASE_URL:?set BASE_URL to your staging API origin}"
 BASE_URL="${BASE_URL%/}"
 SUFFIX="$(date +%s | tail -c 6)"
 USER_A="smoke_a_${SUFFIX}"

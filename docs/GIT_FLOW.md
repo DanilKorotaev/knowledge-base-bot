@@ -29,7 +29,7 @@ Git Flow обеспечивает:
 - **Назначение**: Интеграция и приёмка API/фич до prod
 - **Деплой**: GitHub Actions `deploy-mac-mini-staging.yml` → Docker `kb-staging`  
   Checkout: **`~/Projects/knowledge-base-bot-staging`** (отдельно от prod — не делать `checkout` в prod dir)
-- **URL**: `https://kbapp.staging.example.com`
+- **URL**: staging public base URL (private ops / env — not committed)
 - **Telegram**: после деплоя — отдельное уведомление «KB staging» (тот же `TELEGRAM_*` secrets, что и prod)
 
 #### `develop` (development)

@@ -23,8 +23,7 @@
 - Отдельный фронт в репо (например `admin-web/`) или static service в compose
 - Логин admin JWT против того же API
 - Домены (DNS + nginx на VPS — создать когда UI готов):
-  - staging: `https://kbadmin-staging.example.com`
-  - prod: `https://kbadmin.example.com`
+  - staging / prod admin base URLs — private ops only (placeholders: `https://kbadmin-staging.example.com`, `https://kbadmin.example.com`)
 
 ## Чеклист
 

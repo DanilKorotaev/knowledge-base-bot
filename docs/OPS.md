@@ -6,8 +6,8 @@
 
 | Среда | Код | Runtime | URL (типично) |
 |-------|-----|---------|----------------|
-| **Prod** | `~/Projects/knowledge-base-bot` на Mac mini | LaunchAgent **kb-app-api-host** (uvicorn) | `https://kbapp.example.com` |
-| **Staging** | `~/Projects/knowledge-base-bot-staging` | Docker Compose `kb-staging-*` | `https://kbapp.staging.example.com` (или аналог) |
+| **Prod** | host clone (path local) | LaunchAgent **kb-app-api-host** (uvicorn) | set via env / private ops (`KB_APP_PUBLIC_BASE_URL`) |
+| **Staging** | staging clone (path local) | Docker Compose `kb-staging-*` | set via env / private ops |
 
 Workflows:
 

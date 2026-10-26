@@ -200,10 +200,11 @@ def build_deploy_message(outcome: str, environment: str) -> str:
             if success
             else "❌ <b>KB staging — deploy не удался</b>"
         )
-        ok_body = (
-            "Docker <code>kb-staging</code> обновлён (API :8191).\n"
-            "Публично: <code>https://kbapp.staging.example.com</code>"
-        )
+        public = (os.environ.get("KB_STAGING_PUBLIC_BASE_URL") or "").strip()
+        ok_body = "Docker <code>kb-staging</code> обновлён (API :8191)."
+        if public:
+            ok_body += f"\nПублично: <code>{public}</code>"
+
     else:
         title = (
             "✅ <b>KB production — deploy на Mac mini</b>"

@@ -26,7 +26,7 @@ Owner creates an opaque share token for a session. Anyone with the URL can **rea
 
 ## Ops
 
-`scripts/start-kb-app-api-host.sh` defaults `KB_APP_PUBLIC_BASE_URL=https://kbapp.example.com`.
+`scripts/start-kb-app-api-host.sh` expects `KB_APP_PUBLIC_BASE_URL` from the environment (no real prod FQDN in git).
 Override in `.env` if the public hostname changes. Optional: `KB_APP_SHARE_DEFAULT_TTL_DAYS=30`.
 
 ## Phase 2

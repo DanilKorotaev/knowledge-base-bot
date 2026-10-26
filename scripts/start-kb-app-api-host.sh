@@ -48,7 +48,8 @@ export PYTHONPATH="${API_DIR}/packages/health_linking:${PYTHONPATH:-}"
 # Prefer background query worker for Cursor (survives API redeploy; SSE still streams via job events).
 export KB_APP_QUERY_JOBS_ENABLED="${KB_APP_QUERY_JOBS_ENABLED:-true}"
 # Public share viewer / API URLs (override in .env if the public hostname changes).
-export KB_APP_PUBLIC_BASE_URL="${KB_APP_PUBLIC_BASE_URL:-https://kbapp.example.com}"
+# Real public URL must come from the host env / LaunchAgent — never a prod FQDN default in git.
+export KB_APP_PUBLIC_BASE_URL="${KB_APP_PUBLIC_BASE_URL:-}"
 
 # launchd (Aqua) может читать ~/Documents; SSH — нет. Копируем .p8 в secrets при старте.
 bootstrap_apns_auth_key() {

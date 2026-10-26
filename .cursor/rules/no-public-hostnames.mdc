@@ -1,0 +1,21 @@
+---
+description: Never commit real prod/staging hostnames or personal infra URLs
+alwaysApply: true
+---
+
+# No public hostnames in git
+
+This repository is **public**. Do **not** commit real deployment hostnames, personal domains, or internal URLs.
+
+## Use placeholders instead
+
+- API: `https://kbapp.example.com`, `https://kbapp-staging.example.com`
+- Nextcloud: `https://nextcloud.example.com`
+- Admin: `https://kbadmin.example.com`
+- Allowlists / schema `$id`: `example.com` / `localhost` only
+
+Real URLs belong in **local** `.env`, LaunchAgent plists (not in git), CI **secrets**, or private ops notes — never in README/docs/scripts defaults that ship to GitHub.
+
+## If you find a real hostname in a change
+
+Replace it with a placeholder before commit/push. Do not “document prod” with the live FQDN.

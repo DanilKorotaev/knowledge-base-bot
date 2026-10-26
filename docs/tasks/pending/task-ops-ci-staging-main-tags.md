@@ -7,7 +7,7 @@
 
 ## Цель
 
-- push **`staging`** → только staging Docker API (`kbapp-staging.example.com`), **prod launchd/API не трогать**
+- push **`staging`** → только staging Docker API, **prod launchd/API не трогать**
 - push **`main`** → prod (`deploy-mac-mini.sh`)
 - push **`develop`** → **без** автодеплоя
 - tag **`backend/vX.Y.Z`** → prod release + запись в `docs/RELEASES.md`

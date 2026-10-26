@@ -8,7 +8,7 @@
 
 ## Цель
 
-Живые HTTP-проверки против `https://kbapp-staging.example.com` после CI deploy staging (или workflow_dispatch):
+Живые HTTP-проверки против staging base URL (из secrets/env, не коммитить FQDN) после CI deploy staging (или workflow_dispatch):
 
 - health
 - register/login/refresh/me (когда auth готов)
