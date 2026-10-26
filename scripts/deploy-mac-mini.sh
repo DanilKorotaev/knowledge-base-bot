@@ -6,6 +6,10 @@ set -euo pipefail
 RUNTIME_DIR="${KB_RUNTIME_DIR:-${HOME}/Projects/knowledge-base-bot}"
 VAULT_MAC_MINI="${HOME}/Nextcloud/Документация/Инфраструктура/mac-mini"
 # Nextcloud client may not sync; runtime vault clone lives under var/
+# After multi-user cutover primary vault is users/<login>/…
+if [[ ! -d "${VAULT_MAC_MINI}" ]]; then
+  VAULT_MAC_MINI="${HOME}/var/knowledge-base-bot/kb/users/danilpdr/Документация/Инфраструктура/mac-mini"
+fi
 if [[ ! -d "${VAULT_MAC_MINI}" ]]; then
   VAULT_MAC_MINI="${HOME}/var/knowledge-base-bot/kb/Документация/Инфраструктура/mac-mini"
 fi
