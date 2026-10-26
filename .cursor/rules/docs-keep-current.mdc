@@ -1,0 +1,25 @@
+---
+description: Keep repo docs aligned with KB App API / deploy reality
+alwaysApply: true
+---
+
+# Documentation stays current
+
+This repo’s product face is **KB App API** (multi-user), not a Telegram-bot-first app.
+
+When you change user-facing or ops-facing behavior:
+
+1. Update the matching doc **in the same change** when it already exists:
+   - Root / `docs/README.md`, `docs/ARCHITECTURE.md`
+   - `docs/kb-app-api/*` (when that tree exists)
+   - Deploy / CI docs you touched operationally
+   - iOS `KB_APP_API_CONTRACT.md` if the HTTP/JSON contract changed
+2. If the right guide **does not exist yet**, add or check a follow-up under
+   `docs/tasks/pending/task-doc-kb-app-api-feature-guides.md` — do not silently skip.
+3. Telegram / Mini App material belongs under `docs/telegram/` (legacy). Do **not**
+   revive bot-primary wording in the root README. Revival work is tracked only via
+   `docs/tasks/pending/task-epic-telegram-multiuser.md`.
+4. Before finishing a change that touches `kb_app_api/**` or deploy/restart scripts:
+   skim whether README / ARCHITECTURE still tell the truth.
+
+Hotfixes may ship with a linked follow-up doc task instead of a full guide rewrite.

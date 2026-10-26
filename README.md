@@ -1,117 +1,83 @@
-# Telegram Knowledge Base Bot
+# Knowledge Base App — backend
 
-Telegram-бот для удобного взаимодействия с базой знаний Obsidian через AI-ассистента.
+Бэкенд **Knowledge Base App**: multi-user JWT API, per-user vault в Nextcloud, Cursor CLI, boards / Structured UI, push. Клиент — [iOS app](https://github.com/DanilKorotaev/knowledge-base-app-ios).
 
-## Описание
+Имя репозитория `knowledge-base-bot` — историческое. **Основной продукт сейчас — `kb_app_api`**, не Telegram-бот.
 
-Этот бот работает как интерфейс между пользователем и AI-ассистентом (Cursor CLI) для взаимодействия с базой знаний. Пользователь отправляет запрос в Telegram бота, бот передает запрос в Cursor CLI с контекстом базы знаний, AI обрабатывает запрос и может читать, искать и изменять файлы базы знаний.
+## Что есть
 
-## Основные возможности
+- **KB App API** (`kb_app_api/`) — FastAPI: auth (login/register/refresh), sessions, compose, voice, query jobs, boards + presets, Structured UI, devices/push
+- **Per-user vault** — `users/<login>/`, Cursor isolation (`strict` / `host`), Nextcloud App Password на пользователя
+- **Health Sync API** — отдельный сервис для Apple Health → заметки ([health-sync-api/README.md](health-sync-api/README.md))
+- **Telegram bot + Mini App** — **deprecated** (legacy код ещё в репо; revival — один эпик ниже)
 
-- ✅ Обработка текстовых запросов с контекстом базы знаний
-- ✅ Интуитивный интерфейс с кнопками (главное меню, контекстные клавиатуры)
-- ✅ Автоматическая синхронизация с NextCloud с прогресс-баром и оптимизацией скорости
-- ✅ Транскрибация голосовых сообщений (Whisper API)
-- ✅ Обработка фото и файлов
-- ✅ Отслеживание изменений с возможностью отката через интерфейс
-- ✅ Управление сессиями через удобный интерфейс
-- ✅ Режим "пустого чата" и режим работы с базой знаний
-- ✅ Режим сбора сообщений для группировки нескольких сообщений в один запрос
-- ✅ Система ограничения доступа (whitelist) для защиты личной базы знаний
-- ✅ Административные команды для управления доступом
-- ✅ Универсальность: можно развернуть на любую базу знаний
+Контракт для iOS: `knowledge-base-app-ios/docs/KB_APP_API_CONTRACT.md`. Docker API: [kb-app-api/README.md](kb-app-api/README.md).
 
-## Health Sync API (iOS / HealthSync)
+## Telegram (deprecated)
 
-Отдельный контейнер **`health-sync-api`** (FastAPI) принимает webhook после синхронизации Apple Health: связывает `HealthData/workouts/*.json` с заметками в `Тренировки/`. См. [health-sync-api/README.md](health-sync-api/README.md). В `.env` задайте `HEALTH_SYNC_API_TOKEN` и при необходимости `HEALTH_SYNC_API_PORT`.
+Пользовательский Telegram-бот и Mini App **не являются основным каналом**. Пока multi-user identity строится вокруг App login; бот исторически завязан на `telegram_id`.
 
-## Быстрый старт
+План вернуть Telegram как вторичный канал (1:1 link, invite, bot по `user_id`):  
+→ **[docs/tasks/pending/task-epic-telegram-multiuser.md](docs/tasks/pending/task-epic-telegram-multiuser.md)**
+
+CI/build **уведомления** в Telegram — отдельно: alerts only, это не user-facing бот.
+
+Документация по старому боту/Mini App пока в корне `docs/` (MINIAPP, SETUP_*); перенос в `docs/telegram/` — [задача](docs/tasks/pending/task-doc-relocate-telegram-legacy.md).
+
+## Быстрый старт (API)
 
 ### Требования
 
 - Python 3.11+
-- PostgreSQL (или SQLite для локальной разработки)
-- Cursor CLI (или OpenAI API ключ)
-- NextCloud (опционально, для синхронизации)
+- PostgreSQL (или SQLite для локальных тестов)
+- Cursor CLI (для query pipeline)
+- Nextcloud (per-user App Passwords в проде)
 
-### Установка
-
-1. Клонируйте репозиторий:
+### Локально
 
 ```bash
 git clone https://github.com/DanilKorotaev/knowledge-base-bot.git
 cd knowledge-base-bot
-```
-
-2. Установите зависимости:
-
-```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # или env.example — смотрите актуальный шаблон в репо
 ```
 
-3. Настройте переменные окружения:
+Запуск API (пример через compose):
 
 ```bash
-cp .env.example .env
-# Отредактируйте .env файл
+docker compose build kb-app-api
+docker compose up -d kb-app-api
+# GET http://127.0.0.1:8091/health
 ```
 
-4. Запустите бота:
-
-```bash
-python bot.py
-```
-
-### Локальное тестирование с Docker
-
-1. Создайте `.env` файл (см. `.env.example`)
-2. Настройте NextCloud (см. [docs/SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md))
-3. Запустите скрипт настройки:
-
-```bash
-./scripts/setup_local_testing.sh
-```
-
-4. Запустите бота:
-
-```bash
-docker-compose up -d
-```
-
-5. Проверьте логи:
-
-```bash
-docker-compose logs -f bot
-```
-
-Подробные инструкции по установке и настройке см. в [docs/SETUP.md](docs/SETUP.md) и [docs/SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md).
+Подробнее: [kb-app-api/README.md](kb-app-api/README.md), [docs/QUICK_START_DOCKER.md](docs/QUICK_START_DOCKER.md).  
+Deploy / host vs staging: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/GITHUB_ACTIONS_DEPLOY.md](docs/GITHUB_ACTIONS_DEPLOY.md) (аудит — [задача](docs/tasks/pending/task-doc-deploy-and-releases-audit.md)).
 
 ## Документация
 
-- [SETUP.md](docs/SETUP.md) - Инструкции по установке и настройке
-- [SETUP_NEXTCLOUD.md](docs/SETUP_NEXTCLOUD.md) - Настройка NextCloud для бота
-- [SETUP_NEXTCLOUD_SCENARIO.md](docs/SETUP_NEXTCLOUD_SCENARIO.md) - Сценарий с расшариванием папки
-- [SYNC_AUTOMATIC.md](docs/SYNC_AUTOMATIC.md) - Автоматическая синхронизация
-- [DEVELOPMENT.md](docs/DEVELOPMENT.md) - Руководство для разработчиков
-- [DEPLOYMENT.md](docs/DEPLOYMENT.md) - Инструкции по развертыванию
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Описание архитектуры
-- [GIT_FLOW.md](docs/GIT_FLOW.md) - Процесс разработки и релизов
-- [TODO.md](docs/todo.md) - Активные задачи
-- [COMPLETED.md](docs/completed.md) - Выполненные задачи
+Индекс: [docs/README.md](docs/README.md)
 
-## Структура проекта
+| | |
+|--|--|
+| Архитектура | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — refresh: [задача](docs/tasks/pending/task-doc-architecture-kb-app.md) |
+| Задачи | [docs/todo.md](docs/todo.md) |
+| Эпик доков | [task-epic-documentation-refresh.md](docs/tasks/pending/task-epic-documentation-refresh.md) |
+| Эпик web-клиентов | [task-epic-web-kb-clients.md](docs/tasks/pending/task-epic-web-kb-clients.md) |
+
+## Структура (кратко)
 
 ```
 knowledge-base-bot/
-├── bot.py                      # Точка входа
-├── config.py                   # Конфигурация
-├── database/                   # Работа с БД
-├── services/                   # Бизнес-логика
-├── handlers/                   # Обработчики Telegram
-├── utils/                      # Утилиты
-├── docs/                       # Документация
-├── .cursor/                    # Системные промпты для Cursor
-└── docker-compose.yml          # Docker конфигурация
+├── kb_app_api/           # KB App API (основной runtime)
+├── kb-app-api/           # Docker/README для API
+├── health-sync-api/      # Health webhook
+├── database/ services/   # Общие слои (в т.ч. legacy bot)
+├── handlers/ bot.py      # Legacy Telegram (deprecated)
+├── miniapp/              # Legacy Mini App (deprecated)
+├── agent/                # System / channel prompts для Cursor
+├── docs/                 # Документация и tasks
+└── .cursor/rules/        # Правила агентов (в т.ч. docs-keep-current)
 ```
 
 ## Лицензия
@@ -124,5 +90,5 @@ DanilKorotaev
 
 ## Ссылки
 
-- [GitHub Repository](https://github.com/DanilKorotaev/knowledge-base-bot)
-- [Документация проекта](docs/)
+- [GitHub — backend](https://github.com/DanilKorotaev/knowledge-base-bot)
+- [GitHub — iOS](https://github.com/DanilKorotaev/knowledge-base-app-ios)

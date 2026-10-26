@@ -1,6 +1,10 @@
 # Дополнительные улучшения документации
 
-**Статус**: 📋 Запланировано  
+> **Superseded** → [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md)
+> (README / relocate / architecture / deploy audit).  
+> Не вести этот файл дальше; закрыть при выполнении эпика доков.
+
+**Статус**: ⛔ Superseded  
 **Приоритет**: 🟢 Низкий  
 **Категория**: Документация
 

@@ -1,6 +1,10 @@
 # Создать API документацию
 
-**Статус**: 📋 Запланировано  
+> **Superseded** → [task-epic-documentation-refresh.md](task-epic-documentation-refresh.md) /
+> [task-doc-kb-app-api-feature-guides.md](task-doc-kb-app-api-feature-guides.md).  
+> Не вести этот файл дальше; закрыть при выполнении эпика доков.
+
+**Статус**: ⛔ Superseded  
 **Приоритет**: 🟢 Низкий  
 **Категория**: Документация
 

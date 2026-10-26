@@ -70,11 +70,32 @@
 - [ ] [Интеграция с Google Calendar](tasks/pending/task-feature-google-calendar-integration.md)
 - [ ] [Скачивание видео из различных сервисов](tasks/pending/task-feature-video-download.md)
 
-### Документация
+### Документация (эпик refresh)
 
-- [ ] [Создать API документацию](tasks/pending/task-doc-api-documentation.md)
-- [ ] [Создать видео-инструкции](tasks/pending/task-doc-video-tutorials.md)
-- [ ] [Дополнительные улучшения документации](tasks/pending/task-doc-improvements.md)
+Единая точка: [task-epic-documentation-refresh.md](tasks/pending/task-epic-documentation-refresh.md)
+
+- [x] [README: KB App primary, Telegram deprecated](tasks/completed/task-doc-readme-kb-app-primary.md) ✅
+- [ ] [Relocate Telegram/Mini App docs → docs/telegram/](tasks/pending/task-doc-relocate-telegram-legacy.md)
+- [ ] [ARCHITECTURE multi-user](tasks/pending/task-doc-architecture-kb-app.md)
+- [ ] [Deploy / CI / releases audit](tasks/pending/task-doc-deploy-and-releases-audit.md)
+- [ ] [KB App API feature guides](tasks/pending/task-doc-kb-app-api-feature-guides.md)
+- [x] [Rule: docs stay current](tasks/pending/task-rule-docs-must-stay-current.md) ✅
+- [ ] [Видео-инструкции](tasks/pending/task-doc-video-tutorials.md) — later
+- ~~API documentation / doc improvements~~ → superseded эпиком выше
+
+### Telegram multi-user (эпик revival)
+
+Единая точка из доков: [task-epic-telegram-multiuser.md](tasks/pending/task-epic-telegram-multiuser.md)
+
+- [ ] [Pause Telegram bot runtime](tasks/pending/task-ops-pause-telegram-bot.md)
+- [ ] [1:1 App ↔ Telegram link](tasks/pending/task-api-telegram-account-link-1to1.md)
+- [ ] [Invite without password via Telegram](tasks/pending/task-feature-telegram-invite-no-password.md)
+- [ ] [Bot scoped to App user_id](tasks/pending/task-feature-telegram-bot-user-scoped.md)
+- [ ] [Markdown + channel prompt](tasks/pending/task-feature-telegram-markdown-and-channel.md)
+
+### Web clients (Mini App + mobile + desktop)
+
+- [ ] [Epic: web KB clients](tasks/pending/task-epic-web-kb-clients.md)
 
 ---
 
