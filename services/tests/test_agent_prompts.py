@@ -80,10 +80,16 @@ class ChannelPromptLoadTests(unittest.TestCase):
                 config_mod.config.LOCAL_KB_PATH = base
                 service = object.__new__(CursorCLIService)
                 service.kb_path = vault
+                service.cursor_isolation = "strict"
                 wrapped = service._wrap_query_with_vault_isolation("what do you see?")
                 self.assertIn("Vault isolation", wrapped)
                 self.assertIn("what do you see?", wrapped)
 
+                service.cursor_isolation = "host"
+                host_plain = service._wrap_query_with_vault_isolation("what do you see?")
+                self.assertEqual(host_plain, "what do you see?")
+
+                service.cursor_isolation = "strict"
                 service.kb_path = base
                 plain = service._wrap_query_with_vault_isolation("what do you see?")
                 self.assertEqual(plain, "what do you see?")

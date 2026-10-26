@@ -26,7 +26,13 @@ class SyncService:
         local_kb_path: Optional[Path] = None,
         nextcloud_service: Optional[NextCloudService] = None,
     ):
-        self.local_kb_path = local_kb_path or config.LOCAL_KB_PATH
+        if local_kb_path is not None:
+            self.local_kb_path = Path(local_kb_path)
+        else:
+            rel = (getattr(config, "KB_BOT_VAULT_RELATIVE", None) or "").strip().lstrip("/")
+            self.local_kb_path = (
+                (config.LOCAL_KB_PATH / rel).resolve() if rel else config.LOCAL_KB_PATH
+            )
         self.nextcloud_service = nextcloud_service or NextCloudService()
         self.enabled = config.ENABLE_SYNC and self.nextcloud_service.enabled
         self.sync_interval = config.SYNC_INTERVAL

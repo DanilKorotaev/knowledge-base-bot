@@ -59,6 +59,12 @@ class Config:
     
     # Local Knowledge Base
     LOCAL_KB_PATH: Path = Path(os.getenv("LOCAL_KB_PATH", "/var/knowledge-base-bot/kb"))
+    # Telegram bot / legacy SyncService+Cursor when no API user: sync under this
+    # relative vault (e.g. users/danil) so multi-user layout does not push `users/`
+    # into Nextcloud KnowledgeBase. Empty → LOCAL_KB_PATH itself.
+    KB_BOT_VAULT_RELATIVE: str = (
+        os.getenv("KB_BOT_VAULT_RELATIVE", "").strip().lstrip("/")
+    )
     SYNC_INTERVAL: int = int(os.getenv("SYNC_INTERVAL", "300"))
     AUTO_SYNC: bool = os.getenv("AUTO_SYNC", "true").lower() == "true"
     ENABLE_SYNC: bool = os.getenv("ENABLE_SYNC", "false").lower() == "true"

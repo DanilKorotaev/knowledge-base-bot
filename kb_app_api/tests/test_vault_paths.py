@@ -39,13 +39,16 @@ class TestVaultPaths(unittest.TestCase):
         self.assertEqual(resolve_agent_kb_root(user), vault)
 
         host_user = dict(user, cursor_isolation="host")
-        self.assertEqual(resolve_agent_kb_root(host_user), Path(self._tmpdir).resolve())
+        # host keeps vault cwd; isolation only gates soft-jail elsewhere
+        self.assertEqual(resolve_agent_kb_root(host_user), vault)
 
-        from kb_app_api.vault_paths import is_per_user_vault_path
+        from kb_app_api.vault_paths import is_per_user_vault_path, is_strict_cursor_isolation
 
         self.assertTrue(is_per_user_vault_path(vault))
         self.assertFalse(is_per_user_vault_path(Path(self._tmpdir)))
         self.assertFalse(is_per_user_vault_path(Path(self._tmpdir) / "users"))
+        self.assertTrue(is_strict_cursor_isolation(user))
+        self.assertFalse(is_strict_cursor_isolation(host_user))
 
         changes = localize_file_changes(
             [{"path": "HealthData/a.json", "type": "modified"}],

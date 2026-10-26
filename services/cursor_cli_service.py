@@ -61,8 +61,20 @@ def resolve_cursor_cli_model(model: Optional[str]) -> str:
 class CursorCLIService:
     """Сервис для работы с Cursor CLI"""
     
-    def __init__(self, kb_path: Optional[Path] = None):
-        self.kb_path = Path(kb_path) if kb_path else config.LOCAL_KB_PATH
+    def __init__(
+        self,
+        kb_path: Optional[Path] = None,
+        *,
+        cursor_isolation: str = "strict",
+    ):
+        if kb_path is not None:
+            self.kb_path = Path(kb_path)
+        else:
+            rel = (getattr(config, "KB_BOT_VAULT_RELATIVE", None) or "").strip().lstrip("/")
+            self.kb_path = (
+                (config.LOCAL_KB_PATH / rel).resolve() if rel else config.LOCAL_KB_PATH
+            )
+        self.cursor_isolation = (cursor_isolation or "strict").strip().lower()
         self.api_key = config.CURSOR_API_KEY or config.OPENAI_API_KEY
         self.model = config.CURSOR_MODEL
         
@@ -271,7 +283,7 @@ class CursorCLIService:
             logger.info("Channel prompt (%s) written to .cursor/rules/channel-prompt.md", channel)
 
     def _is_per_user_vault_cwd(self) -> bool:
-        """True when agent cwd is LOCAL_KB_PATH/users/<login> (strict isolation)."""
+        """True when agent cwd is LOCAL_KB_PATH/users/<login>."""
         try:
             from kb_app_api.vault_paths import is_per_user_vault_path
 
@@ -279,6 +291,10 @@ class CursorCLIService:
         except Exception:
             kb = Path(self.kb_path).resolve()
             return "users" in kb.parts and kb.name != "users"
+
+    def _soft_jail_enabled(self) -> bool:
+        """Soft-jail only for strict users in a per-user vault (host may leave vault)."""
+        return self.cursor_isolation != "host" and self._is_per_user_vault_cwd()
 
     _VAULT_ISOLATION_RULE = """---
 description: Per-user vault isolation — stay inside this workspace
@@ -304,19 +320,25 @@ Hard rules:
     )
 
     def _ensure_vault_isolation_rule(self) -> None:
-        """Write always-on isolation rule when cwd is a per-user vault."""
-        if not self._is_per_user_vault_cwd():
-            return
+        """Write always-on isolation rule for strict per-user vaults; remove for host."""
         rules_dir = self.kb_path / ".cursor" / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
         path = rules_dir / "vault-isolation.mdc"
+        if not self._soft_jail_enabled():
+            if path.exists():
+                try:
+                    path.unlink()
+                    logger.info("Removed vault isolation rule (host isolation): %s", path)
+                except OSError as exc:
+                    logger.warning("Could not remove vault isolation rule: %s", exc)
+            return
+        rules_dir.mkdir(parents=True, exist_ok=True)
         text = self._VAULT_ISOLATION_RULE
         if not path.exists() or path.read_text(encoding="utf-8") != text:
             path.write_text(text, encoding="utf-8")
             logger.info("Vault isolation rule written to %s", path)
 
     def _wrap_query_with_vault_isolation(self, query: str) -> str:
-        if not self._is_per_user_vault_cwd():
+        if not self._soft_jail_enabled():
             return query
         return f"{self._VAULT_ISOLATION_QUERY_PREFIX}\n---\n\n{query}"
 
@@ -1093,12 +1115,12 @@ Hard rules:
         master_fd: int | None = None
         try:
             # Выполнить команду в директории базы знаний
-            isolation = "strict-vault" if self._is_per_user_vault_cwd() else "host-or-shared"
             logger.info(f"Выполнение команды: {' '.join(cmd[:-1])} <query>")
             logger.info(
-                "Рабочая директория: %s (cursor_isolation=%s)",
+                "Рабочая директория: %s (cursor_isolation=%s soft_jail=%s)",
                 self.kb_path,
-                isolation,
+                self.cursor_isolation,
+                self._soft_jail_enabled(),
             )
             logger.info(f"Таймаут: {timeout} секунд")
             logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")

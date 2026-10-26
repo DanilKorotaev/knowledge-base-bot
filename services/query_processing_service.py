@@ -563,7 +563,7 @@ class QueryProcessingService:
 
         При use_knowledge_base=False — без Cursor и без начального sync: короткий ответ в чате.
         При allow_structured_ui — после ответа может быть прикреплён structured_ui (если env включён).
-        kb_path — cwd Cursor (per-user vault или LOCAL_KB_PATH при cursor_isolation=host).
+        kb_path — cwd Cursor (per-user vault). Isolation strict|host gates soft-jail only.
         """
         db = await self._get_db()
         session_messages = await db.get_session_messages(session_id)
@@ -575,6 +575,11 @@ class QueryProcessingService:
             api_user = await db.get_user_by_id(int(session_meta["user_id"]))
             if api_user and not api_user.get("login"):
                 api_user = None
+        isolation = (
+            (api_user.get("cursor_isolation") or "strict")
+            if api_user
+            else "strict"
+        )
 
         if not use_knowledge_base:
             if save_user_message:
@@ -626,7 +631,7 @@ class QueryProcessingService:
             cursor_start = time.time()
             # Per-request CursorCLIService so cwd follows the user's vault.
             cursor_service = (
-                CursorCLIService(kb_path=agent_kb)
+                CursorCLIService(kb_path=agent_kb, cursor_isolation=str(isolation))
                 if kb_path is not None
                 else self._get_cursor_service()
             )

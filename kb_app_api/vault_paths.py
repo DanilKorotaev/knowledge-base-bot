@@ -47,15 +47,21 @@ def resolve_kb_root(user: dict[str, Any] | None = None) -> Path:
 
 def resolve_agent_kb_root(user: dict[str, Any] | None = None) -> Path:
     """
-    Cursor CLI cwd for this user.
-    cursor_isolation=strict → only vault; host → whole LOCAL_KB_PATH (legacy mini).
+    Cursor CLI cwd for this user — always the per-user vault when ``user`` is set.
+
+    ``cursor_isolation`` does **not** change cwd:
+    - ``strict`` → soft-jail (rules / query prefix; stay inside vault)
+    - ``host`` → same vault cwd, but agent may leave the tree when the task needs it
     """
     if user is None:
         return kb_base()
-    isolation = (user.get("cursor_isolation") or "strict").strip().lower()
-    if isolation == "host":
-        return kb_base()
     return resolve_kb_root(user)
+
+
+def is_strict_cursor_isolation(user: dict[str, Any] | None = None) -> bool:
+    if user is None:
+        return True
+    return (user.get("cursor_isolation") or "strict").strip().lower() != "host"
 
 
 def is_per_user_vault_path(kb_path: Path | None) -> bool:
