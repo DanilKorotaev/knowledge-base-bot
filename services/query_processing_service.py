@@ -482,27 +482,27 @@ class QueryProcessingService:
 
         sync_success = await sync_service.sync_changes(sync_payload)
 
+        # Auto links after Cursor edits were for Telegram WebView (public OCS shares).
+        # KB App opens files via /api/files/open-link (auth) or optional /share-link on demand.
+        # Never mint public shares on the file-change path — even if NEXTCLOUD_LINK_MODE=share.
         file_urls: Optional[Dict[str, str]] = None
-        link_mode = getattr(app_config, "NEXTCLOUD_LINK_MODE", "disabled")
+        configured_mode = getattr(app_config, "NEXTCLOUD_LINK_MODE", "disabled")
+        link_mode = "disabled"
 
-        if link_mode != "disabled" and sync_success:
-            if api_user is not None:
-                nc_service = NextCloudService.for_user(api_user)
-            else:
-                nc_service = self._get_nextcloud_service()
+        if (
+            api_user is None
+            and configured_mode == "direct"
+            and sync_success
+        ):
+            # Legacy bot-only: optional authenticated web URLs in Telegram notify (no OCS share).
+            nc_service = self._get_nextcloud_service()
             if nc_service and nc_service.enabled:
                 file_urls = {}
 
                 async def get_link_for_change(change: Dict[str, Any]) -> tuple[str, Optional[str]]:
-                    # Public/notify keys stay LOCAL_KB-relative; NC uses vault-relative when api_user.
                     display_path = change.get("path", "")
-                    remote_path = display_path
-                    if api_user is not None:
-                        from kb_app_api.vault_paths import to_vault_relative
-
-                        remote_path = to_vault_relative(api_user, display_path)
                     try:
-                        url = await nc_service.get_file_link(remote_path)
+                        url = await nc_service.get_file_link(display_path)
                         return display_path, url
                     except Exception as e:
                         logger.debug("Не удалось получить ссылку для %s: %s", display_path, e)
@@ -517,8 +517,15 @@ class QueryProcessingService:
                     if isinstance(result, tuple) and result[1]:
                         file_urls[result[0]] = result[1]
 
-                if not file_urls:
+                if file_urls:
+                    link_mode = "direct"
+                else:
                     file_urls = None
+        elif configured_mode == "share":
+            logger.info(
+                "Skipping auto public NC share links on file changes "
+                "(legacy Telegram; use /api/files/share-link if needed)"
+            )
 
         return format_file_changes_info(
             changes, sync_success, file_urls=file_urls, link_mode=link_mode

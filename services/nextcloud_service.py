@@ -961,38 +961,28 @@ class NextCloudService:
     
     async def get_file_link(self, remote_path: str) -> Optional[str]:
         """
-        Получить ссылку на файл в зависимости от настроенного режима
-        
-        Порядок:
-        - share → create_share_link(), fallback → direct
-        - direct → get_web_url() с file_id, fallback → get_web_url() без file_id
-        - disabled → None
-        
-        Args:
-            remote_path: Путь к файлу (относительно base_path)
-        
-        Returns:
-            str: URL ссылки или None
+        Non-mutating link helper for notifications / auto paths.
+
+        - ``direct`` → authenticated web URL (``get_web_url``)
+        - ``share`` / ``disabled`` → ``None`` (public shares only via ``create_share_link``)
         """
         if not self.enabled or self.link_mode == "disabled":
             return None
-        
+
         if self.link_mode == "share":
-            # Попробовать создать share-ссылку
-            url = await self.create_share_link(remote_path)
-            if url:
-                return url
-            # Share не удался — НЕ fallback на direct (требует авторизации, бесполезно из Telegram)
-            logger.warning(f"Share-ссылка не удалась для {remote_path}, ссылка не будет создана")
+            # Public OCS shares are opt-in via create_share_link / POST /api/files/share-link.
+            logger.info(
+                "get_file_link: link_mode=share ignored for auto links (%s); "
+                "use create_share_link explicitly",
+                remote_path,
+            )
             return None
-        
-        # Режим direct (пользователь осознанно выбрал, знает что нужна авторизация)
+
         if self.link_mode == "direct":
-            # Попробовать получить file_id для короткой ссылки
             file_id = await self.get_file_id(remote_path)
             web_url = self.get_web_url(remote_path, file_id=file_id)
             if web_url:
                 return web_url
-        
+
         return None
 

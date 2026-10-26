@@ -46,9 +46,11 @@ Uploads land under the **user vault** session upload root (`resolve_kb_root` / s
 | GET | `/api/files/changes` | Optional `session_id` |
 | POST | `/api/files/revert` | `{ file_id }` |
 | POST | `/api/files/open-link` | Authenticated NC open link |
-| POST | `/api/files/share-link` | Public NC share link |
+| POST | `/api/files/share-link` | Public NC share link (**on demand only**) |
 
 Paths are vault-/NC-relative via `to_vault_relative`.
+
+Cursor file-change sync does **not** auto-create public NC shares (legacy Telegram). See [task-feature-file-open-auth-and-tg-links.md](../tasks/pending/task-feature-file-open-auth-and-tg-links.md).
 
 ## Flow (happy path)
 

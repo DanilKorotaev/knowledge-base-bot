@@ -168,13 +168,13 @@ async def create_file_share_link(
             status_code=503,
         )
 
-    url = await nextcloud.get_file_link(remote_path)
+    # Explicit opt-in: do not use get_file_link (never auto-mints public shares).
+    url = await nextcloud.create_share_link(remote_path)
     if not url:
         raise APIError(
             "share_unavailable",
             "Не удалось создать публичную ссылку на текущую версию файла",
             status_code=409,
-            detail=f"link_mode={nextcloud.link_mode}",
         )
 
     return {
