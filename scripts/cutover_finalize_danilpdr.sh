@@ -15,12 +15,20 @@ SET cursor_isolation = 'host',
     role = 'admin'
 WHERE lower(login) = 'danilpdr';
 
-UPDATE sessions
+-- Avoid unique (user_id, device_token) collisions with tokens already on danilpdr
+DELETE FROM user_devices
+WHERE user_id = 1
+  AND device_token IN (
+    SELECT device_token FROM user_devices
+    WHERE user_id = (SELECT id FROM users WHERE lower(login) = 'danilpdr')
+  );
+
+UPDATE user_devices
 SET user_id = (SELECT id FROM users WHERE lower(login) = 'danilpdr')
 WHERE user_id = 1
   AND EXISTS (SELECT 1 FROM users WHERE lower(login) = 'danilpdr');
 
-UPDATE user_devices
+UPDATE sessions
 SET user_id = (SELECT id FROM users WHERE lower(login) = 'danilpdr')
 WHERE user_id = 1
   AND EXISTS (SELECT 1 FROM users WHERE lower(login) = 'danilpdr');
