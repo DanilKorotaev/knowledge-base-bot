@@ -106,7 +106,7 @@ class CursorCLIService:
         "CREDENTIAL",
     )
 
-    def _prepare_env(self) -> dict:
+    def _prepare_env(self, agent_context: Optional[Dict[str, str]] = None) -> dict:
         """Minimal env for cursor-agent: PATH/proxy/locale + CURSOR_API_KEY; strip host secrets."""
         keep_exact = {
             "PATH",
@@ -184,6 +184,12 @@ class CursorCLIService:
             "TELEGRAM_TOKEN",
         ):
             env.pop(drop, None)
+        # Non-secret per-request client context (session/TZ/locale/…); set after sanitization.
+        if agent_context:
+            for key, value in agent_context.items():
+                text = str(value).strip() if value is not None else ""
+                if key and text:
+                    env[str(key)] = text
         return env
 
     @staticmethod
@@ -1065,6 +1071,7 @@ Hard rules:
         on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
         cancel_event: Optional[asyncio.Event] = None,
         channel: Optional[str] = None,
+        agent_context: Optional[Dict[str, str]] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработать запрос через Cursor CLI
@@ -1083,6 +1090,7 @@ Hard rules:
                 Written to `.cursor/rules/channel-prompt.md` every turn; prefixed
                 into the user query only when ``cursor_chat_id`` is missing
                 (new Cursor session / resume fallback).
+            agent_context: Optional KB_* env overlay (session/user/channel/client TZ…).
         
         Returns:
             tuple: (ответ от AI, список изменений файлов)
@@ -1163,8 +1171,13 @@ Hard rules:
         # Добавить полный запрос
         cmd.append(full_query)
         
-        # Подготовить окружение с API ключом и прокси
-        env = self._prepare_env()
+        # Подготовить окружение с API ключом, прокси и client context
+        env = self._prepare_env(agent_context)
+        if agent_context:
+            logger.info(
+                "Agent context env: %s",
+                ", ".join(f"{k}={agent_context[k]}" for k in sorted(agent_context)),
+            )
         
         # Таймаут из конфига (по умолчанию 10 минут)
         timeout = int(os.getenv("CURSOR_CLI_TIMEOUT", "600"))

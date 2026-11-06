@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from config import config
 
-from kb_app_api.client_metadata import structured_ui_allowed_from_headers
+from kb_app_api.client_metadata import build_agent_context, structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
 from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
@@ -353,6 +353,21 @@ def _cleanup_paths(paths: list[Path]) -> None:
         path.unlink(missing_ok=True)
 
 
+def _agent_context_for_request(
+    request: Request,
+    *,
+    sid: int,
+    user_id: int,
+) -> dict[str, str]:
+    client_meta = getattr(request.state, "client_meta", None) or {}
+    return build_agent_context(
+        channel="app",
+        user_id=user_id,
+        session_id=sid,
+        client_meta=client_meta if isinstance(client_meta, dict) else {},
+    )
+
+
 async def _run_compose_pipeline(
     *,
     sid: int,
@@ -366,6 +381,7 @@ async def _run_compose_pipeline(
     user_message_ack: dict[str, Any] | None = None,
     skip_pipeline: bool = False,
     kb_path: Path | None = None,
+    agent_context: dict[str, str] | None = None,
 ) -> Response:
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -395,6 +411,7 @@ async def _run_compose_pipeline(
                         queue=queue,
                         err_holder=err_holder,
                         skip_pipeline=False,
+                        agent_context=agent_context,
                     )
                     bridged = True
                     return
@@ -410,6 +427,8 @@ async def _run_compose_pipeline(
                     on_activity=on_activity,
                     allow_structured_ui=allow_structured_ui,
                     kb_path=kb_path,
+                    agent_context=agent_context,
+                    kb_user_id=user_id,
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -443,6 +462,7 @@ async def _run_compose_pipeline(
                 on_activity=None,
                 skip_pipeline=False,
                 kb_path=kb_path,
+                agent_context=agent_context,
             )
         except RuntimeError as e:
             raise APIError("processing_error", str(e), status_code=500) from e
@@ -516,6 +536,7 @@ async def post_message(
     wants_sse = accept and "text/event-stream" in accept.lower()
     tid = telegram_id_for_jobs(user)
     allow_sui = structured_ui_allowed_from_headers(request.headers)
+    agent_ctx = _agent_context_for_request(request, sid=sid, user_id=int(user["id"]))
 
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -541,6 +562,7 @@ async def post_message(
                         allow_structured_ui=allow_sui,
                         queue=queue,
                         err_holder=err_holder,
+                        agent_context=agent_ctx,
                     )
                     bridged = True
                     return
@@ -554,6 +576,8 @@ async def post_message(
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
                     kb_path=resolve_agent_kb_root(user),
+                    agent_context=agent_ctx,
+                    kb_user_id=int(user["id"]),
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -584,6 +608,7 @@ async def post_message(
             on_chunk=None,
             on_activity=None,
             kb_path=resolve_agent_kb_root(user),
+            agent_context=agent_ctx,
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e
@@ -655,6 +680,10 @@ async def post_attachment(
             save_user_message=False,
             allow_structured_ui=allow_sui,
             kb_path=resolve_agent_kb_root(user),
+            agent_context=_agent_context_for_request(
+                request, sid=sid, user_id=int(user["id"])
+            ),
+            kb_user_id=int(user["id"]),
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -704,6 +733,7 @@ async def post_voice_message(
     tid = telegram_id_for_jobs(user)
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
+    agent_ctx = _agent_context_for_request(request, sid=sid, user_id=int(user["id"]))
 
     from utils.db_helpers import get_db
 
@@ -736,6 +766,7 @@ async def post_voice_message(
                         allow_structured_ui=allow_sui,
                         queue=queue,
                         err_holder=err_holder,
+                        agent_context=agent_ctx,
                     )
                     bridged = True
                     return
@@ -750,6 +781,8 @@ async def post_voice_message(
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
                     kb_path=resolve_agent_kb_root(user),
+                    agent_context=agent_ctx,
+                    kb_user_id=int(user["id"]),
                 )
             except BaseException as e:
                 err_holder[0] = e
@@ -781,6 +814,7 @@ async def post_voice_message(
             on_chunk=None,
             on_activity=None,
             kb_path=resolve_agent_kb_root(user),
+            agent_context=agent_ctx,
         )
     except RuntimeError as e:
         dest.unlink(missing_ok=True)
@@ -906,6 +940,9 @@ async def post_compose_message(
             user_message_ack=ack,
             skip_pipeline=skip_pipeline,
             kb_path=resolve_agent_kb_root(user),
+            agent_context=_agent_context_for_request(
+                request, sid=sid, user_id=int(user["id"])
+            ),
         )
     except APIError:
         raise

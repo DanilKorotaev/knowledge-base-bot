@@ -70,6 +70,7 @@ async def enqueue_and_bridge_pipeline(
     queue: asyncio.Queue[SSEQueueItem],
     err_holder: list[BaseException | None],
     skip_pipeline: bool = False,
+    agent_context: dict[str, str] | None = None,
 ) -> str | None:
     """Enqueue a job (unless skip) and bridge its events into ``queue``."""
     if skip_pipeline:
@@ -84,6 +85,7 @@ async def enqueue_and_bridge_pipeline(
         use_knowledge_base=use_kb,
         allow_structured_ui=allow_structured_ui,
         attached_files=attached_files,
+        agent_context=agent_context,
     )
     await run_job_event_bridge(job_id=job.id, queue=queue, err_holder=err_holder, jobs=service)
     return job.id
@@ -102,6 +104,7 @@ async def run_query_inline_or_job(
     on_activity: Callable[[str], Awaitable[None]] | None,
     skip_pipeline: bool = False,
     kb_path: Path | None = None,
+    agent_context: dict[str, str] | None = None,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
     Non-SSE path: either enqueue+wait via events (jobs enabled) or call QPS inline.
@@ -134,6 +137,8 @@ async def run_query_inline_or_job(
             on_activity=on_activity,
             allow_structured_ui=allow_structured_ui,
             kb_path=agent_kb,
+            agent_context=agent_context,
+            kb_user_id=user_id,
         )
 
     service = QueryJobService()
@@ -145,6 +150,7 @@ async def run_query_inline_or_job(
         use_knowledge_base=use_kb,
         allow_structured_ui=allow_structured_ui,
         attached_files=attached_files,
+        agent_context=agent_context,
     )
     poll_sec = max(0.05, config.QUERY_JOB_EVENT_POLL_MS / 1000.0)
     after_seq = 0
