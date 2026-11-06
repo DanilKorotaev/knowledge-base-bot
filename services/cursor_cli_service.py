@@ -1149,6 +1149,14 @@ Hard rules:
         # -p: prompt mode (интерактивный режим)
         # --force: принудительное выполнение
         cmd = ["cursor-agent", "-p", "--force", "--trust"]
+        # Headless: approve vault .cursor/mcp.json servers (agent-workspaces, kb-boards, …)
+        approve_mcps = os.getenv("CURSOR_CLI_APPROVE_MCPS", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        if approve_mcps:
+            cmd.append("--approve-mcps")
         cmd.extend(["--workspace", str(self.kb_path)])
         
         # Добавить --resume, если есть cursor_chat_id
