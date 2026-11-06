@@ -50,7 +50,11 @@ jobs:
           echo "Before: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
           git remote get-url origin >/dev/null
           git fetch origin staging
-          git checkout staging 2>/dev/null || git checkout -b staging origin/staging
+          # Clear in-progress merge/rebase so checkout cannot fail with "needs merge".
+          git merge --abort >/dev/null 2>&1 || true
+          git rebase --abort >/dev/null 2>&1 || true
+          git cherry-pick --abort >/dev/null 2>&1 || true
+          git checkout -f -B staging origin/staging
           git reset --hard origin/staging
 
           # Prefer .env.staging from staging dir; else copy once from prod dir.

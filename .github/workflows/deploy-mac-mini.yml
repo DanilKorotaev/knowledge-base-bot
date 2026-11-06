@@ -42,7 +42,12 @@ jobs:
 
           echo "Before: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
           git fetch origin main
-          git checkout main
+          # Runtime checkout is shared with local agent work. Clear any in-progress
+          # merge/rebase/cherry-pick so checkout cannot fail with "needs merge".
+          git merge --abort >/dev/null 2>&1 || true
+          git rebase --abort >/dev/null 2>&1 || true
+          git cherry-pick --abort >/dev/null 2>&1 || true
+          git checkout -f -B main origin/main
           git reset --hard origin/main
 
           if [[ -f scripts/deploy-mac-mini.sh ]]; then
