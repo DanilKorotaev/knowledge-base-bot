@@ -13,6 +13,10 @@ from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.transcription_cache import (
+    transcription_cache,
+    validate_client_transcription_id,
+)
 from kb_app_api.vault_paths import resolve_agent_kb_root
 from kb_app_api.voice_errors import transcription_user_message
 from services.openai_service import OpenAIService
@@ -48,7 +52,7 @@ async def _transcribe_audio_bytes(data: bytes, filename: str | None) -> str:
         if not raw:
             raise APIError(
                 "transcription_empty",
-                "Не удалось распознать речь",
+                "Speech was not recognized in the recording.",
                 status_code=422,
             )
         return await TranscriptionService.polish_transcription_simple(raw, language)
@@ -76,10 +80,36 @@ async def _transcribe_upload(audio: UploadFile) -> str:
 async def transcribe_voice(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
     audio: UploadFile = File(...),
+    client_transcription_id: str = Form(default=""),
 ) -> dict[str, Any]:
-    """Только Whisper + полировка; без записи в сессию и без Cursor."""
-    _ = user
-    transcription_out = await _transcribe_upload(audio)
+    """Whisper + polish only (no session write / Cursor).
+
+    Optional ``client_transcription_id`` makes the call idempotent per user:
+    retries reuse a ready result or join an in-flight Whisper run.
+    """
+    try:
+        client_id = validate_client_transcription_id(client_transcription_id)
+    except ValueError as exc:
+        raise APIError(
+            "validation_error",
+            "Invalid client_transcription_id",
+            detail="client_transcription_id",
+        ) from exc
+
+    data = await audio.read()
+    filename = audio.filename
+
+    async def _run() -> str:
+        return await _transcribe_audio_bytes(data, filename)
+
+    if client_id:
+        transcription_out = await transcription_cache.get_or_run(
+            int(user["id"]),
+            client_id,
+            _run,
+        )
+    else:
+        transcription_out = await _run()
     return {"transcription": transcription_out}
 
 
