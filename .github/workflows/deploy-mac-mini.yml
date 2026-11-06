@@ -23,6 +23,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       TELEGRAM_NOTIFY_PROXY: socks5://127.0.0.1:1080
+      KBAPP_INGRESS_URL: ${{ secrets.KBAPP_INGRESS_URL }}
 
     steps:
       - name: Pull and deploy production runtime
@@ -66,4 +67,14 @@ jobs:
           cd "${KB_RUNTIME_DIR:-$HOME/Projects/knowledge-base-bot}"
           python3 scripts/ci/telegram_notify.py deploy \
             --environment production \
+            --outcome "${{ steps.deploy.outcome }}"
+
+      - name: Notify KB App ingress (deploy prod)
+        if: always()
+        env:
+          KB_RUNTIME_DIR: ${{ vars.KB_RUNTIME_DIR }}
+        run: |
+          set -euo pipefail
+          cd "${KB_RUNTIME_DIR:-$HOME/Projects/knowledge-base-bot}"
+          python3 scripts/ci/kbapp_ingress_notify.py deploy \
             --outcome "${{ steps.deploy.outcome }}"

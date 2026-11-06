@@ -119,6 +119,20 @@ def message_to_kb(
     client_message_id = m.get("client_message_id")
     if client_message_id:
         payload["client_message_id"] = str(client_message_id)
+    metadata = m.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        payload["metadata"] = metadata
+        if role == "external":
+            external = {
+                "summary": metadata.get("summary") or content,
+                "detail": metadata.get("detail"),
+                "participant": metadata.get("participant"),
+                "source": metadata.get("source"),
+                "type": metadata.get("type"),
+                "links": metadata.get("links") or [],
+                "event_id": metadata.get("event_id"),
+            }
+            payload["external"] = external
     return payload
 
 

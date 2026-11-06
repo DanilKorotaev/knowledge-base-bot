@@ -32,6 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
 from kb_app_api.metrics import setup_metrics
+from kb_app_api.ingress.routes import router as ingress_router
 from kb_app_api.routes import (
     admin_users,
     attachments,
@@ -61,6 +62,7 @@ logger = logging.getLogger("kb_app_api")
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     from kb_app_api.auth_service import maybe_bootstrap_admin
+    from kb_app_api.ingress.schema import ensure_ingress_schema
     from utils.db_helpers import close_db, get_db
 
     db = await get_db()
@@ -69,6 +71,10 @@ async def lifespan(_: FastAPI):
         await maybe_bootstrap_admin(db)
     except Exception:
         logger.exception("Bootstrap admin failed")
+    try:
+        await ensure_ingress_schema()
+    except Exception:
+        logger.exception("Ingress schema init failed")
     yield
     await close_db()
 
@@ -110,6 +116,7 @@ app.include_router(health_sync.router, prefix="/api")
 app.include_router(boards.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(remote_ui.router, prefix="/api")
+app.include_router(ingress_router, prefix="/api")
 
 _ADMIN_WEB = _ROOT / "admin-web"
 if _ADMIN_WEB.is_dir():
