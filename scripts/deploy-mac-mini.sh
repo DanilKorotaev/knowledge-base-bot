@@ -88,9 +88,36 @@ launchctl bootstrap "gui/${UID_NUM}" "${HOME}/Library/LaunchAgents/com.coredan.k
   || launchctl kickstart "gui/${UID_NUM}/com.coredan.kb-app-query-worker" 2>/dev/null \
   || true
 # CI: wait for idle agent (up to 10m) instead of blind kickstart -k.
-if ! KB_API_RESTART_WAIT=1 KB_API_RESTART_WAIT_SEC="${KB_API_RESTART_WAIT_SEC:-600}" \
-  bash scripts/safe-restart-kb-app-api-host.sh; then
-  echo "ERROR: safe restart of kb-app-api-host failed" >&2
+set +e
+KB_API_RESTART_WAIT=1 KB_API_RESTART_WAIT_SEC="${KB_API_RESTART_WAIT_SEC:-600}" \
+  bash scripts/safe-restart-kb-app-api-host.sh
+restart_rc=$?
+set -e
+if [[ "${restart_rc}" -eq 0 ]]; then
+  :
+elif [[ "${restart_rc}" -eq 2 ]]; then
+  # Code is already on disk; killing cursor-agent would drop an in-flight KB App reply
+  # (including ingress-enqueued agents). Defer restart until the CLI is idle.
+  echo "WARN: kb-app-api-host restart deferred — cursor-agent still busy after wait"
+  echo "WARN: git HEAD is $(git rev-parse --short HEAD); scheduling restart when agent exits"
+  _restart_script="$(pwd)/scripts/safe-restart-kb-app-api-host.sh"
+  nohup bash -c "
+    for _ in \$(seq 1 240); do
+      if ! pgrep -f '[c]ursor-agent' >/dev/null 2>&1; then
+        break
+      fi
+      sleep 15
+    done
+    if pgrep -f '[c]ursor-agent' >/dev/null 2>&1; then
+      echo 'deferred restart: still busy after long wait' >&2
+      exit 1
+    fi
+    exec bash '${_restart_script}'
+  " >/tmp/kb-app-api-deferred-restart.log 2>&1 &
+  echo "Deferred restart pid $! (log /tmp/kb-app-api-deferred-restart.log)"
+  unset _restart_script
+else
+  echo "ERROR: safe restart of kb-app-api-host failed (rc=${restart_rc})" >&2
   exit 1
 fi
 
