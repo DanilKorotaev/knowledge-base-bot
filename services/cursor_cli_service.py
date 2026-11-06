@@ -61,8 +61,20 @@ def resolve_cursor_cli_model(model: Optional[str]) -> str:
 class CursorCLIService:
     """Сервис для работы с Cursor CLI"""
     
-    def __init__(self, kb_path: Optional[Path] = None):
-        self.kb_path = Path(kb_path) if kb_path else config.LOCAL_KB_PATH
+    def __init__(
+        self,
+        kb_path: Optional[Path] = None,
+        *,
+        cursor_isolation: str = "strict",
+    ):
+        if kb_path is not None:
+            self.kb_path = Path(kb_path)
+        else:
+            rel = (getattr(config, "KB_BOT_VAULT_RELATIVE", None) or "").strip().lstrip("/")
+            self.kb_path = (
+                (config.LOCAL_KB_PATH / rel).resolve() if rel else config.LOCAL_KB_PATH
+            )
+        self.cursor_isolation = (cursor_isolation or "strict").strip().lower()
         self.api_key = config.CURSOR_API_KEY or config.OPENAI_API_KEY
         self.model = config.CURSOR_MODEL
         
@@ -76,13 +88,58 @@ class CursorCLIService:
         
         # Создать .cursor/rules/ и скопировать системные промпты (для оптимизации)
         self._ensure_cursor_rules()
+        self._ensure_vault_isolation_rule()
         
         # Загрузить системный промпт один раз при инициализации
         self.system_prompt = self._load_system_prompt()
     
+    # Host API secrets must not leak into cursor-agent (multi-user can `env`/`printenv`).
+    _CURSOR_ENV_DROP_SUBSTRINGS = (
+        "PASSWORD",
+        "SECRET",
+        "TOKEN",
+        "API_KEY",
+        "APP_PASSWORD",
+        "PRIVATE_KEY",
+        "NC_TOKEN",
+        "JWT",
+        "CREDENTIAL",
+    )
+
     def _prepare_env(self, agent_context: Optional[Dict[str, str]] = None) -> dict:
-        """Подготовить окружение для subprocess: API ключи + optional KB_* client context."""
-        env = os.environ.copy()
+        """Minimal env for cursor-agent: PATH/proxy/locale + CURSOR_API_KEY; strip host secrets."""
+        keep_exact = {
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "TMPDIR",
+            "TMP",
+            "TEMP",
+            "LANG",
+            "LC_ALL",
+            "LC_CTYPE",
+            "TERM",
+            "COLORTERM",
+            "TZ",
+            "XPC_SERVICE_NAME",
+            "SSH_AUTH_SOCK",
+            "NODE_OPTIONS",
+            "AGENT_CLI_CREDENTIAL_STORE",
+        }
+        env: dict[str, str] = {}
+        for key, val in os.environ.items():
+            if key in keep_exact or key.startswith("LC_"):
+                env[key] = val
+                continue
+            # Allow non-secret Cursor CLI knobs (model/timeouts/format), drop *KEY*/*TOKEN*
+            upper = key.upper()
+            if any(s in upper for s in self._CURSOR_ENV_DROP_SUBSTRINGS):
+                continue
+            if upper.startswith("CURSOR_") or upper.startswith("KB_CURSOR"):
+                env[key] = val
+
         env["CURSOR_API_KEY"] = self.api_key
         if not env.get("CURSOR_API_KEY") and config.OPENAI_API_KEY:
             env["OPENAI_API_KEY"] = config.OPENAI_API_KEY
@@ -96,12 +153,13 @@ class CursorCLIService:
         if proxy:
             pl = proxy.strip().lower()
             if pl.startswith("socks5://") or pl.startswith("socks://") or pl.startswith("socks5h://"):
+                http_connect = self._http_connect_proxy_url()
                 logger.warning(
-                    "CURSOR_CLI_PROXY is SOCKS (%s); using http://127.0.0.1:8118 for cursor-agent",
+                    "CURSOR_CLI_PROXY is SOCKS (%s); using %s for cursor-agent",
                     proxy,
+                    http_connect,
                 )
-                proxy = "http://127.0.0.1:8118"
-                pl = proxy
+                proxy = http_connect
             env["ALL_PROXY"] = proxy
             env["HTTPS_PROXY"] = proxy
             env["HTTP_PROXY"] = proxy
@@ -110,12 +168,47 @@ class CursorCLIService:
             env["NODE_USE_ENV_PROXY"] = "1"
         # Headless / SSH: login keychain часто locked — не ходим в него.
         env.setdefault("AGENT_CLI_CREDENTIAL_STORE", "file")
+        # Do not advertise host multi-user layout / defaults to the agent.
+        for drop in (
+            "KB_BOT_VAULT_RELATIVE",
+            "LOCAL_KB_PATH",
+            "LOCAL_KB_HOST_PATH",
+            "NEXTCLOUD_DEEPLINK_USERNAME",
+            "KB_APP_DEFAULT_CURSOR_ISOLATION",
+            "KB_APP_JWT_SECRET",
+            "KB_NC_TOKEN_KEY",
+            "KB_APP_API_TOKEN",
+            "NEXTCLOUD_BOT_PASSWORD",
+            "NEXTCLOUD_BOT_USERNAME",
+            "DB_PASSWORD",
+            "TELEGRAM_TOKEN",
+        ):
+            env.pop(drop, None)
+        # Non-secret per-request client context (session/TZ/locale/…); set after sanitization.
         if agent_context:
             for key, value in agent_context.items():
                 text = str(value).strip() if value is not None else ""
                 if key and text:
                     env[str(key)] = text
         return env
+
+    @staticmethod
+    def _http_connect_proxy_url() -> str:
+        """HTTP CONNECT for cursor-agent (Node cannot use SOCKS).
+
+        Host macOS: sing-box on 127.0.0.1:8118.
+        Docker/Linux: same proxy on the Mac/VPS host via host.docker.internal:8118.
+        Override with CURSOR_CLI_HTTP_PROXY when needed.
+        """
+        explicit = (os.getenv("CURSOR_CLI_HTTP_PROXY") or "").strip()
+        if explicit:
+            return explicit
+        in_docker = Path("/.dockerenv").exists() or os.getenv(
+            "KB_CURSOR_PROXY_VIA_DOCKER_HOST", ""
+        ).lower() in ("1", "true", "yes")
+        if in_docker:
+            return "http://host.docker.internal:8118"
+        return "http://127.0.0.1:8118"
 
     def _cmd_with_optional_stdbuf(self, cmd: list[str]) -> list[str]:
         """stdbuf есть в Linux (Docker); на macOS без GNU coreutils — запуск без обёртки."""
@@ -253,6 +346,66 @@ class CursorCLIService:
         if not channel_file.exists() or channel_file.read_text(encoding="utf-8") != text:
             channel_file.write_text(text, encoding="utf-8")
             logger.info("Channel prompt (%s) written to .cursor/rules/channel-prompt.md", channel)
+
+    def _is_per_user_vault_cwd(self) -> bool:
+        """True when agent cwd is LOCAL_KB_PATH/users/<login>."""
+        try:
+            from kb_app_api.vault_paths import is_per_user_vault_path
+
+            return is_per_user_vault_path(self.kb_path)
+        except Exception:
+            kb = Path(self.kb_path).resolve()
+            return "users" in kb.parts and kb.name != "users"
+
+    def _soft_jail_enabled(self) -> bool:
+        """Soft-jail only for strict users in a per-user vault (host may leave vault)."""
+        return self.cursor_isolation != "host" and self._is_per_user_vault_cwd()
+
+    _VAULT_ISOLATION_RULE = """---
+description: Per-user vault isolation — stay inside this workspace
+alwaysApply: true
+---
+# Vault isolation
+
+You are confined to **this workspace** (the signed-in user's knowledge-base vault).
+
+Hard rules:
+- Do **not** list, read, write, or search paths outside this workspace root.
+- Do **not** `cd ..`, `ls ..`, `ls ../..`, or open sibling folders under `users/`.
+- Do **not** open absolute paths like `/var/knowledge-base-bot/kb`, `/var/knowledge-base-bot/kb/users`, or other users' vaults (`kbadmin`, `quickreg*`, etc.).
+- When asked what you can see or where you are running, describe **only** this workspace (OS may still report Linux in Docker — that is expected).
+- If a tool fails on an outside path, stop and answer from vault contents only.
+"""
+
+    _VAULT_ISOLATION_QUERY_PREFIX = (
+        "# Vault isolation (strict)\n"
+        "Workspace root is this user's vault only. Do not leave it "
+        "(no `..`, no `/var/knowledge-base-bot/kb/users`, no other logins). "
+        "Answer from files inside the workspace only.\n"
+    )
+
+    def _ensure_vault_isolation_rule(self) -> None:
+        """Write always-on isolation rule for strict per-user vaults; remove for host."""
+        rules_dir = self.kb_path / ".cursor" / "rules"
+        path = rules_dir / "vault-isolation.mdc"
+        if not self._soft_jail_enabled():
+            if path.exists():
+                try:
+                    path.unlink()
+                    logger.info("Removed vault isolation rule (host isolation): %s", path)
+                except OSError as exc:
+                    logger.warning("Could not remove vault isolation rule: %s", exc)
+            return
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        text = self._VAULT_ISOLATION_RULE
+        if not path.exists() or path.read_text(encoding="utf-8") != text:
+            path.write_text(text, encoding="utf-8")
+            logger.info("Vault isolation rule written to %s", path)
+
+    def _wrap_query_with_vault_isolation(self, query: str) -> str:
+        if not self._soft_jail_enabled():
+            return query
+        return f"{self._VAULT_ISOLATION_QUERY_PREFIX}\n---\n\n{query}"
 
     def _wrap_query_with_channel(self, query: str, channel: Optional[str]) -> str:
         """
@@ -621,11 +774,51 @@ class CursorCLIService:
         accumulator: StreamJsonAccumulator,
         on_chunk: Optional[Callable[[str], Awaitable[None]]],
         on_activity: Optional[Callable[[str], Awaitable[None]]],
-    ) -> bool:
-        """Returns True if line produced a recognized stream-json event."""
+        process_start_time: Optional[float] = None,
+    ) -> str | None:
+        """Parse one NDJSON event.
+
+        Returns:
+            ``None`` if unrecognized;
+            ``\"result\"`` for terminal stream-json result (agent done);
+            ``\"event\"`` for any other recognized event.
+        """
         event = parse_ndjson_line(line)
         if event is None:
-            return False
+            return None
+        etype = event.get("type") if isinstance(event, dict) else None
+        # Timeline breadcrumbs for slow-run diagnosis (tool calls / result).
+        try:
+            if etype == "tool_call":
+                subtype = event.get("subtype")
+                tool_obj = event.get("tool_call") if isinstance(event.get("tool_call"), dict) else {}
+                tool_name = next(iter(tool_obj.keys()), "?") if tool_obj else "?"
+                elapsed = (
+                    f"{time.time() - process_start_time:.1f}s"
+                    if process_start_time is not None
+                    else "?"
+                )
+                logger.info(
+                    "cursor_cli: tool_call %s name=%s at+%s",
+                    subtype or "?",
+                    tool_name,
+                    elapsed,
+                )
+            elif etype == "result" and isinstance(event, dict):
+                elapsed = (
+                    f"{time.time() - process_start_time:.1f}s"
+                    if process_start_time is not None
+                    else "?"
+                )
+                logger.info(
+                    "cursor_cli: result subtype=%s duration_ms=%s is_error=%s at+%s",
+                    event.get("subtype"),
+                    event.get("duration_ms"),
+                    event.get("is_error"),
+                    elapsed,
+                )
+        except Exception:
+            pass
         chunk, activity = accumulator.consume(event)
         if on_chunk and chunk:
             try:
@@ -637,7 +830,7 @@ class CursorCLIService:
                 await on_activity(activity)
             except Exception as e:
                 logger.debug(f"Ошибка в on_activity callback: {e}")
-        return True
+        return "result" if etype == "result" else "event"
 
     async def _run_stdout_read_loop(
         self,
@@ -701,26 +894,51 @@ class CursorCLIService:
 
             cancel_task = asyncio.create_task(watch_cancel())
 
+        # Slice long waits so slow runs emit heartbeats without changing overall deadlines.
+        heartbeat_sec = 60.0
+        got_terminal_result = False
         try:
             while True:
                 if first_activity_time:
                     # stream-json: tool calls (e.g. swift test) may run minutes without new events
-                    read_timeout = timeout if use_stream_json else idle_timeout
+                    quiet_limit = float(timeout if use_stream_json else idle_timeout)
                 else:
-                    read_timeout = timeout
+                    quiet_limit = float(timeout)
+                quiet_so_far = 0.0
+                if first_activity_time:
+                    quiet_so_far = time.time() - (last_activity_time or first_activity_time)
+                elif process_start_time:
+                    quiet_so_far = time.time() - process_start_time
+                remaining = max(0.1, quiet_limit - quiet_so_far)
+                read_timeout = min(heartbeat_sec, remaining)
                 try:
                     chunk = await asyncio.wait_for(
                         self._read_process_stdout_chunk(process, master_fd, 4096),
                         timeout=read_timeout,
                     )
                 except asyncio.TimeoutError:
+                    quiet_elapsed = (
+                        time.time() - (last_activity_time or first_activity_time)
+                        if first_activity_time
+                        else time.time() - process_start_time
+                    )
+                    if quiet_elapsed + 0.01 < quiet_limit:
+                        logger.info(
+                            "cursor_cli: heartbeat quiet=%.0fs limit=%.0fs "
+                            "alive=+%.0fs pid=%s stream_json=%s",
+                            quiet_elapsed,
+                            quiet_limit,
+                            time.time() - process_start_time,
+                            getattr(process, "pid", None),
+                            use_stream_json,
+                        )
+                        continue
                     if first_activity_time and stdout_chunks:
-                        idle_elapsed = time.time() - (last_activity_time or first_activity_time)
                         logger.info(
                             "cursor_cli: idle %.1f с после последней активности "
-                            "(CURSOR_CLI_IDLE_TIMEOUT=%s) — завершаем чтение",
-                            idle_elapsed,
-                            idle_timeout,
+                            "(limit=%s) — завершаем чтение",
+                            quiet_elapsed,
+                            int(quiet_limit),
                         )
                         break
                     timed_out_before_activity = True
@@ -740,12 +958,14 @@ class CursorCLIService:
                         line, ndjson_buffer = ndjson_buffer.split("\n", 1)
                         if not line.strip():
                             continue
-                        if await self._process_ndjson_line(
+                        kind = await self._process_ndjson_line(
                             line,
                             accumulator=stream_accumulator,
                             on_chunk=on_chunk,
                             on_activity=on_activity,
-                        ):
+                            process_start_time=process_start_time,
+                        )
+                        if kind:
                             if first_activity_time is None:
                                 first_activity_time = now
                                 logger.info(
@@ -753,6 +973,20 @@ class CursorCLIService:
                                     first_activity_time - process_start_time,
                                 )
                             last_activity_time = now
+                            if kind == "result":
+                                # Agent finished; cursor-agent often keeps stdout open /
+                                # leaves worker-server children — do not wait up to
+                                # CURSOR_CLI_TIMEOUT of silence after the terminal event.
+                                got_terminal_result = True
+                                logger.info(
+                                    "cursor_cli: terminal result received — ending stdout read "
+                                    "(alive=+%.1fs pid=%s)",
+                                    time.time() - process_start_time,
+                                    getattr(process, "pid", None),
+                                )
+                                break
+                    if got_terminal_result:
+                        break
                 else:
                     if decoded.strip():
                         if first_activity_time is None:
@@ -769,16 +1003,25 @@ class CursorCLIService:
                             except Exception as e:
                                 logger.debug(f"Ошибка в on_chunk callback: {e}")
 
-            if use_stream_json and stream_accumulator is not None and ndjson_buffer.strip():
-                if await self._process_ndjson_line(
+            if (
+                not got_terminal_result
+                and use_stream_json
+                and stream_accumulator is not None
+                and ndjson_buffer.strip()
+            ):
+                kind = await self._process_ndjson_line(
                     ndjson_buffer,
                     accumulator=stream_accumulator,
                     on_chunk=on_chunk,
                     on_activity=on_activity,
-                ):
+                    process_start_time=process_start_time,
+                )
+                if kind:
                     last_activity_time = time.time()
                     if first_activity_time is None:
                         first_activity_time = last_activity_time
+                    if kind == "result":
+                        got_terminal_result = True
 
         except asyncio.TimeoutError:
             pass
@@ -867,6 +1110,11 @@ class CursorCLIService:
             # context in history; repeating it every message is wasteful.
             if not cursor_chat_id:
                 query = self._wrap_query_with_channel(query, channel)
+
+        # Soft vault jail: rule file always; query prefix on new Cursor chats only.
+        self._ensure_vault_isolation_rule()
+        if not cursor_chat_id:
+            query = self._wrap_query_with_vault_isolation(query)
         
         # Логировать прикрепленные файлы
         if attached_files:
@@ -900,15 +1148,8 @@ class CursorCLIService:
         # Подготовить команду
         # -p: prompt mode (интерактивный режим)
         # --force: принудительное выполнение
-        cmd = ["cursor-agent", "-p", "--force"]
-        # Headless: approve vault .cursor/mcp.json servers (agent-workspaces, kb-boards, …)
-        approve_mcps = os.getenv("CURSOR_CLI_APPROVE_MCPS", "true").lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-        if approve_mcps:
-            cmd.append("--approve-mcps")
+        cmd = ["cursor-agent", "-p", "--force", "--trust"]
+        cmd.extend(["--workspace", str(self.kb_path)])
         
         # Добавить --resume, если есть cursor_chat_id
         if use_resume:
@@ -946,8 +1187,13 @@ class CursorCLIService:
         master_fd: int | None = None
         try:
             # Выполнить команду в директории базы знаний
-            logger.info(f"Выполнение команды: {' '.join(cmd)}")
-            logger.info(f"Рабочая директория: {self.kb_path}")
+            logger.info(f"Выполнение команды: {' '.join(cmd[:-1])} <query>")
+            logger.info(
+                "Рабочая директория: %s (cursor_isolation=%s soft_jail=%s)",
+                self.kb_path,
+                self.cursor_isolation,
+                self._soft_jail_enabled(),
+            )
             logger.info(f"Таймаут: {timeout} секунд")
             logger.debug(f"API ключ установлен: {'Да' if self.api_key else 'Нет'}")
             
