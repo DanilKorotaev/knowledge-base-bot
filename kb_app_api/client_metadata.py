@@ -67,11 +67,14 @@ def build_agent_context(
     session_id: int | str | None = None,
     client_meta: Mapping[str, str] | None = None,
     extra: Mapping[str, str] | None = None,
+    user: Mapping[str, Any] | None = None,
+    agent_root: str | None = None,
 ) -> dict[str, str]:
     """
     Build env overlay for cursor-agent: channel/session/user + optional iOS client_meta.
 
     Values are strings only; empty/None omitted. Safe to JSON-serialize onto query jobs.
+    Sets ``AGENT_ROOT`` from explicit path, ``user``, or ``user_id`` via vault_paths.
     """
     ctx: dict[str, str] = {}
     if channel:
@@ -85,6 +88,28 @@ def build_agent_context(
     if session_id is not None and str(session_id).strip() != "":
         ctx["KB_SESSION_ID"] = str(session_id).strip()
     ctx.update(agent_env_from_client_meta(client_meta))
+
+    root_text = (agent_root or "").strip()
+    if root_text:
+        from pathlib import Path
+
+        root_text = str(Path(root_text).expanduser().resolve())
+    else:
+        try:
+            from kb_app_api.vault_paths import resolve_agent_data_root
+
+            user_dict = dict(user) if user is not None else None
+            root_text = str(
+                resolve_agent_data_root(
+                    user_dict,
+                    user_id=user_id,
+                )
+            )
+        except Exception:
+            root_text = ""
+    if root_text:
+        ctx["AGENT_ROOT"] = root_text
+
     if extra:
         for key, value in extra.items():
             text = str(value).strip()
