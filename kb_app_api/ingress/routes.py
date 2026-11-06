@@ -13,6 +13,10 @@ from kb_app_api.deps import get_api_user
 from kb_app_api.errors import APIError
 from kb_app_api.ingress import store
 from kb_app_api.ingress.deliver import process_event
+from kb_app_api.ingress.grafana_adapt import (
+    adapt_grafana_webhook,
+    looks_like_grafana_webhook,
+)
 from kb_app_api.ingress.schema import ensure_ingress_schema
 from kb_app_api.timefmt import to_iso_z
 
@@ -167,6 +171,14 @@ async def ingest_event(token: str, request: Request) -> dict[str, Any]:
             if not isinstance(parsed, dict):
                 raise APIError("invalid_request", "body must be a JSON object", status_code=400)
             envelope_raw = parsed
+
+    # Grafana Unified Alerting posts a proprietary webhook shape — map it before
+    # source allowlists and envelope normalize (adapters in DB are UI-only).
+    if looks_like_grafana_webhook(envelope_raw) or (
+        str(resolved.get("adapter_key") or "") == "grafana"
+        and "alerts" in envelope_raw
+    ):
+        envelope_raw = adapt_grafana_webhook(envelope_raw)
 
     if resolved.get("adapter_key") and not envelope_raw.get("adapter_key"):
         envelope_raw["adapter_key"] = resolved["adapter_key"]

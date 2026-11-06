@@ -79,6 +79,19 @@ Session routing via user rules (extract `KB-Session:` from commit message) — p
 
 Extract patterns (e.g. `KB-Session:` from commit messages) live in **rule JSON**, not in repository code.
 
+## Grafana alerts
+
+Grafana Unified Alerting can POST its native webhook JSON to a dedicated token
+(`adapter_key=grafana`, `allowed_sources=["grafana"]`). The API maps
+`status` / `alerts` / `commonLabels` into:
+
+- `source=grafana`
+- `type=alert.firing` | `alert.resolved`
+- `hints.severity`, `hints.alertname`, `hints.instance`
+- `payload` = original Grafana body
+
+Route with a rule → `session_key=alerts`. Keep the Telegram contact point in parallel.
+
 ## Orchestrator (P2)
 
 When action kind is `orchestrator` (or no rule matches), the event is posted to the

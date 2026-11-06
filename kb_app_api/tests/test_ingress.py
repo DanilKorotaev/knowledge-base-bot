@@ -265,6 +265,63 @@ class TestIngressRouterUnit(unittest.TestCase):
         self.assertEqual(action["policy"], "enqueue_agent")
 
 
+class TestGrafanaAdaptUnit(unittest.TestCase):
+    def test_adapt_firing_webhook(self) -> None:
+        from kb_app_api.ingress.grafana_adapt import (
+            adapt_grafana_webhook,
+            looks_like_grafana_webhook,
+        )
+
+        raw = {
+            "status": "firing",
+            "title": "[FIRING:1] HostDown",
+            "message": "Host is down",
+            "groupKey": "{}:{alertname=HostDown}",
+            "commonLabels": {
+                "alertname": "HostDown",
+                "severity": "critical",
+                "instance": "old-vps:9100",
+            },
+            "commonAnnotations": {"summary": "Node exporter missing"},
+            "alerts": [
+                {
+                    "status": "firing",
+                    "fingerprint": "abc123",
+                    "labels": {
+                        "alertname": "HostDown",
+                        "severity": "critical",
+                        "instance": "old-vps:9100",
+                    },
+                    "annotations": {"summary": "Node exporter missing"},
+                    "generatorURL": "http://grafana/alerting/1",
+                }
+            ],
+            "externalURL": "http://100.110.240.111:3000",
+        }
+        self.assertTrue(looks_like_grafana_webhook(raw))
+        env = adapt_grafana_webhook(raw)
+        self.assertEqual(env["source"], "grafana")
+        self.assertEqual(env["type"], "alert.firing")
+        self.assertEqual(env["hints"]["severity"], "critical")
+        self.assertEqual(env["hints"]["instance"], "old-vps:9100")
+        self.assertIn("grafana:", env["dedupe_key"])
+        self.assertEqual(env["payload"], raw)
+
+    def test_adapt_resolved(self) -> None:
+        from kb_app_api.ingress.grafana_adapt import adapt_grafana_webhook
+
+        env = adapt_grafana_webhook(
+            {
+                "status": "resolved",
+                "title": "[RESOLVED] DiskLow",
+                "alerts": [],
+                "commonLabels": {"alertname": "DiskLow", "severity": "warning"},
+            }
+        )
+        self.assertEqual(env["type"], "alert.resolved")
+        self.assertEqual(env["hints"]["status"], "resolved")
+
+
 class TestIngressOrchestratorUnit(unittest.TestCase):
     def test_parse_decision_from_fence(self) -> None:
         from kb_app_api.ingress.orchestrator import parse_orchestrator_decision
