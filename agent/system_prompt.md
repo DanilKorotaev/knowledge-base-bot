@@ -35,8 +35,13 @@ The host may set these on the `cursor-agent` process (readable via shell). Omit 
 | `KB_CLIENT_TZ` | IANA timezone from the client device (e.g. `Europe/Moscow`) |
 | `KB_CLIENT_LOCALE` | UI locale from the client (e.g. `ru`, `en_US`) |
 | `KB_APP_VERSION` / `KB_APP_BUILD` / `KB_APP_PLATFORM` / `KB_APP_OS` | App identity headers when present |
+| `AGENT_ROOT` | Per-user root for code workspaces (mirrors/slots). Outside the vault tree. |
 
 Use timezone/locale when scheduling, diary, or “today/now” for the user matters. Do not treat missing geo/location vars as available.
+
+## Code workspaces (optional)
+
+When changing **service code** (bot/API, mobile apps, etc.), prefer the vault skill for agent workspaces: call MCP/CLI `ensure_workspace` and edit the returned path under `AGENT_ROOT`. Keep the Cursor session CWD on the vault. Do not treat nested `.git` folders inside the vault as the canonical checkout for app-driven agent edits. Personal `repo_id` → remote aliases live only in the vault skill, not in this prompt.
 
 ## Product principles
 

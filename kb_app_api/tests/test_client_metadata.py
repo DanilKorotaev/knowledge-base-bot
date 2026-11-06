@@ -64,6 +64,28 @@ class TestClientMetadata(unittest.TestCase):
         self.assertEqual(ctx["KB_SESSION_ID"], "99")
         self.assertEqual(ctx["KB_CLIENT_TZ"], "UTC")
         self.assertEqual(ctx["KB_CLIENT_LOCALE"], "en")
+        self.assertTrue(ctx["AGENT_ROOT"].endswith("/users/id7"))
+
+    def test_build_agent_context_agent_root_override(self) -> None:
+        from pathlib import Path
+
+        custom = str(Path("/tmp/custom-agent-root").resolve())
+        ctx = build_agent_context(
+            channel="app",
+            user_id=1,
+            user={"login": "alice", "agent_root": "/tmp/custom-agent-root"},
+        )
+        self.assertEqual(ctx["AGENT_ROOT"], custom)
+        explicit = str(Path("/tmp/explicit").resolve())
+        ctx2 = build_agent_context(user_id=1, agent_root="/tmp/explicit")
+        self.assertEqual(ctx2["AGENT_ROOT"], explicit)
+        # extra wins over auto-resolved AGENT_ROOT
+        ctx3 = build_agent_context(
+            user_id=1,
+            agent_root="/tmp/ignored",
+            extra={"AGENT_ROOT": "/tmp/from-extra"},
+        )
+        self.assertEqual(ctx3["AGENT_ROOT"], "/tmp/from-extra")
 
     def test_agent_context_json_roundtrip(self) -> None:
         raw = agent_context_to_json({"KB_SESSION_ID": "3", "KB_CLIENT_TZ": "UTC"})

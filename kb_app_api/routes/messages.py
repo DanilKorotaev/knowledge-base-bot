@@ -19,12 +19,10 @@ from config import config
 
 from kb_app_api.client_metadata import build_agent_context, structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
-from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.query_jobs.sse_bridge import enqueue_and_bridge_pipeline, run_query_inline_or_job
 from kb_app_api.session_access import parse_session_id, require_session_for_user
-from kb_app_api.vault_paths import resolve_agent_kb_root, resolve_kb_root
 from kb_app_api.voice_attachments import attach_voice_to_message, voice_upload_path
 from services.query_processing_service import QueryProcessingService
 
@@ -223,8 +221,8 @@ def _parse_use_kb(value: str) -> bool:
     return str(value).lower() in ("1", "true", "yes", "on")
 
 
-def _session_upload_root(session_id: int, user: dict | None = None) -> Path:
-    kb_root = resolve_kb_root(user)
+def _session_upload_root(session_id: int) -> Path:
+    kb_root = Path(config.LOCAL_KB_PATH)
     kb_root.mkdir(parents=True, exist_ok=True)
     upload_root = kb_root / ".kb_app_api_uploads" / str(session_id)
     upload_root.mkdir(parents=True, exist_ok=True)
@@ -306,10 +304,9 @@ async def _persist_compose_uploads(
     file_uploads: list[UploadFile],
     audio_uploads: list[UploadFile],
     transcriptions: list[str],
-    user: dict | None = None,
 ) -> tuple[list[Path], list[Path]]:
     """Save multipart files/audio and link them to the user message. Returns (file_paths, audio_paths)."""
-    upload_root = _session_upload_root(session_id, user)
+    upload_root = _session_upload_root(session_id)
     file_paths: list[Path] = []
     audio_paths: list[Path] = []
 
@@ -339,7 +336,7 @@ async def _persist_compose_uploads(
         if not safe.lower().endswith((".m4a", ".mp4", ".ogg", ".wav", ".webm", ".mp3")):
             base = safe.rsplit(".", 1)[0] if "." in safe else safe
             safe = f"{base}.m4a"
-        dest = voice_upload_path(session_id, safe, user=user)
+        dest = voice_upload_path(session_id, safe)
         dest.write_bytes(data)
         audio_paths.append(dest)
         transcription = transcriptions[index] if index < len(transcriptions) else ""
@@ -358,6 +355,7 @@ def _agent_context_for_request(
     *,
     sid: int,
     user_id: int,
+    user: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     client_meta = getattr(request.state, "client_meta", None) or {}
     return build_agent_context(
@@ -365,6 +363,7 @@ def _agent_context_for_request(
         user_id=user_id,
         session_id=sid,
         client_meta=client_meta if isinstance(client_meta, dict) else {},
+        user=user,
     )
 
 
@@ -380,7 +379,6 @@ async def _run_compose_pipeline(
     allow_structured_ui: bool = False,
     user_message_ack: dict[str, Any] | None = None,
     skip_pipeline: bool = False,
-    kb_path: Path | None = None,
     agent_context: dict[str, str] | None = None,
 ) -> Response:
     if wants_sse:
@@ -426,7 +424,6 @@ async def _run_compose_pipeline(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_structured_ui,
-                    kb_path=kb_path,
                     agent_context=agent_context,
                     kb_user_id=user_id,
                 )
@@ -461,7 +458,6 @@ async def _run_compose_pipeline(
                 on_chunk=None,
                 on_activity=None,
                 skip_pipeline=False,
-                kb_path=kb_path,
                 agent_context=agent_context,
             )
         except RuntimeError as e:
@@ -534,9 +530,11 @@ async def post_message(
     await require_session_for_user(sid, user["id"])
 
     wants_sse = accept and "text/event-stream" in accept.lower()
-    tid = telegram_id_for_jobs(user)
+    tid = int(user["telegram_id"])
     allow_sui = structured_ui_allowed_from_headers(request.headers)
-    agent_ctx = _agent_context_for_request(request, sid=sid, user_id=int(user["id"]))
+    agent_ctx = _agent_context_for_request(
+        request, sid=sid, user_id=int(user["id"]), user=user
+    )
 
     if wants_sse:
         queue: asyncio.Queue[SSEQueueItem] = asyncio.Queue()
@@ -575,7 +573,6 @@ async def post_message(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
-                    kb_path=resolve_agent_kb_root(user),
                     agent_context=agent_ctx,
                     kb_user_id=int(user["id"]),
                 )
@@ -607,7 +604,6 @@ async def post_message(
             allow_structured_ui=allow_sui,
             on_chunk=None,
             on_activity=None,
-            kb_path=resolve_agent_kb_root(user),
             agent_context=agent_ctx,
         )
     except RuntimeError as e:
@@ -638,7 +634,7 @@ async def post_attachment(
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
-    tid = telegram_id_for_jobs(user)
+    tid = int(user["telegram_id"])
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
@@ -647,7 +643,9 @@ async def post_attachment(
         raise APIError("validation_error", "Пустой файл", detail="file")
 
     safe = _safe_filename(file.filename)
-    upload_root = _session_upload_root(sid, user)
+    kb_root = Path(config.LOCAL_KB_PATH)
+    kb_root.mkdir(parents=True, exist_ok=True)
+    upload_root = kb_root / ".kb_app_api_uploads" / str(sid)
     upload_root.mkdir(parents=True, exist_ok=True)
     dest = upload_root / f"{uuid.uuid4().hex[:10]}_{safe}"
     dest.write_bytes(data)
@@ -679,9 +677,8 @@ async def post_attachment(
             attached_files=[dest],
             save_user_message=False,
             allow_structured_ui=allow_sui,
-            kb_path=resolve_agent_kb_root(user),
             agent_context=_agent_context_for_request(
-                request, sid=sid, user_id=int(user["id"])
+                request, sid=sid, user_id=int(user["id"]), user=user
             ),
             kb_user_id=int(user["id"]),
         )
@@ -725,15 +722,17 @@ async def post_voice_message(
         base = safe.rsplit(".", 1)[0] if "." in safe else safe
         safe = f"{base}.m4a"
 
-    dest = voice_upload_path(sid, safe, user=user)
+    dest = voice_upload_path(sid, safe)
     dest.write_bytes(data)
     file_size = len(data)
 
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
-    tid = telegram_id_for_jobs(user)
+    tid = int(user["telegram_id"])
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
-    agent_ctx = _agent_context_for_request(request, sid=sid, user_id=int(user["id"]))
+    agent_ctx = _agent_context_for_request(
+        request, sid=sid, user_id=int(user["id"]), user=user
+    )
 
     from utils.db_helpers import get_db
 
@@ -780,7 +779,6 @@ async def post_voice_message(
                     on_chunk=on_chunk,
                     on_activity=on_activity,
                     allow_structured_ui=allow_sui,
-                    kb_path=resolve_agent_kb_root(user),
                     agent_context=agent_ctx,
                     kb_user_id=int(user["id"]),
                 )
@@ -813,7 +811,6 @@ async def post_voice_message(
             allow_structured_ui=allow_sui,
             on_chunk=None,
             on_activity=None,
-            kb_path=resolve_agent_kb_root(user),
             agent_context=agent_ctx,
         )
     except RuntimeError as e:
@@ -848,7 +845,7 @@ async def post_compose_message(
     """
     sid = parse_session_id(session_id)
     await require_session_for_user(sid, user["id"])
-    tid = telegram_id_for_jobs(user)
+    tid = int(user["telegram_id"])
     use_kb = _parse_use_kb(use_knowledge_base)
     wants_sse = accept and "text/event-stream" in accept.lower()
     allow_sui = structured_ui_allowed_from_headers(request.headers)
@@ -912,7 +909,6 @@ async def post_compose_message(
                 file_uploads,
                 audio_uploads,
                 transcriptions,
-                user=user,
             )
             saved_paths = file_paths + audio_paths
         except APIError:
@@ -939,9 +935,8 @@ async def post_compose_message(
             allow_structured_ui=allow_sui,
             user_message_ack=ack,
             skip_pipeline=skip_pipeline,
-            kb_path=resolve_agent_kb_root(user),
             agent_context=_agent_context_for_request(
-                request, sid=sid, user_id=int(user["id"])
+                request, sid=sid, user_id=int(user["id"]), user=user
             ),
         )
     except APIError:

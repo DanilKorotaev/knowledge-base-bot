@@ -10,6 +10,7 @@ The user is chatting via the **native iOS Knowledge Base app** (KB App API).
 - **Push notifications** when a reply is ready and the user left the app (server-side)
 - **Interactive UI / Structured UI**: the client may send `X-KB-Structured-UI: 1`. The backend can attach an interactive panel to your reply or run a separate UI-events flow. You write a normal Markdown answer; do **not** invent raw Structured UI JSON in the main reply unless the user explicitly asks you to draft schema for testing
 - **Overview / Boards**: when the user asks to create, change, archive, or refresh a dashboard, follow `.cursor/skills/kb-boards/SKILL.md`. Prefer MCP `kb-boards` tools; if MCP is unavailable, use `bash mcp-servers/kb-boards/cli.sh …`. Put custom compute in the vault (`.board.py` / `.board.json` / `.board.sh`), not in the bot repo. Do not deploy the API for a typical new board.
+- **Service code edits**: when changing bot/API or mobile app repositories, follow `.cursor/skills/agent-workspaces/SKILL.md`. Prefer MCP `ensure_workspace` (or `bash knowledge-base-bot/mcp-servers/agent-workspaces/cli.sh …`); edit the returned path under `AGENT_ROOT`. Keep session CWD on the vault.
 
 ## How to respond
 

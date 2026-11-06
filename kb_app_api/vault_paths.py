@@ -47,21 +47,45 @@ def resolve_kb_root(user: dict[str, Any] | None = None) -> Path:
 
 def resolve_agent_kb_root(user: dict[str, Any] | None = None) -> Path:
     """
-    Cursor CLI cwd for this user — always the per-user vault when ``user`` is set.
-
-    ``cursor_isolation`` does **not** change cwd:
-    - ``strict`` → soft-jail (rules / query prefix; stay inside vault)
-    - ``host`` → same vault cwd, but agent may leave the tree when the task needs it
+    Cursor CLI cwd for this user.
+    cursor_isolation=strict → only vault; host → whole LOCAL_KB_PATH (legacy mini).
     """
     if user is None:
+        return kb_base()
+    isolation = (user.get("cursor_isolation") or "strict").strip().lower()
+    if isolation == "host":
         return kb_base()
     return resolve_kb_root(user)
 
 
-def is_strict_cursor_isolation(user: dict[str, Any] | None = None) -> bool:
-    if user is None:
-        return True
-    return (user.get("cursor_isolation") or "strict").strip().lower() != "host"
+def resolve_agent_data_root(
+    user: dict[str, Any] | None = None,
+    *,
+    user_id: int | str | None = None,
+) -> Path:
+    """
+    Per-user AGENT_ROOT for code workspaces (mirrors/slots), outside the vault tree.
+
+    Resolution:
+    1. ``user['agent_root']`` absolute/expandable override when set
+    2. ``AGENT_ROOT_BASE/users/<login|idN>``
+    """
+    if user is not None:
+        override = str(user.get("agent_root") or "").strip()
+        if override:
+            return Path(override).expanduser().resolve()
+    login = ""
+    if user is not None:
+        login = str(user.get("login") or "").strip()
+    if not login and user_id is not None and str(user_id).strip() != "":
+        login = f"id{user_id}"
+    if not login:
+        login = "default"
+    safe = "".join(c for c in login if c.isalnum() or c in ("-", "_", ".")).strip(".-_")
+    if not safe:
+        safe = "default"
+    base = Path(config.AGENT_ROOT_BASE).expanduser().resolve()
+    return (base / "users" / safe).resolve()
 
 
 def is_per_user_vault_path(kb_path: Path | None) -> bool:
