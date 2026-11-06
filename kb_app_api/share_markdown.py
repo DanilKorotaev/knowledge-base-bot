@@ -126,11 +126,73 @@ def markdown_to_share_html(text: str) -> str:
     return _sanitize_fragment(rendered)
 
 
+def share_role_label(message: dict[str, Any]) -> str:
+    """Human-readable sender label for the public share HTML viewer."""
+    role = str(message.get("role") or "user")
+    if role == "assistant":
+        return "Ассистент"
+    if role == "external":
+        external = message.get("external") if isinstance(message.get("external"), dict) else {}
+        participant = external.get("participant") if isinstance(external.get("participant"), dict) else {}
+        label = str(participant.get("label") or "").strip()
+        if label:
+            return label
+        source = str(external.get("source") or message.get("source") or "").strip()
+        return source or "Внешний источник"
+    if role == "system":
+        return "Система"
+    return "Вы"
+
+
+def render_share_external_body(message: dict[str, Any]) -> str:
+    """Summary + optional expandable detail/links for role=external on share page."""
+    external = message.get("external") if isinstance(message.get("external"), dict) else {}
+    summary = str(
+        external.get("summary") or message.get("content") or "External event"
+    ).strip()
+    parts = [f'<div class="ext-summary">{html.escape(summary).replace(chr(10), "<br>")}</div>']
+
+    detail = external.get("detail")
+    if detail is not None and str(detail).strip():
+        detail_html = html.escape(str(detail)).replace("\n", "<br>")
+        parts.append(
+            "<details class=\"ext-detail\">"
+            "<summary>Подробности</summary>"
+            f'<div class="ext-detail-body">{detail_html}</div>'
+            "</details>"
+        )
+
+    links = external.get("links") if isinstance(external.get("links"), list) else []
+    link_items: list[str] = []
+    for link in links[:20]:
+        if not isinstance(link, dict):
+            continue
+        url = str(link.get("url") or "").strip()
+        if not url:
+            continue
+        title = str(link.get("title") or url).strip() or url
+        # Reuse markdown sanitizer policy: only http(s).
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            continue
+        link_items.append(
+            f'<li><a href="{html.escape(url, quote=True)}" rel="noopener noreferrer" '
+            f'target="_blank">{html.escape(title)}</a></li>'
+        )
+    if link_items:
+        parts.append('<ul class="ext-links">' + "".join(link_items) + "</ul>")
+
+    return "".join(parts)
+
+
 def render_share_message_body(message: dict[str, Any]) -> str:
     """Pick plain vs markdown rendering for one shared message bubble."""
     role = str(message.get("role") or "user")
     content = str(message.get("content") or "")
     fmt = str(message.get("content_format") or "").lower()
+
+    if role == "external":
+        return render_share_external_body(message)
 
     if role == "assistant" or fmt == "markdown":
         body = markdown_to_share_html(content)

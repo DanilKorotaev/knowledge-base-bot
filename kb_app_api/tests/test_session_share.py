@@ -117,6 +117,64 @@ class TestSessionShare(unittest.TestCase):
         gone = self.client.get(f"/api/share/{token}")
         self.assertEqual(gone.status_code, 404)
 
+    def test_share_html_renders_external_participant_and_detail(self) -> None:
+        import asyncio
+
+        from utils.constants import MessageRole
+        from utils.db_helpers import get_db
+
+        session_id = self._create_session_with_message()
+
+        async def _add_external() -> None:
+            db = await get_db()
+            msg = await db.add_message(
+                int(session_id),
+                str(MessageRole.EXTERNAL),
+                "Disk almost full",
+            )
+            from kb_app_api.ingress.deliver import _set_message_metadata
+
+            await _set_message_metadata(
+                int(msg["id"]),
+                {
+                    "summary": "Disk almost full",
+                    "detail": "Used 92% on /Volumes/CoreDanData\nPath: /backups/old",
+                    "participant": {"key": "grafana", "label": "Grafana", "avatar_url": None},
+                    "source": "grafana",
+                    "type": "alert.firing",
+                    "links": [{"title": "Panel", "url": "https://example.test/d/1"}],
+                },
+            )
+
+        asyncio.run(_add_external())
+
+        created = self.client.post(
+            f"/api/sessions/{session_id}/share",
+            headers=self.headers,
+            json={},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        token = created.json()["share_url"].rsplit("/", 1)[-1]
+
+        public = self.client.get(f"/api/share/{token}")
+        self.assertEqual(public.status_code, 200, public.text)
+        external_msgs = [m for m in public.json()["messages"] if m.get("role") == "external"]
+        self.assertTrue(external_msgs, public.json()["messages"])
+        self.assertEqual(external_msgs[-1]["external"]["participant"]["label"], "Grafana")
+
+        html_page = self.client.get(f"/share/{token}")
+        self.assertEqual(html_page.status_code, 200)
+        self.assertIn("Grafana", html_page.text)
+        self.assertIn("Disk almost full", html_page.text)
+        self.assertIn("Подробности", html_page.text)
+        self.assertIn("Used 92%", html_page.text)
+        self.assertIn("https://example.test/d/1", html_page.text)
+        # Must not mislabel external as the session owner.
+        self.assertNotRegex(
+            html_page.text,
+            r'class="msg external">\s*<div class="role">Вы</div>',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

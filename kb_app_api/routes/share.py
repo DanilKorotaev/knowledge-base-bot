@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.serializers import session_to_kb_from_row
-from kb_app_api.share_markdown import render_share_message_body
+from kb_app_api.share_markdown import render_share_message_body, share_role_label
 from utils.constants import SessionStatus
 
 router = APIRouter(tags=["share"])
@@ -125,7 +125,7 @@ body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;margin:2r
     messages_html: list[str] = []
     for message in payload.get("messages") or []:
         role = str(message.get("role") or "user")
-        role_label = "Ассистент" if role == "assistant" else "Вы"
+        role_label = html.escape(share_role_label(message))
         content = render_share_message_body(message)
         md_class = " md" if role == "assistant" or str(message.get("content_format") or "") == "markdown" else ""
         messages_html.append(
@@ -149,9 +149,17 @@ header p{{margin:.35rem 0 0;color:#8e8e93;font-size:.85rem}}
 main{{max-width:44rem;margin:0 auto;padding:1rem 1.25rem 2rem;display:flex;flex-direction:column;gap:.75rem}}
 .msg{{padding:.85rem 1rem;border-radius:14px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05)}}
 .msg.assistant{{background:#eef2ff}}
+.msg.external{{background:#f3faf5;border:1px solid #d8eee0}}
+.msg.external .content{{white-space:normal}}
 .role{{font-size:.75rem;color:#8e8e93;margin-bottom:.35rem}}
 .content{{line-height:1.5;word-break:break-word}}
 .content:not(.md){{white-space:pre-wrap}}
+.ext-summary{{font-weight:600}}
+.ext-detail{{margin-top:.55rem;font-size:.92em}}
+.ext-detail summary{{cursor:pointer;color:#3a3a3c;user-select:none}}
+.ext-detail-body{{margin-top:.4rem;padding:.55rem .7rem;border-radius:8px;background:rgba(0,0,0,.04);white-space:pre-wrap;font-weight:400}}
+.ext-links{{margin:.55rem 0 0;padding-left:1.2rem}}
+.ext-links a{{color:#3145c4}}
 .content.md p{{margin:.55em 0}}
 .content.md p:first-child{{margin-top:0}}
 .content.md p:last-child{{margin-bottom:0}}
