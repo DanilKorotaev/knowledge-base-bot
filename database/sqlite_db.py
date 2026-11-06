@@ -670,6 +670,12 @@ class SQLiteDatabase(DatabaseInterface):
                 payload["structured_ui"] = row[5]
         if len(row) > 6 and row[6]:
             payload["client_message_id"] = row[6]
+        # After ALTER: metadata_json is typically column index 7 on SELECT *.
+        if len(row) > 7 and row[7]:
+            try:
+                payload["metadata"] = json.loads(row[7])
+            except (TypeError, json.JSONDecodeError):
+                payload["metadata"] = None
         return payload
 
     async def get_session_messages_window(

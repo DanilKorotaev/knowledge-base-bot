@@ -31,6 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
 from kb_app_api.metrics import setup_metrics
+from kb_app_api.ingress.routes import router as ingress_router
 from kb_app_api.routes import (
     attachments,
     auth,
@@ -58,10 +59,15 @@ logger = logging.getLogger("kb_app_api")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from kb_app_api.ingress.schema import ensure_ingress_schema
     from utils.db_helpers import close_db, get_db
 
     await get_db()
     logger.info("KB App API: база данных готова")
+    try:
+        await ensure_ingress_schema()
+    except Exception:
+        logger.exception("Ingress schema init failed")
     yield
     await close_db()
 
@@ -102,6 +108,7 @@ app.include_router(health_sync.router, prefix="/api")
 app.include_router(boards.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(remote_ui.router, prefix="/api")
+app.include_router(ingress_router, prefix="/api")
 
 
 if __name__ == "__main__":

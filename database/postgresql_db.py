@@ -575,6 +575,14 @@ class PostgreSQLDatabase(DatabaseInterface):
                 payload["structured_ui"] = json.loads(raw)
             except json.JSONDecodeError:
                 pass
+        meta_raw = payload.pop("metadata_json", None)
+        if isinstance(meta_raw, str) and meta_raw.strip():
+            try:
+                payload["metadata"] = json.loads(meta_raw)
+            except json.JSONDecodeError:
+                pass
+        elif isinstance(meta_raw, dict):
+            payload["metadata"] = meta_raw
         return payload
 
     async def get_session_messages_window(

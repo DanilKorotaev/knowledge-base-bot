@@ -28,6 +28,7 @@ class MessageRole(str, Enum):
     """Роли сообщений"""
     USER = "user"
     ASSISTANT = "assistant"
+    EXTERNAL = "external"
     
     def __str__(self) -> str:
         return self.value
