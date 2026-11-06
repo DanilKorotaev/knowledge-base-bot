@@ -33,6 +33,7 @@ class QueryJob:
     assistant_message_id: int | None = None
     created_at: str | None = None
     started_at: str | None = None
+    agent_context: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,8 @@ def _fmt_ts(raw: Any) -> str | None:
 
 
 def _row_to_job(row: dict[str, Any]) -> QueryJob:
+    from kb_app_api.client_metadata import agent_context_from_json
+
     raw_files = row.get("attached_files_json")
     files: list[str] = []
     if isinstance(raw_files, str) and raw_files.strip():
@@ -66,6 +69,7 @@ def _row_to_job(row: dict[str, Any]) -> QueryJob:
             files = []
     use_kb = row.get("use_knowledge_base")
     allow_sui = row.get("allow_structured_ui")
+    agent_ctx = agent_context_from_json(row.get("client_context_json"))
     return QueryJob(
         id=str(row["id"]),
         session_id=int(row["session_id"]),
@@ -82,6 +86,7 @@ def _row_to_job(row: dict[str, Any]) -> QueryJob:
         ),
         created_at=_fmt_ts(row.get("created_at")),
         started_at=_fmt_ts(row.get("started_at")),
+        agent_context=agent_ctx or None,
     )
 
 
@@ -136,6 +141,12 @@ async def ensure_query_jobs_schema() -> None:
                 )
                 """
             )
+            await conn.execute(
+                """
+                ALTER TABLE query_jobs
+                ADD COLUMN IF NOT EXISTS client_context_json TEXT
+                """
+            )
     else:
         assert isinstance(db, SQLiteDatabase)
         async with __import__("aiosqlite").connect(db.db_path) as conn:
@@ -178,6 +189,12 @@ async def ensure_query_jobs_schema() -> None:
                 )
                 """
             )
+            cursor = await conn.execute("PRAGMA table_info(query_jobs)")
+            cols = {str(row[1]) for row in await cursor.fetchall()}
+            if "client_context_json" not in cols:
+                await conn.execute(
+                    "ALTER TABLE query_jobs ADD COLUMN client_context_json TEXT"
+                )
             await conn.commit()
     _SCHEMA_READY = True
 
@@ -195,13 +212,17 @@ class QueryJobService:
         use_knowledge_base: bool = True,
         allow_structured_ui: bool = False,
         attached_files: list[Path] | None = None,
+        agent_context: dict[str, str] | None = None,
     ) -> QueryJob:
+        from kb_app_api.client_metadata import agent_context_to_json
+
         await ensure_query_jobs_schema()
         job_id = str(uuid.uuid4())
         files_json = json.dumps(
             [str(path) for path in (attached_files or [])],
             ensure_ascii=False,
         )
+        context_json = agent_context_to_json(agent_context)
         db = await get_db()
         if isinstance(db, PostgreSQLDatabase):
             assert db.pool is not None
@@ -210,9 +231,10 @@ class QueryJobService:
                     """
                     INSERT INTO query_jobs (
                         id, session_id, user_id, telegram_user_id, status, query_text,
-                        use_knowledge_base, allow_structured_ui, attached_files_json
+                        use_knowledge_base, allow_structured_ui, attached_files_json,
+                        client_context_json
                     )
-                    VALUES ($1::uuid, $2, $3, $4, 'queued', $5, $6, $7, $8)
+                    VALUES ($1::uuid, $2, $3, $4, 'queued', $5, $6, $7, $8, $9)
                     RETURNING *
                     """,
                     job_id,
@@ -223,6 +245,7 @@ class QueryJobService:
                     use_knowledge_base,
                     allow_structured_ui,
                     files_json,
+                    context_json,
                 )
                 job = _row_to_job(dict(row))
         else:
@@ -232,9 +255,10 @@ class QueryJobService:
                     """
                     INSERT INTO query_jobs (
                         id, session_id, user_id, telegram_user_id, status, query_text,
-                        use_knowledge_base, allow_structured_ui, attached_files_json
+                        use_knowledge_base, allow_structured_ui, attached_files_json,
+                        client_context_json
                     )
-                    VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -245,6 +269,7 @@ class QueryJobService:
                         1 if use_knowledge_base else 0,
                         1 if allow_structured_ui else 0,
                         files_json,
+                        context_json,
                     ),
                 )
                 await conn.commit()

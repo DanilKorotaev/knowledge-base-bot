@@ -7,7 +7,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
-from kb_app_api.client_metadata import structured_ui_allowed_from_headers
+from kb_app_api.client_metadata import build_agent_context, structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
 from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
@@ -138,6 +138,13 @@ async def voice_query(
             use_knowledge_base=use_kb,
             allow_structured_ui=allow_sui,
             kb_path=resolve_agent_kb_root(user),
+            agent_context=build_agent_context(
+                channel="app",
+                user_id=int(user["id"]),
+                session_id=sid,
+                client_meta=getattr(request.state, "client_meta", None) or {},
+            ),
+            kb_user_id=int(user["id"]),
         )
     except RuntimeError as e:
         raise APIError("processing_error", str(e), status_code=500) from e

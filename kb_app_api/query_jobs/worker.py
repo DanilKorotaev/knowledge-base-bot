@@ -64,6 +64,8 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             on_activity=on_activity,
             allow_structured_ui=job.allow_structured_ui,
             kb_path=agent_kb,
+            agent_context=job.agent_context,
+            kb_user_id=job.user_id,
         )
         current = await service.get_job(job.id)
         if current is None or current.status == "cancelled":

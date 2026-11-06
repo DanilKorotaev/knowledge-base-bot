@@ -294,6 +294,14 @@ class QueryProcessingService:
             )
             
             # Обработать запрос через Cursor CLI
+            from kb_app_api.client_metadata import build_agent_context
+
+            agent_context = build_agent_context(
+                channel="telegram",
+                user_id=user_id,
+                session_id=session_id,
+            )
+
             response, changes = await cursor_service.process_query(
                 query=query,
                 session_id=session_id,
@@ -304,6 +312,7 @@ class QueryProcessingService:
                 on_activity=on_activity_cb,
                 cancel_event=cancel_event,
                 channel="telegram",
+                agent_context=agent_context,
             )
             
             # Если --resume вернул ошибку, пробуем fallback без cursor_chat_id
@@ -340,6 +349,7 @@ class QueryProcessingService:
                     on_activity=on_activity_cb,
                     cancel_event=cancel_event,
                     channel="telegram",
+                    agent_context=agent_context,
                 )
             
             cursor_time = time.time() - cursor_start
@@ -564,6 +574,8 @@ class QueryProcessingService:
         on_activity: Optional[Callable[[str], Awaitable[None]]] = None,
         allow_structured_ui: bool = False,
         kb_path: Optional[Path] = None,
+        agent_context: Optional[Dict[str, str]] = None,
+        kb_user_id: Optional[int] = None,
     ) -> tuple[str, List[Dict[str, Any]]]:
         """
         Обработка запроса для KB App API без Telegram UI (тот же Cursor CLI и синк, что у бота).
@@ -571,6 +583,8 @@ class QueryProcessingService:
         При use_knowledge_base=False — без Cursor и без начального sync: короткий ответ в чате.
         При allow_structured_ui — после ответа может быть прикреплён structured_ui (если env включён).
         kb_path — cwd Cursor (per-user vault). Isolation strict|host gates soft-jail only.
+        agent_context: optional KB_* env overlay from iOS headers / query job.
+        kb_user_id: internal users.id when known (preferred for KB_USER_ID).
         """
         db = await self._get_db()
         session_messages = await db.get_session_messages(session_id)
@@ -656,6 +670,20 @@ class QueryProcessingService:
             streaming_enabled = app_config.STREAMING_ENABLED
             on_chunk_cb = on_chunk if streaming_enabled and on_chunk else None
 
+            from kb_app_api.client_metadata import build_agent_context
+
+            resolved_user = kb_user_id
+            if resolved_user is None and api_user is not None:
+                resolved_user = int(api_user["id"])
+            if resolved_user is None:
+                resolved_user = telegram_user_id
+            resolved_context = build_agent_context(
+                channel="app",
+                user_id=resolved_user,
+                session_id=session_id,
+                extra=agent_context,
+            )
+
             response, changes = await cursor_service.process_query(
                 query=query,
                 session_id=session_id,
@@ -666,6 +694,7 @@ class QueryProcessingService:
                 on_activity=on_activity,
                 cancel_event=cancel_event,
                 channel="app",
+                agent_context=resolved_context,
             )
 
             if cursor_chat_id and response.startswith("❌") and "код: 1" in response:
@@ -682,6 +711,7 @@ class QueryProcessingService:
                     on_activity=on_activity,
                     cancel_event=cancel_event,
                     channel="app",
+                    agent_context=resolved_context,
                 )
 
             logger.info("KB App API: Cursor CLI за %.2fс cwd=%s", time.time() - cursor_start, agent_kb)
