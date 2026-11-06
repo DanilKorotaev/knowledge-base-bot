@@ -3,9 +3,10 @@
 Env:
   AGENT_ROOT   absolute per-user root (required for tools)
   KB_SESSION_ID  optional; used as default session for ensure_workspace
-"""
-from __future__ import annotations
 
+Note: do not use ``from __future__ import annotations`` here — FastMCP
+introspects real type objects and breaks on postponed annotations.
+"""
 import json
 import sys
 from pathlib import Path
