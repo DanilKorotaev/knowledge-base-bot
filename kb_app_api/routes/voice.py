@@ -71,11 +71,6 @@ async def _transcribe_audio_bytes(data: bytes, filename: str | None) -> str:
             Path(tmp_path).unlink(missing_ok=True)
 
 
-async def _transcribe_upload(audio: UploadFile) -> str:
-    data = await audio.read()
-    return await _transcribe_audio_bytes(data, audio.filename)
-
-
 @router.post("/voice/transcribe")
 async def transcribe_voice(
     user: Annotated[dict[str, Any], Depends(get_api_user)],
