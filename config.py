@@ -38,16 +38,25 @@ class Config:
     # Модель для Cursor CLI: "auto"/"default" → --model auto (пул Auto); иначе --model как есть
     CURSOR_MODEL: str = os.getenv("CURSOR_MODEL", "auto")
     
-    # NextCloud
+    # NextCloud — два независимых URL (могут совпадать или различаться):
+    # NEXTCLOUD_URL     — API для бота: WebDAV sync + OCS (создание share). Можно http://127.0.0.1:8080 на mini.
+    # NEXTCLOUD_WEB_URL — публичная база для ссылок пользователю (direct /f/… и rewrite localhost из OCS).
+    #                     Если не задан → fallback на NEXTCLOUD_URL.
+    # Share-ссылки (LINK_MODE=share): URL в основном из ответа OCS (overwritehost на NC);
+    # если OCS вернул localhost — подменяем хост на NEXTCLOUD_WEB_URL.
+    # Не путать с KB_APP_PUBLIC_BASE_URL (шаринг чатов KB App).
     NEXTCLOUD_URL: Optional[str] = os.getenv("NEXTCLOUD_URL")
     NEXTCLOUD_BOT_USERNAME: Optional[str] = os.getenv("NEXTCLOUD_BOT_USERNAME")
     NEXTCLOUD_BOT_PASSWORD: Optional[str] = os.getenv("NEXTCLOUD_BOT_PASSWORD")
     NEXTCLOUD_KNOWLEDGE_BASE_PATH: str = os.getenv("NEXTCLOUD_KNOWLEDGE_BASE_PATH", "/KnowledgeBase")
-    
-    # NextCloud Web Links
-    NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")  # Fallback на NEXTCLOUD_URL
+
+    NEXTCLOUD_WEB_URL: Optional[str] = os.getenv("NEXTCLOUD_WEB_URL")
     NEXTCLOUD_LINK_MODE: str = os.getenv("NEXTCLOUD_LINK_MODE", "disabled")  # "share" | "direct" | "disabled"
     NEXTCLOUD_SHARE_EXPIRATION_HOURS: int = int(os.getenv("NEXTCLOUD_SHARE_EXPIRATION_HOURS", "24"))
+    # Legacy bot-only fallback for nextcloud:// deep links.
+    # Per-user API sync uses nextcloud_username/login via NextCloudService.for_user
+    # (deeplink_username=that user). Prefer leaving unset on multi-user hosts.
+    NEXTCLOUD_DEEPLINK_USERNAME: Optional[str] = os.getenv("NEXTCLOUD_DEEPLINK_USERNAME")
     
     # Local Knowledge Base
     LOCAL_KB_PATH: Path = Path(os.getenv("LOCAL_KB_PATH", "/var/knowledge-base-bot/kb"))
@@ -55,6 +64,12 @@ class Config:
     AGENT_ROOT_BASE: Path = Path(
         os.getenv("AGENT_ROOT_BASE", str(Path.home() / "var" / "kb-agent-roots"))
     ).expanduser()
+    # Telegram bot / legacy SyncService+Cursor when no API user: sync under this
+    # relative vault (e.g. users/danil) so multi-user layout does not push `users/`
+    # into Nextcloud KnowledgeBase. Empty → LOCAL_KB_PATH itself.
+    KB_BOT_VAULT_RELATIVE: str = (
+        os.getenv("KB_BOT_VAULT_RELATIVE", "").strip().lstrip("/")
+    )
     SYNC_INTERVAL: int = int(os.getenv("SYNC_INTERVAL", "300"))
     AUTO_SYNC: bool = os.getenv("AUTO_SYNC", "true").lower() == "true"
     ENABLE_SYNC: bool = os.getenv("ENABLE_SYNC", "false").lower() == "true"
@@ -112,18 +127,47 @@ class Config:
     ).lower() in ("true", "1", "yes")
     
     # KB App API (iOS) — отдельный процесс `uvicorn kb_app_api.main:app`
+    # Legacy shared Bearer removed for app traffic; JWT via /api/auth/login.
+    # KB_APP_API_TOKEN kept only as optional JWT secret fallback in tests.
     KB_APP_API_TOKEN: Optional[str] = os.getenv("KB_APP_API_TOKEN")
+    KB_APP_JWT_SECRET: Optional[str] = os.getenv("KB_APP_JWT_SECRET") or os.getenv(
+        "KB_APP_API_TOKEN"
+    )
+    KB_APP_ACCESS_TTL_SEC: int = int(os.getenv("KB_APP_ACCESS_TTL_SEC", "3600"))
+    KB_APP_REFRESH_TTL_SEC: int = int(os.getenv("KB_APP_REFRESH_TTL_SEC", str(60 * 60 * 24 * 30)))
+    KB_APP_OPEN_SIGNUP: bool = os.getenv("KB_APP_OPEN_SIGNUP", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+    KB_APP_DEFAULT_CURSOR_ISOLATION: str = os.getenv(
+        "KB_APP_DEFAULT_CURSOR_ISOLATION", "strict"
+    ).strip().lower() or "strict"
+    KB_APP_DEFAULT_QUOTA: str = os.getenv("KB_APP_DEFAULT_QUOTA", "5 GB")
+    KB_APP_NC_PROVISION_ENABLED: bool = os.getenv(
+        "KB_APP_NC_PROVISION_ENABLED", "true"
+    ).lower() in ("true", "1", "yes")
+    # Keep short: NC outages must not block register/login on the API worker.
+    KB_APP_NC_PROVISION_TIMEOUT_SEC: float = float(
+        os.getenv("KB_APP_NC_PROVISION_TIMEOUT_SEC", "5") or "5"
+    )
+    # Fernet key (or passphrase) for encrypting per-user Nextcloud App Passwords.
+    # If empty, derived from KB_APP_JWT_SECRET (ok for staging; set explicitly in prod).
+    KB_NC_TOKEN_KEY: Optional[str] = os.getenv("KB_NC_TOKEN_KEY")
+    # Default relative folder inside the user's NC home for the knowledge base.
+    KB_APP_DEFAULT_KB_FOLDER: str = (os.getenv("KB_APP_DEFAULT_KB_FOLDER") or "/").strip() or "/"
+    # Bootstrap first admin if no login-users exist (staging/dev)
+    KB_BOOTSTRAP_ADMIN_LOGIN: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_LOGIN")
+    KB_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_PASSWORD")
+    KB_BOOTSTRAP_ADMIN_EMAIL: Optional[str] = os.getenv("KB_BOOTSTRAP_ADMIN_EMAIL")
+
+    # Deprecated Telegram-mapped identity (bot still uses telegram_id; API uses login JWT)
     KB_APP_API_TELEGRAM_ID: int = int(os.getenv("KB_APP_API_TELEGRAM_ID", "9000000009000001"))
-    # iOS E2E / интеграционные тесты: запросы с заголовком X-KB-App-E2E: 1
     KB_APP_API_TEST_TELEGRAM_ID: int = int(
         os.getenv("KB_APP_API_TEST_TELEGRAM_ID", "9000000009000001")
     )
-    # POST /api/auth/token — выдача того же Bearer после проверки секрета (см. kb_app_api/routes/auth.py)
-    KB_APP_API_TOKEN_ENDPOINT_ENABLED: bool = os.getenv(
-        "KB_APP_API_TOKEN_ENDPOINT_ENABLED", "false"
-    ).lower() in ("true", "1", "yes")
-    KB_APP_API_TOKEN_ISSUE_SECRET: Optional[str] = os.getenv("KB_APP_API_TOKEN_ISSUE_SECRET")
-    # Только для отладки: не проверять is_allowed у KB_APP_API_TELEGRAM_ID при ACCESS_MODE=restricted
+    KB_APP_API_TOKEN_ENDPOINT_ENABLED: bool = False  # removed shared-token issue endpoint
+    KB_APP_API_TOKEN_ISSUE_SECRET: Optional[str] = None
     KB_APP_API_BYPASS_ACCESS_CHECK: bool = os.getenv(
         "KB_APP_API_BYPASS_ACCESS_CHECK", "false"
     ).lower() in ("true", "1", "yes")
@@ -172,7 +216,7 @@ class Config:
     )
 
     # Host allowlist for GET /api/remote-ui?url=… (full URL lives in Actions JSON).
-    # Env REMOTE_UI_HOST_ALLOWLIST=127.0.0.1,localhost,lyrics.coredan.ru
+    # Env REMOTE_UI_HOST_ALLOWLIST=127.0.0.1,localhost,lyrics.example.com
     # Empty env → defaults (local mini services). Not a URL map — only hosts/IPs.
     REMOTE_UI_HOST_ALLOWLIST: List[str] = _parse_host_allowlist(
         os.getenv("REMOTE_UI_HOST_ALLOWLIST", ""),
