@@ -84,6 +84,30 @@ async def _run_one(job: QueryJob, service: QueryJobService) -> None:
             assistant_id,
             len(reply or ""),
         )
+        try:
+            from kb_app_api.ingress.orchestrator import (
+                maybe_apply_orchestrator_route_after_job,
+            )
+
+            route = await maybe_apply_orchestrator_route_after_job(
+                job_query_text=job.query_text,
+                session_id=int(job.session_id),
+                user_id=int(job.user_id),
+                reply_text=reply or "",
+            )
+            if route is not None:
+                logger.info(
+                    "query_job orchestrator_route job_id=%s session_id=%s result=%s",
+                    job.id,
+                    job.session_id,
+                    route,
+                )
+        except Exception:
+            logger.exception(
+                "query_job orchestrator_route failed job_id=%s session_id=%s",
+                job.id,
+                job.session_id,
+            )
     except BaseException as exc:
         current = await service.get_job(job.id)
         if current is not None and current.status == "cancelled":

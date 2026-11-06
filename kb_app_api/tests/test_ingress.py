@@ -257,6 +257,61 @@ class TestIngressRouterUnit(unittest.TestCase):
         action = resolve_action(rule=rule, envelope={}, token=token)
         self.assertEqual(action["policy"], "ingest_only")
 
+    def test_no_rule_falls_back_to_orchestrator(self) -> None:
+        from kb_app_api.ingress.router import resolve_action
+
+        action = resolve_action(rule=None, envelope={}, token={"allow_enqueue_agent": True})
+        self.assertEqual(action["kind"], "orchestrator")
+        self.assertEqual(action["policy"], "enqueue_agent")
+
+
+class TestIngressOrchestratorUnit(unittest.TestCase):
+    def test_parse_decision_from_fence(self) -> None:
+        from kb_app_api.ingress.orchestrator import parse_orchestrator_decision
+
+        reply = (
+            "Looks like CI for the iOS app.\n\n"
+            '```json\n{"session_key": "ci-default", "policy": "ingest_only", '
+            '"reason": "success notify"}\n```\n'
+        )
+        decision = parse_orchestrator_decision(reply)
+        self.assertIsNotNone(decision)
+        assert decision is not None
+        self.assertEqual(decision.get("session_key"), "ci-default")
+        self.assertEqual(decision.get("policy"), "ingest_only")
+
+    def test_parse_wait_user(self) -> None:
+        from kb_app_api.ingress.orchestrator import parse_orchestrator_decision
+
+        decision = parse_orchestrator_decision(
+            'Need a target.\n{"action": "wait_user", "reason": "ambiguous"}'
+        )
+        self.assertEqual(decision, {"action": "wait_user", "reason": "ambiguous"})
+
+    def test_extract_event_id(self) -> None:
+        from kb_app_api.ingress.orchestrator import extract_event_id_from_prompt
+
+        eid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        text = f"External ingress event `{eid}` was delivered to this session.\n"
+        self.assertEqual(extract_event_id_from_prompt(text), eid)
+
+    def test_maybe_apply_skips_non_orchestrator_prompt(self) -> None:
+        import asyncio
+
+        from kb_app_api.ingress.orchestrator import (
+            maybe_apply_orchestrator_route_after_job,
+        )
+
+        result = asyncio.run(
+            maybe_apply_orchestrator_route_after_job(
+                job_query_text="Ordinary user question",
+                session_id=1,
+                user_id=1,
+                reply_text='{"session_id": 2, "policy": "ingest_only"}',
+            )
+        )
+        self.assertIsNone(result)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -749,6 +749,29 @@ async def insert_event(
             raise
 
 
+async def get_event(event_id: str) -> dict[str, Any] | None:
+    await ensure_ingress_schema()
+    db = await get_db()
+    if isinstance(db, SQLiteDatabase):
+        import aiosqlite
+
+        async with aiosqlite.connect(db.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            cur = await conn.execute(
+                "SELECT * FROM ingress_events WHERE id=? LIMIT 1",
+                (event_id,),
+            )
+            row = await cur.fetchone()
+            return _event_row(dict(row)) if row else None
+    assert isinstance(db, PostgreSQLDatabase) and db.pool is not None
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM ingress_events WHERE id=$1 LIMIT 1",
+            event_id,
+        )
+        return _event_row(dict(row)) if row else None
+
+
 async def update_event_status(
     event_id: str,
     *,

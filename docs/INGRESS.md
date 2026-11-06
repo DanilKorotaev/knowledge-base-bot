@@ -78,3 +78,20 @@ Session routing via user rules (extract `KB-Session:` from commit message) — p
 - `orchestrator` — resolve binding key `orchestrator` (AI router session)
 
 Extract patterns (e.g. `KB-Session:` from commit messages) live in **rule JSON**, not in repository code.
+
+## Orchestrator (P2)
+
+When action kind is `orchestrator` (or no rule matches), the event is posted to the
+`orchestrator` binding session and a query job wakes with prompt profile
+`ingress_orchestrator`. The agent must end its reply with a JSON decision:
+
+```json
+{"session_id": 307, "policy": "ingest_only", "reason": "CI trailer pointed here"}
+```
+
+or `{"session_key": "ci-default", "policy": "enqueue_agent", "reason": "…"}`  
+or `{"action": "wait_user", "reason": "…"}`.
+
+After the job completes, the worker parses that JSON and re-delivers the original
+event into the target session. Anti-loop: `enqueue_agent` back into the
+orchestrator session is downgraded to `ingest_only`.

@@ -119,7 +119,8 @@ def resolve_action(
         hints = apply_extract(rule.get("extract") or {}, {**envelope, "hints": hints})
         action = dict(rule.get("action") or {})
     else:
-        action = {"kind": "orchestrator", "policy": "ingest_only"}
+        # No matching rule → AI router session (deliver forces enqueue + orchestrator prompt).
+        action = {"kind": "orchestrator", "policy": "enqueue_agent"}
 
     kind = str(action.get("kind") or "session")
     policy = str(action.get("policy") or "ingest_only")

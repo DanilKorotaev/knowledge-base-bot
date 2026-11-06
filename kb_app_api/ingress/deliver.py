@@ -9,6 +9,10 @@ from utils.constants import MessageRole
 from utils.db_helpers import get_db
 
 from kb_app_api.ingress import store
+from kb_app_api.ingress.orchestrator import (
+    ORCHESTRATOR_DECISION_INSTRUCTIONS,
+    ORCHESTRATOR_PROMPT_PROFILE,
+)
 from kb_app_api.ingress.router import resolve_action, select_rule
 from kb_app_api.ingress.schema import ensure_ingress_schema
 
@@ -164,17 +168,25 @@ async def _enqueue_untrusted_job(
 ) -> str | None:
     from kb_app_api.query_jobs.service import QueryJobService
 
-    addendum = ""
-    if agent_prompt_profile == "untrusted_ingress":
-        addendum = UNTRUSTED_INGRESS_ADDENDUM
-    prompt = (
-        f"External ingress event `{event_id}` was delivered to this session.\n"
-        f"Summary: {summary}\n"
-        f"Agent runtime hint: {agent_runtime}\n"
-        f"{addendum}\n"
-        "Inspect the latest external message metadata and handle it according to this "
-        "session's skills and prior instructions."
-    )
+    if agent_prompt_profile == ORCHESTRATOR_PROMPT_PROFILE:
+        prompt = (
+            f"External ingress event `{event_id}` was delivered to this session.\n"
+            f"Summary: {summary}\n"
+            f"Agent runtime hint: {agent_runtime}\n\n"
+            f"{ORCHESTRATOR_DECISION_INSTRUCTIONS}"
+        )
+    else:
+        addendum = ""
+        if agent_prompt_profile == "untrusted_ingress":
+            addendum = UNTRUSTED_INGRESS_ADDENDUM
+        prompt = (
+            f"External ingress event `{event_id}` was delivered to this session.\n"
+            f"Summary: {summary}\n"
+            f"Agent runtime hint: {agent_runtime}\n"
+            f"{addendum}\n"
+            "Inspect the latest external message metadata and handle it according to this "
+            "session's skills and prior instructions."
+        )
     try:
         service = QueryJobService()
         # telegram_user_id historically used; pass user_id for app users.
@@ -267,15 +279,32 @@ async def process_event(
                 "action": action,
             }
 
+        # Orchestrator session always wakes the routing agent (P2), regardless of
+        # the rule's ingest_only default — token sandbox still gates host runtime.
+        if action["kind"] == "orchestrator":
+            policy = "enqueue_agent"
+            agent_runtime = str(
+                action.get("agent_runtime") or token.get("agent_runtime") or "host"
+            )
+            if agent_runtime == "none":
+                agent_runtime = "host"
+            agent_prompt_profile = ORCHESTRATOR_PROMPT_PROFILE
+        else:
+            policy = str(action["policy"])
+            agent_runtime = str(action.get("agent_runtime") or "none")
+            agent_prompt_profile = str(
+                action.get("agent_prompt_profile") or "untrusted_ingress"
+            )
+
         result = await post_external_message(
             user_id=user_id,
             session_id=session_id,
             event=event,
             envelope=envelope,
             token=token,
-            policy=str(action["policy"]),
-            agent_runtime=str(action.get("agent_runtime") or "none"),
-            agent_prompt_profile=str(action.get("agent_prompt_profile") or "untrusted_ingress"),
+            policy=policy,
+            agent_runtime=agent_runtime,
+            agent_prompt_profile=agent_prompt_profile,
         )
         await store.update_event_status(
             event["id"],
