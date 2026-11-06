@@ -90,7 +90,9 @@ def select_rule(
     envelope: dict[str, Any],
     token: dict[str, Any],
 ) -> dict[str, Any] | None:
-    for rule in rules:
+    # Lower priority number wins (1 before 100).
+    ordered = sorted(rules, key=lambda r: int(r.get("priority") or 100))
+    for rule in ordered:
         if not rule.get("enabled", True):
             continue
         if _match_rule(rule.get("match") or {}, envelope, token):
