@@ -9,9 +9,11 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 
 from kb_app_api.client_metadata import build_agent_context, structured_ui_allowed_from_headers
 from kb_app_api.deps import get_api_user
+from kb_app_api.user_ids import telegram_id_for_jobs
 from kb_app_api.errors import APIError
 from kb_app_api.message_enrichment import enrich_session_messages
 from kb_app_api.session_access import parse_session_id, require_session_for_user
+from kb_app_api.vault_paths import resolve_agent_kb_root
 from kb_app_api.voice_errors import transcription_user_message
 from services.openai_service import OpenAIService
 from services.query_processing_service import QueryProcessingService
@@ -101,7 +103,7 @@ async def voice_query(
     await require_session_for_user(sid, user["id"])
 
     use_kb = str(use_knowledge_base).lower() in ("1", "true", "yes", "on")
-    tid = int(user["telegram_id"])
+    tid = telegram_id_for_jobs(user)
     allow_sui = structured_ui_allowed_from_headers(request.headers)
 
     text_for_pipeline: str
@@ -128,14 +130,6 @@ async def voice_query(
         )
 
     try:
-        client_meta = getattr(request.state, "client_meta", None) or {}
-        agent_ctx = build_agent_context(
-            channel="app",
-            user_id=int(user["id"]),
-            session_id=sid,
-            client_meta=client_meta if isinstance(client_meta, dict) else {},
-            user=user,
-        )
         qps = QueryProcessingService()
         await qps.process_query_for_api(
             text_for_pipeline,
@@ -143,7 +137,14 @@ async def voice_query(
             tid,
             use_knowledge_base=use_kb,
             allow_structured_ui=allow_sui,
-            agent_context=agent_ctx,
+            kb_path=resolve_agent_kb_root(user),
+            agent_context=build_agent_context(
+                channel="app",
+                user_id=int(user["id"]),
+                session_id=sid,
+                client_meta=getattr(request.state, "client_meta", None) or {},
+                user=user,
+            ),
             kb_user_id=int(user["id"]),
         )
     except RuntimeError as e:
