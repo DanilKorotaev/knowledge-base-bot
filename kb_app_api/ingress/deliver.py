@@ -139,12 +139,34 @@ async def post_external_message(
         )
 
     try:
+        from kb_app_api.notifications.service import record_ingress_event
+
+        await record_ingress_event(
+            user_id=user_id,
+            session_id=session_id,
+            message_id=int(message["id"]),
+            title=summary,
+            body=str(detail or "")[:500] if detail else "",
+            source_key=str(
+                participant.get("key")
+                or envelope.get("source")
+                or token.get("adapter_key")
+                or "ingress"
+            ),
+            event_id=str(event["id"]),
+            participant_label=str(participant.get("label") or "") or None,
+        )
+    except Exception:
+        logger.exception("ingress inbox failed event=%s", event.get("id"))
+
+    try:
         from kb_app_api.push_dispatch import deliver_chat_reply_push
 
         await deliver_chat_reply_push(
             session_id=session_id,
             message_id=int(message["id"]),
             reply_text=f"{participant.get('label') or 'Ingress'}: {summary}",
+            record_inbox=False,
         )
     except Exception:
         logger.exception("ingress push failed event=%s", event.get("id"))
