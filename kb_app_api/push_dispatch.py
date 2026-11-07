@@ -16,6 +16,7 @@ async def notify_chat_reply_ready(
     session_id: int,
     message_id: int,
     reply_text: str,
+    record_inbox: bool = True,
 ) -> None:
     from utils.db_helpers import get_db
 
@@ -26,6 +27,27 @@ async def notify_chat_reply_ready(
         return
 
     user_id = int(session["user_id"])
+    title = session.get("display_title") or f"Session {session_id}"
+
+    # Inbox for agent replies (even with zero devices). Ingress records separately.
+    if record_inbox:
+        try:
+            from kb_app_api.notifications.service import record_agent_reply
+
+            await record_agent_reply(
+                user_id=user_id,
+                session_id=session_id,
+                message_id=message_id,
+                title=str(title),
+                body=reply_text,
+            )
+        except Exception:
+            logger.exception(
+                "inbox agent_reply failed session=%s message=%s",
+                session_id,
+                message_id,
+            )
+
     devices = await db.list_user_devices(user_id)
     if not devices:
         logger.info(
@@ -35,7 +57,6 @@ async def notify_chat_reply_ready(
         )
         return
 
-    title = session.get("display_title") or f"Session {session_id}"
     logger.info(
         "chat reply push sending session=%s message=%s devices=%s",
         session_id,
@@ -59,6 +80,7 @@ async def deliver_chat_reply_push(
     session_id: int,
     message_id: int,
     reply_text: str,
+    record_inbox: bool = True,
 ) -> None:
     """Отправить push с таймаутом; ошибки логируем, pipeline не роняем."""
     try:
@@ -67,6 +89,7 @@ async def deliver_chat_reply_push(
                 session_id=session_id,
                 message_id=message_id,
                 reply_text=reply_text,
+                record_inbox=record_inbox,
             ),
             timeout=_PUSH_TIMEOUT_SEC,
         )

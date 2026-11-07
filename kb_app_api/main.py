@@ -45,6 +45,7 @@ from kb_app_api.routes import (
     jobs,
     me,
     messages,
+    notifications,
     remote_ui,
     sessions,
     share,
@@ -63,6 +64,7 @@ logger = logging.getLogger("kb_app_api")
 async def lifespan(_: FastAPI):
     from kb_app_api.auth_service import maybe_bootstrap_admin
     from kb_app_api.ingress.schema import ensure_ingress_schema
+    from kb_app_api.notifications.schema import ensure_notifications_schema
     from utils.db_helpers import close_db, get_db
 
     db = await get_db()
@@ -75,6 +77,10 @@ async def lifespan(_: FastAPI):
         await ensure_ingress_schema()
     except Exception:
         logger.exception("Ingress schema init failed")
+    try:
+        await ensure_notifications_schema()
+    except Exception:
+        logger.exception("Notifications schema init failed")
     yield
     await close_db()
 
@@ -112,6 +118,7 @@ app.include_router(voice.router, prefix="/api")
 app.include_router(files.router, prefix="/api")
 app.include_router(devices.router, prefix="/api")
 app.include_router(me.router, prefix="/api")
+app.include_router(notifications.router, prefix="/api")
 app.include_router(health_sync.router, prefix="/api")
 app.include_router(boards.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
