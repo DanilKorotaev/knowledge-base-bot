@@ -35,6 +35,7 @@ from kb_app_api.metrics import setup_metrics
 from kb_app_api.ingress.routes import router as ingress_router
 from kb_app_api.routes import (
     admin_users,
+    crash_logs,
     attachments,
     auth,
     boards,
@@ -110,6 +111,7 @@ app.include_router(health.router)
 app.include_router(share.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(admin_users.router, prefix="/api")
+app.include_router(crash_logs.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(messages.router, prefix="/api")
 app.include_router(ui_events.router, prefix="/api")

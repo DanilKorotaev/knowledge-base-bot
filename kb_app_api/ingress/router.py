@@ -14,6 +14,12 @@ def _get_path(data: dict[str, Any], dotted: str) -> Any:
     return cur
 
 
+def _field_matches(expected: Any, actual: str) -> bool:
+    if isinstance(expected, list):
+        return actual in {str(item) for item in expected}
+    return str(expected) == actual
+
+
 def _match_rule(match: dict[str, Any], envelope: dict[str, Any], token: dict[str, Any]) -> bool:
     if not match:
         return True
@@ -22,9 +28,9 @@ def _match_rule(match: dict[str, Any], envelope: dict[str, Any], token: dict[str
     channel = str(token.get("channel_id") or "")
     adapter = str(token.get("adapter_key") or envelope.get("adapter_key") or "")
 
-    if "source" in match and str(match["source"]) != source:
+    if "source" in match and not _field_matches(match["source"], source):
         return False
-    if "type" in match and str(match["type"]) != event_type:
+    if "type" in match and not _field_matches(match["type"], event_type):
         return False
     if "channel_id" in match and str(match["channel_id"]) != channel:
         return False

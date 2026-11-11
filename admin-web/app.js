@@ -153,7 +153,10 @@
     const data = await res.json();
     store.access = data.access_token;
     store.refresh = data.refresh_token;
-    if (await loadMe()) await loadUsers();
+    if (await loadMe()) {
+      await loadUsers();
+      await loadCrashLogSetting();
+    }
   });
 
   document.getElementById("btn-logout").addEventListener("click", async () => {
@@ -185,8 +188,37 @@
     if (res.ok) await loadUsers();
   });
 
+  async function loadCrashLogSetting() {
+    const box = document.getElementById("accept-crash-logs");
+    const status = document.getElementById("crash-logs-status");
+    if (!box) return;
+    const res = await api("/api/admin/settings");
+    if (!res.ok) {
+      status.textContent = `Не удалось прочитать настройку (${res.status})`;
+      return;
+    }
+    const data = await res.json();
+    box.checked = Boolean(data.accept_crash_logs);
+    status.textContent = "";
+  }
+
+  const acceptCrashLogs = document.getElementById("accept-crash-logs");
+  if (acceptCrashLogs) {
+    acceptCrashLogs.addEventListener("change", async () => {
+      const status = document.getElementById("crash-logs-status");
+      const res = await api("/api/admin/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ accept_crash_logs: acceptCrashLogs.checked }),
+      });
+      status.textContent = res.ok ? "" : `Ошибка ${res.status}`;
+      if (!res.ok) acceptCrashLogs.checked = !acceptCrashLogs.checked;
+    });
+  }
+
   (async () => {
-    if (store.access && (await loadMe())) await loadUsers();
-    else showLogin();
+    if (store.access && (await loadMe())) {
+      await loadUsers();
+      await loadCrashLogSetting();
+    } else showLogin();
   })();
 })();

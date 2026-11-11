@@ -189,6 +189,16 @@ async def ingest_event(token: str, request: Request) -> dict[str, Any]:
         raise APIError("forbidden", "source not allowed for this token", status_code=403)
 
     envelope = _normalize_envelope(envelope_raw)
+    log_session = ""
+    if envelope["source"] == "ios" and envelope["type"] == "app.crash":
+        from kb_app_api.crash_logs.store import logs_status_for
+
+        hints = dict(envelope["hints"])
+        log_session = str(hints.get("log_session") or "")
+        hints["logs_status"] = await logs_status_for(int(resolved["user_id"]), log_session)
+        if hints.get("git_tag") and not hints.get("code_state"):
+            hints["code_state"] = hints["git_tag"]
+        envelope = {**envelope, "hints": hints}
     event, created = await store.insert_event(
         user_id=int(resolved["user_id"]),
         token_id=str(resolved["id"]),
@@ -210,6 +220,23 @@ async def ingest_event(token: str, request: Request) -> dict[str, Any]:
         }
 
     routed = await process_event(token=resolved, event=event, envelope=envelope)
+    if (
+        envelope["source"] == "ios"
+        and envelope["type"] == "app.crash"
+        and log_session
+        and routed.get("ok")
+    ):
+        from kb_app_api.crash_logs.store import note_crash_delivery
+
+        session_id = (routed.get("result") or {}).get("session_id")
+        if session_id:
+            await note_crash_delivery(
+                user_id=int(resolved["user_id"]),
+                log_session=log_session,
+                chat_session_id=int(session_id),
+                crash_event_id=str(event["id"]),
+                logs_already_ready=envelope["hints"].get("logs_status") == "ready",
+            )
     return {
         "ok": bool(routed.get("ok")),
         "deduped": False,
