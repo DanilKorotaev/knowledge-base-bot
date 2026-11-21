@@ -261,8 +261,8 @@
 
     async function loadSessions() {
         try {
-            const statusFilter = state.currentFilter === 'all' ? null : state.currentFilter;
-            const data = await api.getSessions(statusFilter);
+            const statusFilter = state.currentFilter === 'archived' ? 'archived' : null;
+            const data = await api.getSessions(statusFilter, 200);
             
             state.sessions = data.sessions || [];
             state.activeSessionId = data.active_session_id;
@@ -307,20 +307,22 @@
         empty.classList.add('hidden');
 
         list.innerHTML = state.sessions.map(session => {
-            const type = formatSessionType(session.session_type);
-            const status = formatStatus(session.status);
-            const isActive = session.id === state.activeSessionId;
+            const title = escapeHtml((session.display_title || '').trim() || 'Без названия');
+            const inThisChat = session.id === state.activeSessionId;
+            const archived = session.status === 'archived';
+            const when = formatDate(session.updated_at || session.created_at);
+            const badge = inThisChat
+                ? '<span class="session-status active">В этом чате</span>'
+                : (archived ? '<span class="session-status completed">Архив</span>' : '');
 
             return `
-                <div class="session-card ${isActive ? 'active' : ''}" data-session-id="${session.id}">
+                <div class="session-card ${inThisChat ? 'active' : ''}" data-session-id="${session.id}">
                     <div class="session-card-header">
-                        <span class="session-id">${type.emoji} #${session.id}</span>
-                        <span class="session-status ${status.class}">${status.emoji} ${status.label}</span>
+                        <span class="session-id">${title}</span>
+                        ${badge}
                     </div>
                     <div class="session-card-body">
-                        <span class="session-type">${type.label}</span>
-                        <span class="session-messages-count">💬 ${session.messages_count || 0}</span>
-                        <span class="session-date">${formatDate(session.created_at)}</span>
+                        <span class="session-date">${when}</span>
                     </div>
                 </div>
             `;

@@ -29,10 +29,6 @@ def get_main_menu_inline_keyboard() -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="📋 Мои сессии", callback_data="main_sessions"),
-                InlineKeyboardButton(text="📜 История", callback_data="main_history")
-            ],
-            [
-                InlineKeyboardButton(text="🔄 Синхронизация", callback_data="main_sync"),
                 InlineKeyboardButton(text="❓ Помощь", callback_data="main_help")
             ]
         ]
@@ -77,42 +73,34 @@ def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     return keyboard
 
 
-def get_sessions_keyboard(sessions: List[Dict], page: int = 0, per_page: int = 5) -> InlineKeyboardMarkup:
-    """Клавиатура для списка сессий с пагинацией - при клике на сессию показываются детали"""
+def get_sessions_keyboard(
+    page_sessions: List[Dict],
+    page: int = 0,
+    per_page: int = 8,
+    total_count: int = 0,
+) -> InlineKeyboardMarkup:
+    """Кнопки текущей страницы. Сессии уже отсортированы вызывающим кодом."""
+    from utils.session_helpers import session_title
+
     keyboard = []
-    
-    # Показать сессии для текущей страницы
-    start_idx = page * per_page
-    end_idx = start_idx + per_page
-    page_sessions = sessions[start_idx:end_idx]
-    
-    # Каждая сессия - одна кнопка, при клике показываются детали
     for session in page_sessions:
         session_id = session["id"]
-        session_type_label = "📚" if session["session_type"] == "query_with_kb" else "💬"
-        status_emoji = "🟢" if session["status"] == "active" else "⚪"
-        
-        from utils.session_helpers import session_title
-
         title = session_title(session)
-        prefix = f"{session_type_label} {status_emoji} "
-        room = 64 - len(prefix)
-        if len(title) > room:
-            title = title[: max(1, room - 1)].rstrip() + "…"
+        if len(title) > 64:
+            title = title[:63].rstrip() + "…"
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{prefix}{title}",
+                text=title,
                 callback_data=f"session_details_{session_id}"
             )
         ])
     
-    # Кнопки навигации
     nav_buttons = []
     if page > 0:
         nav_buttons.append(
             InlineKeyboardButton(text="◀️ Назад", callback_data=f"sessions_page_{page - 1}")
         )
-    if end_idx < len(sessions):
+    if (page + 1) * per_page < total_count:
         nav_buttons.append(
             InlineKeyboardButton(text="Вперед ▶️", callback_data=f"sessions_page_{page + 1}")
         )
@@ -472,12 +460,8 @@ def format_active_session_info(active_session: Optional[Dict]) -> str:
     from utils.session_helpers import session_title
     import html
 
-    session_type = active_session.get("session_type", "")
-    session_type_emoji = "📚" if session_type == "query_with_kb" else "💬"
-    session_type_label = "С контекстом БЗ" if session_type == "query_with_kb" else "Без контекста"
     title = html.escape(session_title(active_session))
-
-    return f"\n\n🟢 <b>Активная сессия:</b> {session_type_emoji} {title}\n<i>{session_type_label}</i>"
+    return f"\n\n<b>Сейчас в чате:</b> {title}"
 
 
 def get_main_menu_inline_keyboard_with_admin(
@@ -503,10 +487,6 @@ def get_main_menu_inline_keyboard_with_admin(
         ],
         [
             InlineKeyboardButton(text="📋 Мои сессии", callback_data="main_sessions"),
-            InlineKeyboardButton(text="📜 История", callback_data="main_history")
-        ],
-        [
-            InlineKeyboardButton(text="🔄 Синхронизация", callback_data="main_sync"),
             InlineKeyboardButton(text="❓ Помощь", callback_data="main_help")
         ]
     ]

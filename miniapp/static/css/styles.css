@@ -239,6 +239,8 @@ body {
 .session-id {
     font-weight: 700;
     font-size: 15px;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .session-status {

@@ -20,7 +20,7 @@ from handlers.states import QueryStates, AdminStates
 from middleware.admin_middleware import require_admin
 from services.session_service import SessionService
 from services.sync_service import SyncService
-from utils.constants import SessionType, SessionStatus
+from utils.constants import SessionType
 from utils.db_helpers import get_db
 from utils.error_helpers import send_error_message, handle_error_silently
 from utils.query_builder import QueryBuilder, query_builder_to_state
@@ -215,14 +215,13 @@ async def help_handler(message: Message):
 <b>📋 Основные действия:</b>
 • 📚 Новый запрос - Начать новый запрос с контекстом базы знаний
 • 💬 Новый чат - Начать пустой чат (без контекста)
-• 📋 Мои сессии - Показать список ваших сессий
-• 📜 История - Показать историю изменений текущей сессии
-• 🔄 Синхронизация - Принудительная синхронизация с NextCloud
+• 📋 Мои сессии - Список чатов по дате последнего сообщения
+• Переписку удобнее читать в Mini App
 
 <b>💡 Работа с сессиями:</b>
 • Нажмите на сессию в списке, чтобы увидеть детали и доступные действия
 • Вы можете переключиться на другую сессию, просмотреть детали, завершить или удалить сессию
-• Активная сессия отмечена зелёным индикатором 🟢
+• Какая сессия открыта в этом чате, написано в меню: «Сейчас в чате»
 
 <b>📝 Режим сбора сообщений:</b>
 • При создании нового запроса доступна кнопка "Режим сбора сообщений"
@@ -232,11 +231,7 @@ async def help_handler(message: Message):
 
 <b>🎤 Голосовые сообщения:</b>
 • Отправляйте голосовые сообщения - они автоматически расшифруются
-• После расшифровки доступна кнопка для повторной расшифровки при необходимости
-
-<b>📄 История изменений:</b>
-• Просматривайте историю изменений файлов в текущей сессии
-• Откатывайте отдельные изменения или все изменения сессии через кнопки"""
+• После расшифровки доступна кнопка для повторной расшифровки при необходимости"""
     
     await message.answer(help_text, parse_mode=ParseMode.HTML, reply_markup=get_main_keyboard())
     
@@ -545,8 +540,7 @@ async def sessions_handler(message: Message):
     page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
         user_id=user["id"],
         page=0,
-        per_page=5,
-        limit=20
+        per_page=8,
     )
     
     if not page_sessions:
@@ -564,15 +558,13 @@ async def sessions_handler(message: Message):
         sessions=page_sessions,
         active_session_id=active_session_id,
         page=0,
-        per_page=5,
+        per_page=8,
         total_count=total_count
     )
     
-    # Получить все сессии для клавиатуры (нужны для навигации)
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
-    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
-    
-    keyboard = get_sessions_keyboard(sessions, page=0)
+    keyboard = get_sessions_keyboard(
+        page_sessions, page=0, per_page=8, total_count=total_count
+    )
     await message.answer(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 

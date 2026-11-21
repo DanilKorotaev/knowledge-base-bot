@@ -4,32 +4,18 @@
 import html
 from typing import List, Dict, Any, Optional, Tuple
 from utils.db_helpers import get_db
-from utils.constants import SessionType, SessionStatus, MessageRole
+from utils.constants import MessageRole
 
 
 async def get_user_sessions_for_display(
     user_id: int,
     page: int = 0,
-    per_page: int = 5,
-    limit: int = 20
+    per_page: int = 8,
 ) -> Tuple[List[Dict[str, Any]], Optional[int], int]:
-    """
-    Получить сессии пользователя для отображения с пагинацией
-    
-    Args:
-        user_id: ID пользователя в БД
-        page: Номер страницы (начиная с 0)
-        per_page: Количество сессий на странице
-        limit: Максимальное количество сессий для получения из БД
-    
-    Returns:
-        Tuple[List[Dict], Optional[int], int]: (сессии для страницы, ID активной сессии, общее количество сессий)
-    """
+    """Сессии страницы, от новых сообщений к старым. Архив и удалённые не входят."""
     db = await get_db()
 
     total_count = await db.count_user_sessions(user_id, exclude_deleted=True)
-    # Keep historical cap used by Telegram UI (limit), then paginate within it.
-    capped_total = min(total_count, limit)
     start_idx = page * per_page
     page_sessions = await db.get_user_sessions_with_counts(
         user_id,
@@ -37,9 +23,6 @@ async def get_user_sessions_for_display(
         offset=start_idx,
         exclude_deleted=True,
     )
-    # If caller asked for a historical window smaller than DB total, trim last page.
-    if start_idx + len(page_sessions) > capped_total:
-        page_sessions = page_sessions[: max(0, capped_total - start_idx)]
 
     for session in page_sessions:
         session["messages_count"] = int(session.get("message_count") or 0)
@@ -47,7 +30,7 @@ async def get_user_sessions_for_display(
     active_session = await db.get_active_session(user_id)
     active_session_id = active_session["id"] if active_session else None
 
-    return page_sessions, active_session_id, capped_total
+    return page_sessions, active_session_id, total_count
 
 
 def session_title(session: Dict[str, Any]) -> str:
@@ -79,25 +62,18 @@ def format_sessions_list(
     if not sessions:
         return "ℹ️ У вас нет сессий.\n\nИспользуйте кнопку '📚 Новый запрос' для создания новой сессии."
     
-    response = "📋 <b>Ваши сессии:</b>\n\n"
-    response += "Нажмите на сессию, чтобы увидеть детали и действия.\n\n"
+    response = "📋 <b>Ваши сессии</b>\n"
+    response += "Сверху те, где последнее сообщение новее.\n\n"
     
     for session in sessions:
-        session_type_emoji = "📚" if session["session_type"] == str(SessionType.QUERY_WITH_KB) else "💬"
-        status_emoji = "🟢" if session["id"] == active_session_id else "⚪"
-        session_type_label = "С контекстом БЗ" if session["session_type"] == str(SessionType.QUERY_WITH_KB) else "Без контекста"
-        
-        messages_count = session.get("messages_count", 0)
         title = html.escape(session_title(session))
-
-        response += f"{session_type_emoji} <b>{title}</b> {status_emoji}\n"
-        response += f"  {session_type_label} • {messages_count} сообщений\n\n"
+        marker = " · в этом чате" if session["id"] == active_session_id else ""
+        response += f"<b>{title}</b>{marker}\n"
     
-    # Добавить информацию о пагинации
     total = total_count if total_count is not None else len(sessions)
     if total > per_page:
-        shown_count = len(sessions)
-        response += f"\n<i>Страница {page + 1}. Показано {shown_count} из {total} сессий.</i>"
+        pages = (total + per_page - 1) // per_page
+        response += f"\n<i>Страница {page + 1} из {pages}. Всего {total}.</i>"
     
     return response
 
@@ -118,16 +94,12 @@ async def format_session_details(session: Dict[str, Any], is_active: bool = Fals
     db = await get_db()
     
     session_id = session["id"]
-    session_type_label = "С контекстом БЗ" if session["session_type"] == str(SessionType.QUERY_WITH_KB) else "Без контекста"
-    status_label = "🟢 Активна" if is_active else f"⚪ {session['status']}"
-    
-    # Получить сообщения сессии
     messages = await db.get_session_messages(session_id, limit=10)
     
-    response = f"📋 <b>{html.escape(session_title(session))}</b>\n\n"
-    response += f"Статус: {status_label}\n"
-    response += f"Тип: {session_type_label}\n"
-    response += f"Сообщений: {len(messages)}\n\n"
+    response = f"📋 <b>{html.escape(session_title(session))}</b>\n"
+    if is_active:
+        response += "Сейчас открыта в этом чате.\n"
+    response += f"\nСообщений: {len(messages)}\n\n"
     
     if messages:
         response += "<b>Последние сообщения:</b>\n\n"

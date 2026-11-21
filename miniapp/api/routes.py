@@ -81,7 +81,7 @@ async def _verify_session_access(session_id: int, telegram_id: int):
 @router.get("/sessions")
 async def get_sessions(
     status: Optional[str] = Query(None, description="Фильтр по статусу: active, completed, deleted"),
-    limit: int = Query(50, ge=1, le=100, description="Максимальное количество сессий"),
+    limit: int = Query(50, ge=1, le=200, description="Максимальное количество сессий"),
     telegram_id: int = Depends(verify_telegram_auth)
 ):
     """Получить список сессий пользователя"""

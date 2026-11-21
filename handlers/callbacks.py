@@ -266,16 +266,13 @@ async def session_details_callback(callback: CallbackQuery):
     # Получить сообщения сессии
     messages = await db.get_session_messages(session_id)
     
-    session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
-    status_label = "🟢 Активна" if is_active else f"⚪ {session['status']}"
-    
     from utils.session_helpers import session_title
     import html
 
-    response = f"<b>{html.escape(session_title(session))}</b>\n\n"
-    response += f"Статус: {status_label}\n"
-    response += f"Тип: {session_type_label}\n"
-    response += f"Сообщений: {len(messages)}\n"
+    response = f"<b>{html.escape(session_title(session))}</b>\n"
+    if is_active:
+        response += "Сейчас открыта в этом чате.\n"
+    response += f"\nСообщений: {len(messages)}\n"
     response += f"Создана: {session['created_at']}\n\n"
     
     if messages:
@@ -465,8 +462,7 @@ async def sessions_page_callback(callback: CallbackQuery):
     page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
         user_id=user["id"],
         page=page,
-        per_page=5,
-        limit=20
+        per_page=8,
     )
     
     if not page_sessions:
@@ -481,15 +477,13 @@ async def sessions_page_callback(callback: CallbackQuery):
         sessions=page_sessions,
         active_session_id=active_session_id,
         page=page,
-        per_page=5,
+        per_page=8,
         total_count=total_count
     )
     
-    # Получить все сессии для клавиатуры (нужны для навигации)
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
-    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
-    
-    keyboard = get_sessions_keyboard(sessions, page=page)
+    keyboard = get_sessions_keyboard(
+        page_sessions, page=page, per_page=8, total_count=total_count
+    )
     await callback.message.edit_text(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
@@ -848,8 +842,7 @@ async def main_sessions_callback(callback: CallbackQuery):
     page_sessions, active_session_id, total_count = await get_user_sessions_for_display(
         user_id=user["id"],
         page=0,
-        per_page=5,
-        limit=20
+        per_page=8,
     )
     
     if not page_sessions:
@@ -865,15 +858,13 @@ async def main_sessions_callback(callback: CallbackQuery):
         sessions=page_sessions,
         active_session_id=active_session_id,
         page=0,
-        per_page=5,
+        per_page=8,
         total_count=total_count
     )
     
-    # Получить все сессии для клавиатуры (нужны для навигации)
-    all_sessions = await db.get_user_sessions(user["id"], limit=20)
-    sessions = [s for s in all_sessions if s.get("status") != str(SessionStatus.DELETED)]
-    
-    keyboard = get_sessions_keyboard(sessions, page=0)
+    keyboard = get_sessions_keyboard(
+        page_sessions, page=0, per_page=8, total_count=total_count
+    )
     await callback.message.edit_text(response, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
