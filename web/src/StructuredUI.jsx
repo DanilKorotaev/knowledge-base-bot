@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { Markdown } from "./markdown.jsx";
+
 function textOf(node) {
   return node.text || node.label || "";
 }
@@ -39,23 +41,27 @@ function Node({ node, valueOf, setValue, fire, busy }) {
   if (!node || typeof node !== "object") return null;
   const type = node.type;
   if (type === "vstack" || type === "hstack") {
+    const children = node.children || [];
+    const metrics = children.length >= 2 && children.every((child) => child.type === "metric" || child.type === "timer");
+    const className = metrics ? "sui-metrics" : type === "hstack" ? "sui-row" : "sui-stack";
     return (
-      <div className={type === "hstack" ? "sui-row" : "sui-stack"}>
-        {(node.children || []).map((child) => (
+      <div className={className}>
+        {children.map((child) => (
           <Node key={child.id} node={child} valueOf={valueOf} setValue={setValue} fire={fire} busy={busy} />
         ))}
       </div>
     );
   }
-  if (type === "text" || type === "markdown") return <p className="sui-text">{textOf(node)}</p>;
+  if (type === "markdown") return <Markdown text={textOf(node)} />;
+  if (type === "text") return <p className="sui-text">{textOf(node)}</p>;
   if (type === "callout") return <p className={`sui-callout ${node.variant || "info"}`}>{textOf(node)}</p>;
   if (type === "divider") return <hr />;
   if (type === "spacer") return <div style={{ height: node.size || 8 }} />;
-  if (type === "metric") {
+  if (type === "metric" || type === "timer") {
     return (
       <div className="sui-metric">
-        <span>{node.label}</span>
-        <strong>{node.value ?? node.text ?? "—"}</strong>
+        {node.label && <span>{node.label}</span>}
+        <strong>{metricValue(node)}</strong>
       </div>
     );
   }
@@ -153,28 +159,60 @@ function Node({ node, valueOf, setValue, fire, busy }) {
   return <p className="muted">{type}</p>;
 }
 
+function metricValue(node) {
+  if (typeof node.text === "string" && node.text) return node.text;
+  const value = node.value;
+  if (value == null || value === "") return "—";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "да" : "нет";
+  return "—";
+}
+
+function cellText(row, column, index) {
+  const raw = Array.isArray(row) ? row[index] : row?.[column?.key || column?.id];
+  if (raw == null) return "";
+  const text = String(raw);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const date = new Date(`${text}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
+    }
+  }
+  return text;
+}
+
 function Table({ node }) {
   const columns = node.columns || [];
   const rows = node.rows || [];
+  const width = Math.max(columns.length, ...rows.map((row) => (Array.isArray(row) ? row.length : 0)), 0);
+  const heads = columns.length
+    ? columns
+    : Array.from({ length: width }, (_, index) => ({ id: index, label: "" }));
   return (
-    <table>
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th key={column.key || column.id || column.label}>{column.label || column.key}</th>
+    <div className="table-wrap">
+      {node.label && <p className="sui-text">{node.label}</p>}
+      <table>
+        {columns.length > 0 && (
+          <thead>
+            <tr>
+              {heads.map((column, index) => (
+                <th key={column.id || column.key || index}>{column.label || column.key || ""}</th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={index}>
+              {heads.map((column, cellIndex) => (
+                <td key={column.id || column.key || cellIndex}>{cellText(row, column, cellIndex)}</td>
+              ))}
+            </tr>
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={index}>
-            {columns.map((column) => (
-              <td key={column.key || column.id}>{String(row[column.key || column.id] ?? "")}</td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+    </div>
   );
 }
 

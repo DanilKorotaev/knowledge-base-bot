@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, loadAuth, saveAuth } from "./api.js";
+import { Markdown } from "./markdown.jsx";
 import { StructuredUI } from "./StructuredUI.jsx";
 
 const TABS = [
@@ -80,7 +81,7 @@ export default function App() {
           </button>
         ))}
       </nav>
-      <main className="main">
+      <main className={`main ${wide && tab === "chats" ? "locked" : ""}`}>
         {tab === "chats" && (
           <Chats wide={wide} openChat={openChat} onOpen={setOpenChat} onClose={() => setOpenChat(null)} />
         )}
@@ -135,7 +136,7 @@ function Login({ error, onSuccess }) {
       <label>Логин <input value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="username" /></label>
       <label>Пароль <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
       {message && <p className="error">{message}</p>}
-      <button type="submit" disabled={busy}>Войти</button>
+      <button type="submit" className="primary" disabled={busy}>Войти</button>
     </form>
   );
 }
@@ -168,21 +169,21 @@ function Chats({ wide, openChat, onOpen, onClose }) {
   }
 
   const list = (
-    <section>
-      <div className="row">
+    <section className="pane">
+      <div className="page-head">
         <h1>Чаты</h1>
-        <button type="button" onClick={() => create(true)}>Новый</button>
+        <button type="button" className="primary" onClick={() => create(true)}>Новый</button>
       </div>
-      <div className="row">
-        <button type="button" className="ghost" onClick={() => setArchived(false)}>Сессии</button>
-        <button type="button" className="ghost" onClick={() => setArchived(true)}>Архив</button>
+      <div className="segment">
+        <button type="button" className={archived ? "" : "on"} onClick={() => setArchived(false)}>Сессии</button>
+        <button type="button" className={archived ? "on" : ""} onClick={() => setArchived(true)}>Архив</button>
       </div>
       {error && <p className="error">{error}</p>}
       <div className="list">
         {sessions.map((item) => (
           <button key={item.id} type="button" className={`card ${openChat?.id === item.id ? "active" : ""}`} onClick={() => onOpen(item)}>
             <strong>{item.title}</strong>
-            <small>{formatWhen(item.updated_at)}{archived ? " · архив" : ""}</small>
+            <time>{formatWhen(item.updated_at)}{archived ? " · архив" : ""}</time>
           </button>
         ))}
         {!sessions.length && <p className="muted">Пока пусто.</p>}
@@ -193,11 +194,11 @@ function Chats({ wide, openChat, onOpen, onClose }) {
   const chat = openChat ? (
     <ChatThread session={openChat} archived={archived} onClose={onClose} onChanged={reload} />
   ) : (
-    <p className="muted">Выберите чат.</p>
+    <p className="muted pane">Выберите чат.</p>
   );
 
   if (!wide) return openChat ? chat : list;
-  return <div className="split">{list}{chat}</div>;
+  return <div className="split">{list}<section className="chat-pane">{chat}</section></div>;
 }
 
 function kbEnabled(session) {
@@ -212,8 +213,10 @@ function ChatThread({ session, archived, onClose, onChanged }) {
   const [text, setText] = useState("");
   const [title, setTitle] = useState(session.title || "");
   const [useKb, setUseKb] = useState(kbEnabled(session));
+  const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const scroller = useRef(null);
 
   async function load() {
     const data = await api(`/api/sessions/${session.id}/messages?limit=100`);
@@ -223,8 +226,14 @@ function ChatThread({ session, archived, onClose, onChanged }) {
   useEffect(() => {
     setTitle(session.title || "");
     setUseKb(kbEnabled(session));
+    setMenu(false);
     load().catch((err) => setError(err.message));
   }, [session.id]);
+
+  useEffect(() => {
+    const node = scroller.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [messages]);
 
   async function send(event) {
     event.preventDefault();
@@ -268,31 +277,42 @@ function ChatThread({ session, archived, onClose, onChanged }) {
 
   return (
     <section className="chat">
-      <div className="row">
-        <button type="button" className="ghost" onClick={onClose}>Назад</button>
-        <button type="button" className="ghost" onClick={toggleArchive}>{archived ? "Вернуть" : "В архив"}</button>
-      </div>
-      <form className="row" onSubmit={rename}>
-        <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Название чата" />
-        <button type="submit" className="ghost">Переименовать</button>
-      </form>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={useKb}
-          onChange={(event) => {
-            const next = event.target.checked;
-            setUseKb(next);
-            localStorage.setItem(`kb.web.kb.${session.id}`, next ? "1" : "0");
-          }}
-        />
-        Использовать базу знаний
-      </label>
-      <div className="messages">
+      <header className="chat-bar">
+        <button type="button" className="icon" onClick={onClose} aria-label="Назад">←</button>
+        <h2>{title}</h2>
+        <div className="menu">
+          <button type="button" className="icon" aria-label="Действия" onClick={() => setMenu((open) => !open)}>⋯</button>
+          {menu && (
+            <div className="menu-pop">
+              <form onSubmit={rename}>
+                <input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Название чата" />
+                <button type="submit">Переименовать</button>
+              </form>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={useKb}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setUseKb(next);
+                    localStorage.setItem(`kb.web.kb.${session.id}`, next ? "1" : "0");
+                  }}
+                />
+                Использовать базу знаний
+              </label>
+              <button type="button" onClick={toggleArchive}>{archived ? "Вернуть из архива" : "В архив"}</button>
+            </div>
+          )}
+        </div>
+      </header>
+      <div className="messages" ref={scroller}>
         {messages.map((message) => (
           <article key={message.id} className={`bubble ${message.role === "user" ? "user" : "assistant"}`}>
-            <small>{message.role === "user" ? "Вы" : "Ассистент"}</small>
-            <p>{message.content}</p>
+            <header>
+              <span>{message.role === "user" ? "Вы" : "Ассистент"}</span>
+              <time>{formatWhen(message.created_at)}</time>
+            </header>
+            <Markdown text={message.content} />
             {message.structured_ui && (
               <StructuredUI
                 document={message.structured_ui}
@@ -319,7 +339,7 @@ function ChatThread({ session, archived, onClose, onChanged }) {
       {error && <p className="error">{error}</p>}
       <form className="composer" onSubmit={send}>
         <textarea rows={3} value={text} onChange={(event) => setText(event.target.value)} placeholder={busy ? "Агент отвечает…" : "Сообщение"} disabled={busy} />
-        <button type="submit" disabled={busy}>Отправить</button>
+        <button type="submit" className="primary" disabled={busy}>Отправить</button>
       </form>
     </section>
   );
@@ -375,33 +395,48 @@ function BoardList({ surface }) {
       {error && <p className="error">{error}</p>}
       {selected ? (
         <div className="list">
-          <div className="row">
+          <div className="toolbar">
             <button type="button" className="ghost" onClick={() => setSelected(null)}>Назад</button>
-            <button type="button" className="ghost" onClick={refresh}>Обновить</button>
-          </div>
-          <label>
-            Период
             <input
-              value={period}
-              placeholder="2026-11 или all"
+              type="month"
+              aria-label="Период"
+              value={period === "all" ? "" : period}
               onChange={(event) => {
                 const next = event.target.value;
                 setPeriod(next);
+                open(selected.board, next).catch((err) => setError(err.message));
               }}
-              onBlur={() => open(selected.board, period).catch((err) => setError(err.message))}
             />
-          </label>
+            <button type="button" className="ghost" onClick={() => { setPeriod("all"); open(selected.board, "all").catch((err) => setError(err.message)); }}>Всё</button>
+            <button type="button" className="ghost" onClick={refresh}>Обновить</button>
+          </div>
           <h2>{selected.board?.title || selected.title}</h2>
+          {(selected.board?.subtitle) && <p className="muted">{selected.board.subtitle}</p>}
           <StructuredUI document={selected.document || selected.rendered_document} onEvent={null} />
         </div>
       ) : (
         <div className="list">
-          {visible.map((board) => (
-            <button key={board.id} type="button" className="card" onClick={() => open(board).catch((err) => setError(err.message))}>
-              <strong>{board.title}</strong>
-              <small>{board.archived ? "архив · " : ""}{board.subtitle || board.list_cell?.subtitle || ""}</small>
-            </button>
-          ))}
+          {visible.map((board) => {
+            const cell = board.list_cell || {};
+            const metrics = Array.isArray(cell.metrics) ? cell.metrics.slice(0, 3) : [];
+            return (
+              <button key={board.id} type="button" className="card" onClick={() => open(board).catch((err) => setError(err.message))}>
+                <strong>{cell.title || board.title}</strong>
+                <span className="sub">{board.archived ? "Архив · " : ""}{cell.subtitle || board.subtitle || ""}</span>
+                {metrics.length > 0 && (
+                  <span className="metric-line">
+                    {metrics.map((metric) => (
+                      <span key={metric.label}>
+                        <small>{metric.label}</small>
+                        <b>{metric.value}</b>
+                      </span>
+                    ))}
+                  </span>
+                )}
+                {cell.status_text && <span className="chip">{cell.status_text}</span>}
+              </button>
+            );
+          })}
           {catalog.map((preset) => (
             <div key={preset.id} className="card">
               <strong>{preset.title}</strong>
@@ -466,7 +501,7 @@ function Settings({ session, onLogout, onUser }) {
         <form className="list" onSubmit={changePassword}>
           <label>Текущий пароль <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" /></label>
           <label>Новый пароль <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={8} autoComplete="new-password" /></label>
-          <button type="submit">Сменить пароль</button>
+          <button type="submit" className="primary">Сменить пароль</button>
         </form>
       )}
       {message && <p className="muted">{message}</p>}
