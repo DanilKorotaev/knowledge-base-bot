@@ -164,6 +164,61 @@ class TestTelegramLink(unittest.TestCase):
         old = self.client.get("/api/auth/me", headers=first_headers)
         self.assertFalse(old.json()["user"]["telegram_linked"])
 
+    def test_webapp_init_data_becomes_jwt(self) -> None:
+        import hashlib
+        import hmac
+        import json
+        import time
+        from urllib.parse import urlencode
+
+        from config import config
+
+        config.TELEGRAM_TOKEN = "test-token"
+        registered = self._register("tg-web")
+        headers = {"Authorization": f"Bearer {registered['access_token']}"}
+        code = self.client.post("/api/auth/telegram/link", headers=headers).json()["code"]
+
+        import asyncio
+
+        from kb_app_api.telegram_link import accept_link_code
+        from utils.db_helpers import get_db
+
+        async def _bind() -> None:
+            db = await get_db()
+            await accept_link_code(db, code, 909090, "web")
+
+        asyncio.run(_bind())
+
+        user = json.dumps({"id": 909090, "username": "web"}, separators=(",", ":"))
+        fields = {"auth_date": str(int(time.time())), "user": user}
+        check = "\n".join(f"{key}={fields[key]}" for key in sorted(fields))
+        secret = hmac.new(b"WebAppData", b"test-token", hashlib.sha256).digest()
+        fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
+        init_data = urlencode(fields)
+
+        denied_user = json.dumps({"id": 111, "username": "nope"}, separators=(",", ":"))
+        denied_fields = {"auth_date": fields["auth_date"], "user": denied_user}
+        denied_check = "\n".join(f"{key}={denied_fields[key]}" for key in sorted(denied_fields))
+        denied_fields["hash"] = hmac.new(secret, denied_check.encode(), hashlib.sha256).hexdigest()
+        unlinked = self.client.post(
+            "/api/auth/telegram/webapp",
+            json={"init_data": urlencode(denied_fields)},
+        )
+        self.assertEqual(unlinked.status_code, 403, unlinked.text)
+        self.assertIn("привяз", unlinked.json()["error"]["message"])
+
+        exchanged = self.client.post("/api/auth/telegram/webapp", json={"init_data": init_data})
+        self.assertEqual(exchanged.status_code, 200, exchanged.text)
+        body = exchanged.json()
+        self.assertTrue(body["access_token"])
+        self.assertEqual(body["user"]["login"], "tg-web")
+        self.assertTrue(body["user"]["telegram_linked"])
+        me = self.client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {body['access_token']}"},
+        )
+        self.assertEqual(me.status_code, 200, me.text)
+
     def test_new_telegram_chat_keeps_app_session(self) -> None:
         import asyncio
 

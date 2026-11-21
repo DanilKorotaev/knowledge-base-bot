@@ -28,6 +28,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from kb_app_api.client_metadata_middleware import ClientMetadataMiddleware
 from kb_app_api.errors import APIError, api_error_handler, validation_error_handler
@@ -139,6 +140,31 @@ if _ADMIN_WEB.is_dir():
         StaticFiles(directory=str(_ADMIN_WEB), html=True),
         name="admin-web",
     )
+
+
+class _SpaFiles(StaticFiles):
+    """Serve the built web client and fall back to index.html for its routes."""
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            response = await super().get_response("index.html", scope)
+        if path == "index.html" or path == "" or str(getattr(response, "media_type", "")).startswith("text/html"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+
+_WEB_DIST = _ROOT / "web" / "dist"
+if _WEB_DIST.is_dir():
+
+    @app.get("/app")
+    async def app_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/app/", status_code=307)
+
+    app.mount("/app", _SpaFiles(directory=str(_WEB_DIST), html=True), name="kb-web")
 
 
 if __name__ == "__main__":

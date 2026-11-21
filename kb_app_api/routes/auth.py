@@ -42,6 +42,10 @@ class PatchMeBody(BaseModel):
     kb_folder: Optional[str] = Field(default=None, max_length=512)
 
 
+class TelegramWebAppBody(BaseModel):
+    init_data: str = Field(..., min_length=10)
+
+
 class CreateNcFolderBody(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     parent: Optional[str] = Field(default="/", max_length=512)
@@ -66,6 +70,27 @@ async def register(body: RegisterBody) -> dict[str, Any]:
         email=body.email,
         signup_source="self",
     )
+    return await auth_service.issue_tokens(db, user)
+
+
+@router.post("/telegram/webapp")
+async def telegram_webapp(body: TelegramWebAppBody) -> dict[str, Any]:
+    """Exchange Telegram Mini App initData for the same JWT pair as login."""
+    from miniapp.api.auth import validate_init_data
+    from kb_app_api.telegram_link import LINK_REQUIRED, telegram_linked
+    from utils.db_helpers import get_db
+
+    user_data = validate_init_data(body.init_data, config.TELEGRAM_TOKEN or "")
+    telegram_id = int(user_data["id"]) if user_data and user_data.get("id") else 0
+    if telegram_id <= 0:
+        raise APIError("unauthorized", "Не удалось проверить Telegram", status_code=401)
+
+    db = await get_db()
+    user = await db.get_user_by_telegram_id(telegram_id)
+    if not user or not user.get("login") or not telegram_linked(user):
+        raise APIError("forbidden", LINK_REQUIRED, status_code=403)
+    if user.get("is_allowed") is False:
+        raise APIError("forbidden", "Аккаунт отключён", status_code=403)
     return await auth_service.issue_tokens(db, user)
 
 

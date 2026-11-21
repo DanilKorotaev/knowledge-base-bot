@@ -20,6 +20,12 @@ wheels/
 .installed.cfg
 *.egg
 
+web/node_modules/
+
+# The web client is served from the checkout. Root dist/ must not hide it.
+!web/dist/
+!web/dist/**
+
 # Virtual Environment
 venv/
 env/

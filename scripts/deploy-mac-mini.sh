@@ -61,6 +61,10 @@ if [[ ! -d .venv ]]; then
 fi
 .venv/bin/pip install -q -r requirements.txt
 
+if command -v npm >/dev/null 2>&1 && [[ -f web/package.json ]]; then
+  (cd web && npm ci && npm run build) || echo "web build failed; serving the committed dist" >&2
+fi
+
 for i in $(seq 1 30); do
   docker info >/dev/null 2>&1 && break
   sleep 2
