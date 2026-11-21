@@ -92,9 +92,16 @@ def get_sessions_keyboard(sessions: List[Dict], page: int = 0, per_page: int = 5
         session_type_label = "📚" if session["session_type"] == "query_with_kb" else "💬"
         status_emoji = "🟢" if session["status"] == "active" else "⚪"
         
+        from utils.session_helpers import session_title
+
+        title = session_title(session)
+        prefix = f"{session_type_label} {status_emoji} "
+        room = 64 - len(prefix)
+        if len(title) > room:
+            title = title[: max(1, room - 1)].rstrip() + "…"
         keyboard.append([
             InlineKeyboardButton(
-                text=f"{session_type_label} #{session_id} {status_emoji}",
+                text=f"{prefix}{title}",
                 callback_data=f"session_details_{session_id}"
             )
         ])
@@ -462,12 +469,15 @@ def format_active_session_info(active_session: Optional[Dict]) -> str:
     if not active_session:
         return ""
     
-    session_id = active_session.get("id")
+    from utils.session_helpers import session_title
+    import html
+
     session_type = active_session.get("session_type", "")
     session_type_emoji = "📚" if session_type == "query_with_kb" else "💬"
     session_type_label = "С контекстом БЗ" if session_type == "query_with_kb" else "Без контекста"
-    
-    return f"\n\n🟢 <b>Активная сессия:</b> {session_type_emoji} #{session_id}\n<i>{session_type_label}</i>"
+    title = html.escape(session_title(active_session))
+
+    return f"\n\n🟢 <b>Активная сессия:</b> {session_type_emoji} {title}\n<i>{session_type_label}</i>"
 
 
 def get_main_menu_inline_keyboard_with_admin(
@@ -475,10 +485,13 @@ def get_main_menu_inline_keyboard_with_admin(
     active_session: Optional[Dict] = None
 ) -> InlineKeyboardMarkup:
     """
-    Главное меню как inline-кнопки с опциональной кнопкой админки и режимом сбора
-    
+    Главное меню как inline-кнопки и режимом сбора.
+
+    Кнопку админки не показываем: в чате она управляет старым белым списком,
+    а пользователи приложения живут в веб-админке.
+
     Args:
-        is_admin: Является ли пользователь администратором
+        is_admin: оставлен для вызовов, на состав меню не влияет
         active_session: Информация об активной сессии (если есть)
     """
     from config import config
@@ -514,11 +527,6 @@ def get_main_menu_inline_keyboard_with_admin(
                 text="📝 Режим сбора сообщений",
                 callback_data="start_collect_mode"
             )
-        ])
-    
-    if is_admin:
-        keyboard.append([
-            InlineKeyboardButton(text="⚙️ Админка", callback_data="admin_menu")
         ])
     
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

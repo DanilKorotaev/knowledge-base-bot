@@ -1,6 +1,7 @@
 """
 Утилиты для работы с сессиями
 """
+import html
 from typing import List, Dict, Any, Optional, Tuple
 from utils.db_helpers import get_db
 from utils.constants import SessionType, SessionStatus, MessageRole
@@ -49,6 +50,11 @@ async def get_user_sessions_for_display(
     return page_sessions, active_session_id, capped_total
 
 
+def session_title(session: Dict[str, Any]) -> str:
+    """Человеческое имя сессии. Числовой id остаётся только в callback-данных."""
+    title = " ".join(str(session.get("display_title") or "").split())
+    return title or "Без названия"
+
 
 def format_sessions_list(
     sessions: List[Dict[str, Any]],
@@ -82,8 +88,9 @@ def format_sessions_list(
         session_type_label = "С контекстом БЗ" if session["session_type"] == str(SessionType.QUERY_WITH_KB) else "Без контекста"
         
         messages_count = session.get("messages_count", 0)
-        
-        response += f"{session_type_emoji} <b>#{session['id']}</b> {status_emoji}\n"
+        title = html.escape(session_title(session))
+
+        response += f"{session_type_emoji} <b>{title}</b> {status_emoji}\n"
         response += f"  {session_type_label} • {messages_count} сообщений\n\n"
     
     # Добавить информацию о пагинации
@@ -117,7 +124,7 @@ async def format_session_details(session: Dict[str, Any], is_active: bool = Fals
     # Получить сообщения сессии
     messages = await db.get_session_messages(session_id, limit=10)
     
-    response = f"📋 <b>Сессия #{session_id}</b>\n\n"
+    response = f"📋 <b>{html.escape(session_title(session))}</b>\n\n"
     response += f"Статус: {status_label}\n"
     response += f"Тип: {session_type_label}\n"
     response += f"Сообщений: {len(messages)}\n\n"

@@ -269,7 +269,10 @@ async def session_details_callback(callback: CallbackQuery):
     session_type_label = "С контекстом БЗ" if session["session_type"] == "query_with_kb" else "Без контекста"
     status_label = "🟢 Активна" if is_active else f"⚪ {session['status']}"
     
-    response = f"<b>Сессия #{session_id}</b>\n\n"
+    from utils.session_helpers import session_title
+    import html
+
+    response = f"<b>{html.escape(session_title(session))}</b>\n\n"
     response += f"Статус: {status_label}\n"
     response += f"Тип: {session_type_label}\n"
     response += f"Сообщений: {len(messages)}\n"
