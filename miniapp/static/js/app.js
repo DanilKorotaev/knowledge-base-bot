@@ -270,7 +270,25 @@
             renderSessions();
             showScreen('sessions');
         } catch (error) {
-            showToast('Ошибка загрузки сессий: ' + error.message, 'error');
+            const message = error.message || '';
+            if (message.includes('привяз')) {
+                state.sessions = [];
+                state.activeSessionId = null;
+                showScreen('sessions');
+                const empty = document.getElementById('sessions-empty');
+                const list = document.getElementById('sessions-list');
+                if (list) list.innerHTML = '';
+                if (empty) {
+                    empty.classList.remove('hidden');
+                    empty.innerHTML = `
+                        <div class="empty-icon">🔗</div>
+                        <p>Telegram не привязан</p>
+                        <p class="hint">В приложении получите код и отправьте боту /link КОД</p>
+                    `;
+                }
+                return;
+            }
+            showToast('Ошибка загрузки сессий: ' + message, 'error');
             showScreen('sessions');
             renderSessions();
         }

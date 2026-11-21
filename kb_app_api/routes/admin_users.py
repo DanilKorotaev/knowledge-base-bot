@@ -31,7 +31,15 @@ def _public(u: dict[str, Any]) -> dict[str, Any]:
         "has_nc_app_password": bool(u.get("nc_app_password_enc")),
         "signup_source": u.get("signup_source"),
         "created_at": str(u.get("created_at") or ""),
+        "telegram_linked": _linked(u),
+        "telegram_id": int(u["telegram_id"]) if _linked(u) else None,
     }
+
+
+def _linked(u: dict[str, Any]) -> bool:
+    from kb_app_api.telegram_link import telegram_linked
+
+    return telegram_linked(u)
 
 
 class CreateUserBody(BaseModel):
@@ -46,6 +54,7 @@ class CreateUserBody(BaseModel):
     role: str = Field(default="user", pattern="^(user|admin)$")
     cursor_isolation: Optional[str] = Field(default=None, pattern="^(strict|host)$")
     must_change_password: bool = True
+    invite_via: Optional[str] = Field(default=None, pattern="^telegram$")
 
 
 class PatchUserBody(BaseModel):
@@ -100,6 +109,11 @@ async def create_user(
     out = _public(user)
     # Return temp password once (admin must share out-of-band until email works)
     out["temporary_password"] = temp
+    if body.invite_via == "telegram":
+        from kb_app_api.telegram_link import issue_link_code
+
+        invite = await issue_link_code(db, int(user["id"]), purpose="invite")
+        out["telegram_invite"] = invite
     return {"user": out}
 
 
@@ -154,3 +168,21 @@ async def reset_password(
         must_change_password=body.must_change_password,
     )
     return {"status": "ok", "temporary_password": temp, "user_id": user_id}
+
+
+@router.post("/{user_id}/telegram-invite")
+async def telegram_invite(
+    user_id: int,
+    _: Annotated[dict[str, Any], Depends(require_admin)],
+) -> dict[str, Any]:
+    """Code the person sends to the bot with /link. Does not require their password."""
+    from utils.db_helpers import get_db
+
+    from kb_app_api.telegram_link import issue_link_code
+
+    db = await get_db()
+    user = await db.get_user_by_id(user_id)
+    if not user or not user.get("login"):
+        raise APIError("not_found", "Пользователь не найден", status_code=404)
+    invite = await issue_link_code(db, user_id, purpose="invite")
+    return {"user_id": user_id, "telegram_invite": invite}

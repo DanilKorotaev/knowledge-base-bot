@@ -40,6 +40,18 @@ def get_main_menu_inline_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_link_confirm_keyboard(code: str) -> InlineKeyboardMarkup:
+    """Да/нет перед записью telegram_id. callback_data: tg_link:yes|no:<code>."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да, привязать", callback_data=f"tg_link:yes:{code}"),
+                InlineKeyboardButton(text="Нет", callback_data=f"tg_link:no:{code}"),
+            ]
+        ]
+    )
+
+
 def get_query_cancel_keyboard(request_id: str) -> InlineKeyboardMarkup:
     """Inline-кнопка отмены текущего запроса к Cursor CLI. callback_data: cq:<request_id>"""
     return InlineKeyboardMarkup(

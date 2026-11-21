@@ -42,7 +42,16 @@ def _public_user(user: dict[str, Any]) -> dict[str, Any]:
         "nextcloud_username": user.get("nextcloud_username"),
         "kb_folder": user.get("kb_folder") or "/",
         "has_nc_app_password": bool(user.get("nc_app_password_enc")),
+        "telegram_linked": _telegram_linked(user),
+        "telegram_id": int(user["telegram_id"]) if _telegram_linked(user) else None,
+        "telegram_username": user.get("username") if _telegram_linked(user) else None,
     }
+
+
+def _telegram_linked(user: dict[str, Any]) -> bool:
+    from kb_app_api.telegram_link import telegram_linked
+
+    return telegram_linked(user)
 
 
 async def issue_tokens(db: Any, user: dict[str, Any]) -> dict[str, Any]:

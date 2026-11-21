@@ -311,6 +311,21 @@ class PostgreSQLDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_auth_refresh_user
                 ON auth_refresh_sessions(user_id)
             """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    purpose TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT
+                )
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_channel_state (
+                    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    active_session_id INTEGER
+                )
+            """)
     
     async def ensure_user(self, telegram_id: int, username: Optional[str] = None) -> Dict[str, Any]:
         """Создать или обновить пользователя"""
@@ -332,19 +347,125 @@ class PostgreSQLDatabase(DatabaseInterface):
             row["kb_folder"] = "/"
         return row
 
+    _PG_USER_SELECT = """
+        id, telegram_id, username, is_allowed, is_admin, created_at,
+        login, password_hash, email, role, must_change_password, signup_source,
+        nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
+        health_data_relative, nc_app_password_enc, kb_folder
+    """
+
     async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT id, telegram_id, username, is_allowed, is_admin, created_at,
-                    login, password_hash, email, role, must_change_password, signup_source,
-                    nextcloud_username, vault_root_relative, quota_bytes, cursor_isolation,
-                    health_data_relative, nc_app_password_enc, kb_folder
-                FROM users WHERE id = $1
-                """,
+                f"SELECT {self._PG_USER_SELECT} FROM users WHERE id = $1",
                 user_id,
             )
             return self._normalize_user(dict(row)) if row else None
+
+    async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT {self._PG_USER_SELECT} FROM users WHERE telegram_id = $1",
+                telegram_id,
+            )
+            return self._normalize_user(dict(row)) if row else None
+
+    async def set_user_telegram_identity(
+        self,
+        user_id: int,
+        telegram_id: int,
+        username: Optional[str] = None,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users
+                SET telegram_id = $2,
+                    username = COALESCE($3, username),
+                    is_allowed = TRUE
+                WHERE id = $1
+                """,
+                user_id,
+                telegram_id,
+                username,
+            )
+
+    async def clear_user_telegram_identity(self, user_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET telegram_id = NULL WHERE id = $1",
+                user_id,
+            )
+            await conn.execute(
+                "DELETE FROM telegram_channel_state WHERE user_id = $1",
+                user_id,
+            )
+
+    async def insert_telegram_link_token(
+        self,
+        token: str,
+        user_id: int,
+        purpose: str,
+        expires_at: str,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO telegram_link_tokens (token, user_id, purpose, expires_at)
+                VALUES ($1, $2, $3, $4)
+                """,
+                token,
+                user_id,
+                purpose,
+                expires_at,
+            )
+
+    async def get_telegram_link_token(self, token: str) -> Optional[Dict[str, Any]]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT token, user_id, purpose, expires_at, used_at
+                FROM telegram_link_tokens WHERE token = $1
+                """,
+                token,
+            )
+            return dict(row) if row else None
+
+    async def mark_telegram_link_token_used(self, token: str, used_at: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE telegram_link_tokens SET used_at = $2 WHERE token = $1",
+                token,
+                used_at,
+            )
+
+    async def get_telegram_active_session_id(self, user_id: int) -> Optional[int]:
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval(
+                "SELECT active_session_id FROM telegram_channel_state WHERE user_id = $1",
+                user_id,
+            )
+            return int(value) if value is not None else None
+
+    async def set_telegram_active_session_id(
+        self, user_id: int, session_id: Optional[int]
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            if session_id is None:
+                await conn.execute(
+                    "DELETE FROM telegram_channel_state WHERE user_id = $1",
+                    user_id,
+                )
+                return
+            await conn.execute(
+                """
+                INSERT INTO telegram_channel_state (user_id, active_session_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id) DO UPDATE SET active_session_id = EXCLUDED.active_session_id
+                """,
+                user_id,
+                session_id,
+            )
 
     async def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
         async with self.pool.acquire() as conn:
@@ -576,7 +697,19 @@ class PostgreSQLDatabase(DatabaseInterface):
             return dict(row) if row else None
     
     async def get_active_session(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """Получить активную сессию пользователя"""
+        """Telegram focus if set. App users do not fall through to another active chat."""
+        focused_id = await self.get_telegram_active_session_id(user_id)
+        if focused_id:
+            session = await self.get_session(focused_id)
+            if (
+                session
+                and int(session["user_id"]) == int(user_id)
+                and str(session.get("status")) == "active"
+            ):
+                return session
+        user = await self.get_user_by_id(user_id)
+        if user and user.get("login"):
+            return None
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
                 SELECT * FROM sessions 
@@ -1069,9 +1202,11 @@ class PostgreSQLDatabase(DatabaseInterface):
         """Проверить, является ли пользователь администратором"""
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("""
-                SELECT is_admin FROM users WHERE telegram_id = $1
+                SELECT is_admin, role FROM users WHERE telegram_id = $1
             """, telegram_id)
-            return row['is_admin'] if row else False
+            if not row:
+                return False
+            return bool(row["is_admin"]) or row["role"] == "admin"
     
     async def allow_user(self, telegram_id: int) -> None:
         """Разрешить доступ пользователю"""

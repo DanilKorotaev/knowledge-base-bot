@@ -1,6 +1,6 @@
 # Epic: Telegram multi-user (link + invite + bot)
 
-**Статус:** 📋 Planned  
+**Статус:** 🟡 Backend, бот и Mini App сделаны (2026-11-21). iOS — отдельная задача, репозиторий приложения не трогать.
 **Приоритет:** 🟡 Средний (после стабилизации KB App API)  
 **Категория:** Telegram / Auth  
 **Связь:** из README/доков — единственная ссылка на «воскрешение Telegram»
@@ -27,7 +27,8 @@ KB App API уже multi-user (JWT, per-user vault). Legacy Telegram-бот и Mi
 | 2 | [Invite without password via Telegram](task-feature-telegram-invite-no-password.md) |
 | 3 | [Bot resolves `user_id`, sessions as App](task-feature-telegram-bot-user-scoped.md) |
 | 4 | [Channel prompt + Markdown fidelity](task-feature-telegram-markdown-and-channel.md) |
-| 5 | Mini App → см. web-эпик (initData auth) |
+| 5 | Mini App: `initData` → тот же linked user и его vault (сделано в `miniapp/`) |
+| — | iOS-кнопка привязки: [task-ios-telegram-account-link.md](task-ios-telegram-account-link.md) |
 
 ## Вне скоупа этого эпика
 

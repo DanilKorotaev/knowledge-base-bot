@@ -38,6 +38,32 @@ def _user_facing_query_error(exc: BaseException) -> str:
     return "❌ Произошла ошибка при обработке запроса. Попробуйте позже."
 
 
+async def _vault_user_for_session(db: Any, session_id: int) -> Optional[Dict[str, Any]]:
+    """App user that owns the session, when the session is tied to a login."""
+    session = await db.get_session(session_id)
+    if not session or not session.get("user_id"):
+        return None
+    user = await db.get_user_by_id(int(session["user_id"]))
+    if user and user.get("login"):
+        return user
+    return None
+
+
+def _cursor_service_for_user(
+    owner: "QueryProcessingService",
+    vault_user: Optional[Dict[str, Any]],
+) -> CursorCLIService:
+    if vault_user is None:
+        return owner._get_cursor_service()
+    from kb_app_api.vault_paths import absolute_vault_root
+
+    isolation = str(vault_user.get("cursor_isolation") or "strict")
+    return CursorCLIService(
+        kb_path=absolute_vault_root(vault_user),
+        cursor_isolation=isolation,
+    )
+
+
 def _format_query_elapsed(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds} с"
@@ -184,6 +210,7 @@ class QueryProcessingService:
             tuple[str, List[Dict]]: (ответ, список изменений файлов)
         """
         db = await self._get_db()
+        vault_user = await _vault_user_for_session(db, session_id)
         
         # Получить историю сообщений сессии для контекста
         # Если save_user_message=False, сообщение уже сохранено ранее
@@ -218,7 +245,11 @@ class QueryProcessingService:
         
         try:
             # Проверить актуальность базы знаний (быстрая синхронизация из NextCloud)
-            sync_service = self._get_sync_service()
+            sync_service = (
+                SyncService.for_user(vault_user)
+                if vault_user is not None
+                else self._get_sync_service()
+            )
             sync_updated = False
             
             sync_start = time.time()
@@ -248,7 +279,7 @@ class QueryProcessingService:
             
             # Инициализировать сервис Cursor CLI
             cursor_start = time.time()
-            cursor_service = self._get_cursor_service()
+            cursor_service = _cursor_service_for_user(self, vault_user)
             
             # Получить cursor_chat_id из сессии
             session_data = await db.get_session(session_id)
@@ -298,7 +329,7 @@ class QueryProcessingService:
 
             agent_context = build_agent_context(
                 channel="telegram",
-                user_id=user_id,
+                user_id=int(vault_user["id"]) if vault_user is not None else user_id,
                 session_id=session_id,
             )
 
@@ -401,7 +432,9 @@ class QueryProcessingService:
                 )
             
             # Обработать изменения файлов
-            await self.handle_file_changes(session_id, changes, message)
+            await self.handle_file_changes(
+                session_id, changes, message, api_user=vault_user
+            )
             
             total_time = time.time() - start_time
             logger.info(f"✅ Запрос обработан успешно за {total_time:.2f}с")
@@ -477,8 +510,14 @@ class QueryProcessingService:
 
         try:
             from utils.health_linking_hook import maybe_link_health_for_kb_changes
+            from kb_app_api.vault_paths import absolute_vault_root
 
-            maybe_link_health_for_kb_changes(app_config.LOCAL_KB_PATH, changes)
+            health_root = (
+                absolute_vault_root(api_user)
+                if api_user is not None
+                else app_config.LOCAL_KB_PATH
+            )
+            maybe_link_health_for_kb_changes(health_root, changes)
         except Exception as e:
             logger.warning("Health link Path 2 (handle_file_changes): %s", e, exc_info=True)
 
@@ -789,7 +828,9 @@ class QueryProcessingService:
         self,
         session_id: int,
         changes: List[Dict[str, Any]],
-        message: Message
+        message: Message,
+        *,
+        api_user: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Обработать изменения файлов: залогировать, синхронизировать и уведомить пользователя
@@ -809,7 +850,9 @@ class QueryProcessingService:
                 pass
             return
 
-        changes_info = await self._apply_file_changes_storage(session_id, changes)
+        changes_info = await self._apply_file_changes_storage(
+            session_id, changes, api_user=api_user
+        )
         if not changes_info:
             return
 

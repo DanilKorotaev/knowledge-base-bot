@@ -9,10 +9,10 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, Contact
+from aiogram.types import CallbackQuery, Message, Contact
 
 from handlers.keyboards import (
-    get_confirm_query_keyboard, get_main_keyboard, get_new_query_keyboard,
+    get_confirm_query_keyboard, get_link_confirm_keyboard, get_main_keyboard, get_new_query_keyboard,
     get_active_session_keyboard, get_collecting_messages_keyboard,
     get_admin_menu_keyboard, get_cancel_keyboard
 )
@@ -31,34 +31,87 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _start_payload(message: Message) -> str:
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return ""
+    payload = parts[1].strip()
+    if payload.lower().startswith("link_"):
+        return payload[5:]
+    return payload
+
+
+async def _propose_link(message: Message, code: str) -> None:
+    """Показать, к какому аккаунту ведёт код, и спросить подтверждение."""
+    import html
+
+    from kb_app_api.errors import APIError
+    from kb_app_api.telegram_link import preview_link_code
+
+    token = code.strip()
+    if not token or token.startswith("/"):
+        await message.answer("Не получилось прочитать код. Отправьте /link КОД")
+        return
+    db = await get_db()
+    try:
+        preview = await preview_link_code(db, token, message.from_user.id)
+    except APIError as exc:
+        await message.answer(f"❌ {exc.message}")
+        return
+
+    login = html.escape(str(preview["login"]))
+    status = preview["status"]
+    if status == "same":
+        await message.answer(f"Этот Telegram уже привязан к аккаунту <b>{login}</b>.", parse_mode=ParseMode.HTML)
+        return
+    if status == "telegram_taken":
+        holder = html.escape(str(preview.get("holder_login") or ""))
+        await message.answer(
+            f"Этот Telegram уже привязан к аккаунту <b>{holder}</b>.\n"
+            "Сначала отвяжите его в приложении, затем откройте ссылку снова.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if status == "account_taken":
+        await message.answer(
+            f"Аккаунт <b>{login}</b> уже привязан к другому Telegram.\n"
+            "Сначала отвяжите его в приложении.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await message.answer(
+        f"Привязать этот Telegram к аккаунту <b>{login}</b>?\n\n"
+        "Пока вы не нажмёте «Да, привязать», ничего не изменится.",
+        reply_markup=get_link_confirm_keyboard(str(preview["code"])),
+        parse_mode=ParseMode.HTML,
+    )
+
+
 @router.message(Command("start"))
 async def start_handler(message: Message):
     """Обработчик команды /start"""
     from handlers.keyboards import get_main_menu_inline_keyboard_with_admin
-    from config import config
-    
+
+    payload = _start_payload(message)
+    if payload and len(payload) >= 6 and payload.isalnum():
+        await _propose_link(message, payload)
+        return
+
     db = await get_db()
     user_id = message.from_user.id
-    user = await db.ensure_user(user_id, message.from_user.username)
-    
-    # Проверка доступа в режиме restricted
-    if config.ACCESS_MODE == "restricted":
-        is_allowed = await db.is_user_allowed(user_id)
-        if not is_allowed:
-            await message.answer(
-                "❌ У вас нет доступа к этому боту.\n\n"
-                "Обратитесь к администратору для получения доступа."
-            )
-            logger.warning(
-                f"Попытка доступа от неавторизованного пользователя при /start: "
-                f"telegram_id={user_id}, username={message.from_user.username}"
-            )
-            return
-    
-    # Проверить, является ли пользователь администратором
+    user = await db.get_user_by_telegram_id(user_id)
+    from kb_app_api.telegram_link import telegram_linked
+
+    if not user or not user.get("login") or not telegram_linked(user):
+        await message.answer(
+            "👋 Это бот базы знаний.\n\n"
+            "Он работает от вашего аккаунта в приложении.\n"
+            "Откройте привязку в приложении и отправьте код командой /link КОД."
+        )
+        return
+
     is_admin = await db.is_user_admin(user_id)
-    
-    # Получить активную сессию
     active_session = await db.get_active_session(user["id"])
     
     await message.answer(
@@ -83,6 +136,57 @@ async def start_handler(message: Message):
     )
 
 
+@router.message(Command("link"))
+async def link_handler(message: Message):
+    """Привязать Telegram к аккаунту по одноразовому коду."""
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer("Отправьте код так: /link КОД")
+        return
+    await _propose_link(message, parts[1])
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("tg_link:"))
+async def link_confirm_callback(callback: CallbackQuery):
+    """Подтверждение или отказ. Код списывается только на «Да»."""
+    from kb_app_api.errors import APIError
+    from kb_app_api.telegram_link import accept_link_code
+
+    parts = (callback.data or "").split(":", 2)
+    if len(parts) != 3 or not callback.from_user:
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+    _prefix, action, code = parts
+    if action == "no":
+        if callback.message:
+            await callback.message.edit_text("Привязка отменена. Аккаунт не изменён.")
+        await callback.answer()
+        return
+    if action != "yes":
+        await callback.answer("Некорректная кнопка", show_alert=True)
+        return
+
+    db = await get_db()
+    try:
+        user = await accept_link_code(
+            db,
+            code,
+            callback.from_user.id,
+            callback.from_user.username,
+        )
+    except APIError as exc:
+        if callback.message:
+            await callback.message.edit_text(f"❌ {exc.message}")
+        await callback.answer()
+        return
+    if callback.message:
+        await callback.message.edit_text(
+            f"✅ Telegram привязан к аккаунту {user.get('login')}.\n"
+            "Можно писать в этот чат — ответы пойдут в вашу базу."
+        )
+    await callback.answer("Привязано")
+
+
 @router.message(Command("help"))
 async def help_handler(message: Message):
     """Обработчик команды /help"""
@@ -91,10 +195,16 @@ async def help_handler(message: Message):
     
     db = await get_db()
     user_id = message.from_user.id
-    user = await db.ensure_user(user_id, message.from_user.username)
+    user = await db.get_user_by_telegram_id(user_id)
+    from kb_app_api.telegram_link import telegram_linked
+
+    if not user or not user.get("login") or not telegram_linked(user):
+        await message.answer(
+            "Справка доступна после привязки.\n"
+            "В приложении получите код и отправьте /link КОД."
+        )
+        return
     is_admin = await db.is_user_admin(user_id)
-    
-    # Получить активную сессию
     active_session = await db.get_active_session(user["id"])
     
     help_text = """📚 <b>Справка по использованию бота</b>
@@ -498,13 +608,14 @@ async def switch_session_handler(message: Message, state: FSMContext):
         await message.answer("❌ Эта сессия не принадлежит вам.")
         return
     
-    # Деактивировать текущую активную сессию
+    # Сменить только чат Telegram. Сессии приложения не завершаем.
     active_session = await db.get_active_session(user["id"])
     if active_session and active_session["id"] != session_id:
         await db.update_session(active_session["id"], status="completed")
     
     # Активировать выбранную сессию
     await db.update_session(session_id, status="active")
+    await db.set_telegram_active_session_id(user["id"], session_id)
     await state.update_data(session_id=session_id)
     
     messages_count = await db.count_session_messages(session_id)
@@ -598,6 +709,16 @@ async def revert_session_handler(message: Message):
 @require_admin
 async def admin_users_requested_handler(message: Message, state: FSMContext):
     """Обработка выбора пользователя через UI Telegram (кнопка 'Выбрать пользователя')"""
+    state_data = await state.get_data()
+    if state_data.get("admin_action") in ("allow", "set_admin"):
+        await state.clear()
+        await message.answer(
+            "Доступ больше не выдаётся по Telegram id.\n\n"
+            "Создайте пользователя в админке приложения и отправьте ему код: /link КОД.",
+            reply_markup=get_main_keyboard(),
+        )
+        return
+
     db = await get_db()
     user_id = message.from_user.id
     
@@ -871,7 +992,13 @@ async def sync_handler(message: Message):
     sync_message = await message.answer("🔄 Синхронизация с NextCloud...")
     
     try:
-        sync_service = SyncService()
+        db = await get_db()
+        app_user = await db.get_user_by_telegram_id(message.from_user.id)
+        sync_service = (
+            SyncService.for_user(app_user)
+            if app_user and app_user.get("login")
+            else SyncService()
+        )
         
         if not sync_service.enabled:
             await sync_message.edit_text("❌ Синхронизация отключена. Проверьте настройки в .env")

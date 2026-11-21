@@ -26,6 +26,35 @@ async def _get_db():
     return await get_db()
 
 
+async def _linked_user(telegram_id: int):
+    """App user bound to this Telegram. Never creates a row."""
+    from kb_app_api.errors import APIError
+    from kb_app_api.telegram_link import require_linked_user
+
+    db = await _get_db()
+    try:
+        return await require_linked_user(db, telegram_id)
+    except APIError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+def _vault_root(user: dict):
+    from kb_app_api.vault_paths import absolute_vault_root, ensure_vault_dir
+
+    ensure_vault_dir(user)
+    return absolute_vault_root(user)
+
+
+def _safe_vault_path(user: dict, relative: str):
+    from pathlib import Path
+
+    root = _vault_root(user)
+    target = (root / relative).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    return root, target
+
+
 async def _verify_session_access(session_id: int, telegram_id: int):
     """
     Проверить доступ пользователя к сессии
@@ -42,7 +71,7 @@ async def _verify_session_access(session_id: int, telegram_id: int):
     if not session:
         raise HTTPException(status_code=404, detail="Сессия не найдена")
     
-    user = await db.ensure_user(telegram_id)
+    user = await _linked_user(telegram_id)
     if session["user_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="Нет доступа к этой сессии")
     
@@ -57,7 +86,7 @@ async def get_sessions(
 ):
     """Получить список сессий пользователя"""
     db = await _get_db()
-    user = await db.ensure_user(telegram_id)
+    user = await _linked_user(telegram_id)
 
     exclude_deleted = status is None
     sessions = await db.get_user_sessions_with_counts(
@@ -88,7 +117,7 @@ async def search_sessions(
 ):
     """Поиск среди сессий пользователя по ID или содержимому сообщений"""
     db = await _get_db()
-    user = await db.ensure_user(telegram_id)
+    user = await _linked_user(telegram_id)
 
     active_session = await db.get_active_session(user["id"])
     active_session_id = active_session["id"] if active_session else None
@@ -169,13 +198,13 @@ async def switch_session(
     
     db = await _get_db()
     
-    # Деактивировать текущую активную сессию
+    # Только фокус Telegram. Остальные активные сессии приложения не закрываем.
     active_session = await db.get_active_session(user["id"])
     if active_session and active_session["id"] != session_id:
         await db.update_session(active_session["id"], status="completed")
-    
-    # Активировать выбранную сессию
+
     await db.update_session(session_id, status="active")
+    await db.set_telegram_active_session_id(user["id"], session_id)
     
     logger.info(f"Пользователь {telegram_id} переключился на сессию #{session_id}")
     
@@ -213,6 +242,9 @@ async def end_session(
     
     db = await _get_db()
     await db.update_session(session_id, status="completed")
+    focused = await db.get_telegram_active_session_id(user["id"])
+    if focused == session_id:
+        await db.set_telegram_active_session_id(user["id"], None)
     
     logger.info(f"Пользователь {telegram_id} завершил сессию #{session_id}")
     
@@ -241,6 +273,9 @@ async def delete_session(
     db = await _get_db()
     was_active = session["status"] == "active"
     await db.update_session(session_id, status="deleted")
+    focused = await db.get_telegram_active_session_id(user["id"])
+    if focused == session_id:
+        await db.set_telegram_active_session_id(user["id"], None)
     
     logger.info(f"Пользователь {telegram_id} удалил сессию #{session_id}")
     
@@ -276,7 +311,7 @@ async def get_attachment_file(
     # Найти вложение
     # Получаем все вложения для проверки доступа
     # (нужно найти session_id, чтобы проверить что пользователь владеет сессией)
-    user = await db.ensure_user(telegram_id)
+    user = await _linked_user(telegram_id)
     
     # Пробуем найти вложение в сессиях пользователя
     all_sessions = await db.get_user_sessions(user["id"], limit=200)
@@ -354,22 +389,9 @@ async def view_file(
     path: str = Query(..., description="Путь к файлу в базе знаний"),
     telegram_id: int = Depends(verify_telegram_auth)
 ):
-    """Получить содержимое файла из базы знаний"""
-    from config import config
-    from pathlib import Path
-    
-    # Проверяем доступ пользователя
-    db = await _get_db()
-    is_allowed = await db.is_user_allowed(telegram_id)
-    if not is_allowed:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    
-    # Безопасность: не допускаем выход за пределы базы знаний
-    kb_path = Path(config.LOCAL_KB_PATH).resolve()
-    file_path = (kb_path / path).resolve()
-    
-    if not str(file_path).startswith(str(kb_path)):
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    """Получить содержимое файла из базы знаний пользователя."""
+    user = await _linked_user(telegram_id)
+    _root, file_path = _safe_vault_path(user, path)
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Файл не найден")
@@ -394,22 +416,9 @@ async def list_files(
     path: str = Query("", description="Путь к папке в базе знаний"),
     telegram_id: int = Depends(verify_telegram_auth)
 ):
-    """Получить список файлов и папок в директории базы знаний"""
-    from config import config
-    from pathlib import Path
-    
-    # Проверяем доступ пользователя
-    db = await _get_db()
-    is_allowed = await db.is_user_allowed(telegram_id)
-    if not is_allowed:
-        raise HTTPException(status_code=403, detail="Нет доступа")
-    
-    # Безопасность
-    kb_path = Path(config.LOCAL_KB_PATH).resolve()
-    dir_path = (kb_path / path).resolve()
-    
-    if not str(dir_path).startswith(str(kb_path)):
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    """Список файлов в vault привязанного пользователя."""
+    user = await _linked_user(telegram_id)
+    kb_path, dir_path = _safe_vault_path(user, path)
     
     if not dir_path.exists():
         raise HTTPException(status_code=404, detail="Директория не найдена")

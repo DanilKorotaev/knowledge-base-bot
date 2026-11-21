@@ -261,7 +261,22 @@ class SQLiteDatabase(DatabaseInterface):
                 CREATE INDEX IF NOT EXISTS idx_auth_refresh_user
                 ON auth_refresh_sessions(user_id)
             """)
-            
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+                    token TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    purpose TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS telegram_channel_state (
+                    user_id INTEGER PRIMARY KEY,
+                    active_session_id INTEGER
+                )
+            """)
+
             await db.commit()
 
     def _row_to_user(self, row: Any) -> Dict[str, Any]:
@@ -322,6 +337,128 @@ class SQLiteDatabase(DatabaseInterface):
             )
             row = await cursor.fetchone()
             return self._row_to_user(row) if row else None
+
+    async def get_user_by_telegram_id(self, telegram_id: int) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                f"SELECT {self._USER_SELECT} FROM users WHERE telegram_id = ?",
+                (telegram_id,),
+            )
+            row = await cursor.fetchone()
+            return self._row_to_user(row) if row else None
+
+    async def set_user_telegram_identity(
+        self,
+        user_id: int,
+        telegram_id: int,
+        username: Optional[str] = None,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                UPDATE users
+                SET telegram_id = ?, username = COALESCE(?, username), is_allowed = 1
+                WHERE id = ?
+                """,
+                (telegram_id, username, user_id),
+            )
+            await db.commit()
+
+    async def clear_user_telegram_identity(self, user_id: int) -> None:
+        """SQLite telegram_id is NOT NULL — park a synthetic id so the real one is free."""
+        synthetic = -(10**12 + int(user_id))
+        async with aiosqlite.connect(self.db_path) as db:
+            for _ in range(5):
+                try:
+                    await db.execute(
+                        "UPDATE users SET telegram_id = ? WHERE id = ?",
+                        (synthetic, user_id),
+                    )
+                    await db.execute(
+                        "DELETE FROM telegram_channel_state WHERE user_id = ?",
+                        (user_id,),
+                    )
+                    await db.commit()
+                    return
+                except Exception:
+                    synthetic -= 1
+            raise RuntimeError("could not clear telegram_id")
+
+    async def insert_telegram_link_token(
+        self,
+        token: str,
+        user_id: int,
+        purpose: str,
+        expires_at: str,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO telegram_link_tokens (token, user_id, purpose, expires_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (token, user_id, purpose, expires_at),
+            )
+            await db.commit()
+
+    async def get_telegram_link_token(self, token: str) -> Optional[Dict[str, Any]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT token, user_id, purpose, expires_at, used_at
+                FROM telegram_link_tokens WHERE token = ?
+                """,
+                (token,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return {
+                "token": row[0],
+                "user_id": row[1],
+                "purpose": row[2],
+                "expires_at": row[3],
+                "used_at": row[4],
+            }
+
+    async def mark_telegram_link_token_used(self, token: str, used_at: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE telegram_link_tokens SET used_at = ? WHERE token = ?",
+                (used_at, token),
+            )
+            await db.commit()
+
+    async def get_telegram_active_session_id(self, user_id: int) -> Optional[int]:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT active_session_id FROM telegram_channel_state WHERE user_id = ?",
+                (user_id,),
+            )
+            row = await cursor.fetchone()
+            if not row or row[0] is None:
+                return None
+            return int(row[0])
+
+    async def set_telegram_active_session_id(
+        self, user_id: int, session_id: Optional[int]
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            if session_id is None:
+                await db.execute(
+                    "DELETE FROM telegram_channel_state WHERE user_id = ?",
+                    (user_id,),
+                )
+            else:
+                await db.execute(
+                    """
+                    INSERT INTO telegram_channel_state (user_id, active_session_id)
+                    VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET active_session_id = excluded.active_session_id
+                    """,
+                    (user_id, session_id),
+                )
+            await db.commit()
 
     async def get_user_by_login(self, login: str) -> Optional[Dict[str, Any]]:
         async with aiosqlite.connect(self.db_path) as db:
@@ -426,10 +563,9 @@ class SQLiteDatabase(DatabaseInterface):
         quota_bytes: Optional[int] = None,
         is_admin: bool = False,
     ) -> Dict[str, Any]:
-        # SQLite users.telegram_id stays NOT NULL — synthetic negative id for app accounts
-        synthetic = -abs(hash(login)) % (10**12)
-        if synthetic == 0:
-            synthetic = -1
+        # SQLite users.telegram_id stays NOT NULL — synthetic negative id for app accounts.
+        # Unary minus binds tighter than %, so (-n) % m would be positive. Keep the sign.
+        synthetic = -((abs(hash(login)) % (10**12)) or 1)
         async with aiosqlite.connect(self.db_path) as db:
             # collide retry
             for _ in range(5):
@@ -623,7 +759,19 @@ class SQLiteDatabase(DatabaseInterface):
             }
     
     async def get_active_session(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """Получить активную сессию пользователя"""
+        """Telegram focus if set. App users do not fall through to another active chat."""
+        focused_id = await self.get_telegram_active_session_id(user_id)
+        if focused_id:
+            session = await self.get_session(focused_id)
+            if (
+                session
+                and int(session["user_id"]) == int(user_id)
+                and str(session.get("status")) == "active"
+            ):
+                return session
+        user = await self.get_user_by_id(user_id)
+        if user and user.get("login"):
+            return None
         import json
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
@@ -1282,10 +1430,12 @@ class SQLiteDatabase(DatabaseInterface):
         """Проверить, является ли пользователь администратором"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                SELECT is_admin FROM users WHERE telegram_id = ?
+                SELECT is_admin, role FROM users WHERE telegram_id = ?
             """, (telegram_id,))
             row = await cursor.fetchone()
-            return bool(row[0]) if row else False
+            if not row:
+                return False
+            return bool(row[0]) or (row[1] == "admin")
     
     async def allow_user(self, telegram_id: int) -> None:
         """Разрешить доступ пользователю"""

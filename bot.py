@@ -7,8 +7,6 @@ import sys
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.enums import ParseMode
-
 from config import config
 
 # Настройка логирования
@@ -35,7 +33,7 @@ async def main():
         bot = Bot(
             token=config.TELEGRAM_TOKEN,
             session=session,
-            default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
+            default=DefaultBotProperties(parse_mode=None)
         )
         dp = Dispatcher()
         
@@ -54,11 +52,20 @@ async def main():
         
         # Инициализация администраторов из конфигурации
         if config.ADMIN_TELEGRAM_IDS:
-            logger.info(f"Инициализация администраторов: {config.ADMIN_TELEGRAM_IDS}")
+            logger.info("ADMIN_TELEGRAM_IDS учитываются только у уже привязанных аккаунтов")
             for admin_id in config.ADMIN_TELEGRAM_IDS:
                 try:
-                    await db.set_user_admin(admin_id, is_admin=True)
-                    logger.info(f"Администратор {admin_id} инициализирован")
+                    existing = await db.get_user_by_telegram_id(admin_id)
+                    if not existing or not existing.get("login"):
+                        logger.info(
+                            "Пропуск admin id %s: нет привязанного аккаунта приложения",
+                            admin_id,
+                        )
+                        continue
+                    await db.update_app_user_fields(
+                        int(existing["id"]), role="admin", is_admin=True
+                    )
+                    logger.info("Администратор %s подтверждён", admin_id)
                 except Exception as e:
                     logger.error(f"Ошибка при инициализации администратора {admin_id}: {e}")
         
@@ -67,17 +74,9 @@ async def main():
         dp.update.middleware(AccessControlMiddleware())
         logger.info("Middleware для проверки доступа зарегистрирован")
         
-        # Инициализация синхронизации с NextCloud
-        from services.sync_service import SyncService
-        sync_service = SyncService()
-        logger.info("Инициализация синхронизации с NextCloud...")
-        await sync_service.initialize()
-        logger.info("Синхронизация инициализирована")
-        
-        # Запуск периодической синхронизации (если включена)
-        if config.ENABLE_SYNC and config.AUTO_SYNC:
-            sync_task = asyncio.create_task(sync_service.start_periodic_sync())
-            logger.info("Периодическая синхронизация запущена")
+        # Общий каталог бота больше не синхронизируется в фоне.
+        # Запрос привязанного пользователя тянет его vault через SyncService.for_user.
+        logger.info("Периодическая синхронизация общего vault бота не запускается")
         
         logger.info("Бот запущен")
         

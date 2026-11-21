@@ -204,13 +204,14 @@ async def switch_session_callback(callback: CallbackQuery, state: FSMContext):
         await callback.answer("❌ Эта сессия не принадлежит вам", show_alert=True)
         return
     
-    # Деактивировать текущую активную сессию
+    # Сменить только чат Telegram. Сессии приложения не завершаем.
     active_session = await db.get_active_session(user["id"])
     if active_session and active_session["id"] != session_id:
         await db.update_session(active_session["id"], status="completed")
     
     # Активировать выбранную сессию
     await db.update_session(session_id, status="active")
+    await db.set_telegram_active_session_id(user["id"], session_id)
     await state.update_data(session_id=session_id)
     
     # Показать детали сессии после переключения
@@ -1694,19 +1695,15 @@ async def admin_select_user_callback(callback: CallbackQuery, state: FSMContext)
     await callback.answer()
     
     try:
-        if action == "allow":
-            await db.allow_user(target_telegram_id)
-            await db.ensure_user(target_telegram_id)  # Создать пользователя если его нет
-            result_text = f"✅ Пользователю {target_telegram_id} разрешен доступ."
-            logger.info(f"Администратор {user_id} разрешил доступ пользователю {target_telegram_id}")
+        if action in ("allow", "set_admin"):
+            result_text = (
+                "Доступ больше не выдаётся по Telegram id.\n\n"
+                "Создайте пользователя в админке приложения и отправьте ему код: /link КОД."
+            )
         elif action == "disallow":
             await db.disallow_user(target_telegram_id)
             result_text = f"❌ Пользователю {target_telegram_id} запрещен доступ."
             logger.info(f"Администратор {user_id} запретил доступ пользователю {target_telegram_id}")
-        elif action == "set_admin":
-            await db.set_user_admin(target_telegram_id, is_admin=True)
-            result_text = f"👑 Пользователю {target_telegram_id} назначены права администратора."
-            logger.info(f"Администратор {user_id} назначил администратором пользователя {target_telegram_id}")
         elif action == "remove_admin":
             await db.set_user_admin(target_telegram_id, is_admin=False)
             result_text = f"🔻 У пользователя {target_telegram_id} убраны права администратора."

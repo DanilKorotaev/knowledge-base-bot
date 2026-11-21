@@ -31,42 +31,43 @@ def escape_markdown_v2(text: str) -> str:
     return text
 
 
+_CODE_FENCE_RE = re.compile(r"```[\s\S]*?```")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+
 def markdown_to_html(text: str) -> str:
     """
-    Конвертировать Markdown в HTML для Telegram
-    
-    Args:
-        text: Текст в Markdown формате
-    
-    Returns:
-        str: Текст в HTML формате
+    Конвертировать Markdown в HTML для Telegram.
+
+    Содержимое `кода` и ```блоков``` не разбирается как разметка, чтобы пути
+    вроде `Питание/foo_bar.md` не превращались в курсив и не теряли подчёркивания.
     """
-    # Экранировать HTML специальные символы
-    text = text.replace('&', '&amp;')
-    text = text.replace('<', '&lt;')
-    text = text.replace('>', '&gt;')
-    
-    # Заголовки
+    holders: list[str] = []
+
+    def _hold(match: re.Match[str]) -> str:
+        holders.append(match.group(0))
+        return f"\x00CODE{len(holders) - 1}\x00"
+
+    text = _CODE_FENCE_RE.sub(_hold, text)
+    text = _INLINE_CODE_RE.sub(_hold, text)
+
+    text = html.escape(text)
+
     text = re.sub(r'^### (.*?)$', r'<b>\1</b>', text, flags=re.MULTILINE)
     text = re.sub(r'^## (.*?)$', r'<b>\1</b>', text, flags=re.MULTILINE)
     text = re.sub(r'^# (.*?)$', r'<b>\1</b>', text, flags=re.MULTILINE)
-    
-    # Жирный текст
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
-    
-    # Курсив
     text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
-    
-    # Код (inline)
-    text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
-    
-    # Код (блок)
-    text = re.sub(r'```(.*?)```', r'<pre>\1</pre>', text, flags=re.DOTALL)
-    
-    # Списки
     text = re.sub(r'^\- (.*?)$', r'• \1', text, flags=re.MULTILINE)
-    
-    return text
+
+    def _restore(match: re.Match[str]) -> str:
+        raw = holders[int(match.group(1))]
+        if raw.startswith("```"):
+            inner = raw.strip("`").strip("\n")
+            return f"<pre>{html.escape(inner)}</pre>"
+        return f"<code>{html.escape(raw.strip('`'))}</code>"
+
+    return re.sub(r"\x00CODE(\d+)\x00", _restore, text)
 
 
 def split_long_message(text: str, max_length: int = 4096) -> List[str]:

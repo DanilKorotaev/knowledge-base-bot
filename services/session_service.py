@@ -21,6 +21,11 @@ class SessionService:
         if self._db is None:
             self._db = await get_db()
         return self._db
+
+    async def _linked_user(self, telegram_id: int) -> Dict[str, Any]:
+        from kb_app_api.telegram_link import require_linked_user
+
+        return await require_linked_user(await self._get_db(), telegram_id)
     
     async def get_or_create_active_session(
         self,
@@ -40,9 +45,7 @@ class SessionService:
             Dict: Информация о сессии
         """
         db = await self._get_db()
-        
-        # Убедиться, что пользователь существует
-        user = await db.ensure_user(user_id, username)
+        user = await self._linked_user(user_id)
         
         # Получить активную сессию
         active_session = await db.get_active_session(user["id"])
@@ -54,6 +57,7 @@ class SessionService:
                 session_type=str(session_type),
                 status=str(SessionStatus.ACTIVE)
             )
+            await db.set_telegram_active_session_id(user["id"], active_session["id"])
             logger.info(f"Создана новая сессия #{active_session['id']} для пользователя {user_id}")
         
         return active_session
@@ -75,12 +79,7 @@ class SessionService:
         Returns:
             Tuple[Dict, Dict]: (пользователь, сессия)
         """
-        db = await self._get_db()
-        
-        # Убедиться, что пользователь существует
-        user = await db.ensure_user(user_id, username)
-        
-        # Получить или создать активную сессию
+        user = await self._linked_user(user_id)
         session = await self.get_or_create_active_session(user_id, username, session_type)
         
         return user, session
@@ -93,15 +92,14 @@ class SessionService:
             user_id: Telegram ID пользователя
         """
         db = await self._get_db()
-        
-        # Преобразовать Telegram ID в внутренний DB ID
-        user = await db.ensure_user(user_id)
+        user = await self._linked_user(user_id)
         
         # Получить активную сессию по внутреннему DB ID
         active_session = await db.get_active_session(user["id"])
         
         if active_session:
             await db.update_session(active_session["id"], status=str(SessionStatus.COMPLETED))
+            await db.set_telegram_active_session_id(user["id"], None)
             logger.info(f"Сессия #{active_session['id']} деактивирована для пользователя {user_id}")
     
     async def create_new_session(

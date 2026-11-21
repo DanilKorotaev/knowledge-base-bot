@@ -183,3 +183,29 @@ async def create_nc_folder(
 @router.get("/signup-status")
 async def signup_status() -> dict[str, Any]:
     return {"open_signup": bool(config.KB_APP_OPEN_SIGNUP)}
+
+
+@router.post("/telegram/link")
+async def start_telegram_link(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """One-time code. The user sends ``/link CODE`` to the bot."""
+    from utils.db_helpers import get_db
+
+    from kb_app_api.telegram_link import issue_link_code
+
+    db = await get_db()
+    return await issue_link_code(db, int(user["id"]), purpose="link")
+
+
+@router.delete("/telegram/link")
+async def delete_telegram_link(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    from utils.db_helpers import get_db
+
+    from kb_app_api.telegram_link import unlink_telegram
+
+    db = await get_db()
+    updated = await unlink_telegram(db, int(user["id"]))
+    return {"user": auth_service._public_user(updated)}
