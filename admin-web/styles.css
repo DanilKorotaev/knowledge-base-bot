@@ -26,6 +26,14 @@ input, select {
   background: #0c1117; border: 1px solid var(--border); color: var(--text);
   border-radius: 8px; padding: 0.65rem 0.75rem; font: inherit;
 }
+input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
 button {
   margin-top: 0.75rem; background: var(--accent); color: white; border: 0;
   border-radius: 8px; padding: 0.65rem 1rem; font: inherit; cursor: pointer;

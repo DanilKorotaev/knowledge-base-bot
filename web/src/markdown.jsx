@@ -13,7 +13,7 @@ export function Markdown({ text }) {
 }
 
 function parseBlocks(source) {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
+  const lines = source.replace(/\r\n/g, "\n").split("\n").map(normalizeLine);
   const blocks = [];
   let text = [];
   const flush = () => {
@@ -55,13 +55,23 @@ function parseBlocks(source) {
   return blocks;
 }
 
+function normalizeLine(line) {
+  return line
+    .replace(/[\uFF5C\u2502\u2503]/g, "|")
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u2500]/g, "-");
+}
+
 function isTableLine(line) {
   const trimmed = line.trim();
-  return trimmed.includes("|") && trimmed.replace(/\|/g, "").trim().length > 0;
+  let pipes = 0;
+  for (const char of trimmed) if (char === "|") pipes += 1;
+  return pipes >= 2;
 }
 
 function isSeparator(line) {
-  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+  const trimmed = line.trim();
+  if (!trimmed.includes("|") || !trimmed.includes("-")) return false;
+  return trimmed.replace(/[|:\-\s]/g, "") === "";
 }
 
 function splitCells(line) {

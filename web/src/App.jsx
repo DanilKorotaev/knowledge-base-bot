@@ -192,7 +192,7 @@ function Chats({ wide, openChat, onOpen, onClose }) {
   );
 
   const chat = openChat ? (
-    <ChatThread session={openChat} archived={archived} onClose={onClose} onChanged={reload} />
+    <ChatThread key={openChat.id} session={openChat} archived={archived} onClose={onClose} onChanged={reload} />
   ) : (
     <p className="muted pane">Выберите чат.</p>
   );
@@ -215,25 +215,37 @@ function ChatThread({ session, archived, onClose, onChanged }) {
   const [useKb, setUseKb] = useState(kbEnabled(session));
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const scroller = useRef(null);
 
-  async function load() {
-    const data = await api(`/api/sessions/${session.id}/messages?limit=100`);
-    setMessages(data.messages || []);
-  }
-
   useEffect(() => {
+    let cancel = false;
     setTitle(session.title || "");
     setUseKb(kbEnabled(session));
     setMenu(false);
-    load().catch((err) => setError(err.message));
+    setMessages([]);
+    setLoading(true);
+    setError("");
+    api(`/api/sessions/${session.id}/messages?limit=100`)
+      .then((data) => {
+        if (!cancel) setMessages(data.messages || []);
+      })
+      .catch((err) => {
+        if (!cancel) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
+      });
+    return () => {
+      cancel = true;
+    };
   }, [session.id]);
 
   useEffect(() => {
     const node = scroller.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [messages]);
+    if (node && !loading) node.scrollTop = node.scrollHeight;
+  }, [messages, loading]);
 
   async function send(event) {
     event.preventDefault();
@@ -306,7 +318,12 @@ function ChatThread({ session, archived, onClose, onChanged }) {
         </div>
       </header>
       <div className="messages" ref={scroller}>
-        {messages.map((message) => (
+        {loading && (
+          <div className="loader" role="status" aria-label="Загрузка">
+            <span />
+          </div>
+        )}
+        {!loading && messages.map((message) => (
           <article key={message.id} className={`bubble ${message.role === "user" ? "user" : "assistant"}`}>
             <header>
               <span>{message.role === "user" ? "Вы" : "Ассистент"}</span>
