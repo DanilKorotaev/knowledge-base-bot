@@ -1,28 +1,46 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f2f2f7;
   --panel: #ffffff;
   --ink: #1c1c1e;
   --muted: #8e8e93;
   --line: #d1d1d6;
-  --accent: #007aff;
-  --accent-ink: #ffffff;
-  --danger: #ff3b30;
+  --accent: #3e6d8a;
+  --accent-ink: #f4f8fb;
+  --danger: #c4524a;
   --fill: rgba(120, 120, 128, 0.12);
-  --mine: #007aff;
+  --mine: #3e6d8a;
+  --mine-ink: #f7fbff;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #1c1c1e;
+  --ink: #f2f2f7;
+  --muted: #8e8e93;
+  --line: #3a3a3c;
+  --accent: #9bb4c6;
+  --accent-ink: #12202b;
+  --fill: rgba(120, 120, 128, 0.28);
+  --mine: #2a3c4b;
+  --mine-ink: #e7eef3;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #000000;
     --panel: #1c1c1e;
     --ink: #f2f2f7;
     --muted: #8e8e93;
     --line: #3a3a3c;
-    --accent: #0a84ff;
+    --accent: #9bb4c6;
+    --accent-ink: #12202b;
     --fill: rgba(120, 120, 128, 0.28);
-    --mine: #0a84ff;
+    --mine: #2a3c4b;
+    --mine-ink: #e7eef3;
   }
 }
 
@@ -120,7 +138,7 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
   border-radius: 10px;
 }
 .segment button { color: var(--ink); border-radius: 8px; }
-.segment button.on { background: var(--panel); }
+.segment button.on { background: var(--panel); font-weight: 650; box-shadow: 0 0 0 1px var(--line); }
 
 .list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.85rem; }
 .card {
@@ -198,7 +216,7 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
   padding: 0.55rem 0.75rem 0.65rem;
   background: var(--panel);
 }
-.bubble.user { margin-left: auto; background: var(--mine); color: #fff; }
+.bubble.user { margin-left: auto; background: var(--mine); color: var(--mine-ink); }
 .bubble header, .bubble time { color: inherit; opacity: 0.72; font-size: 0.75rem; }
 .bubble header { display: flex; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.2rem; }
 .composer-panel {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, loadAuth, saveAuth } from "./api.js";
 import { Composer, MessageAttachments } from "./Composer.jsx";
+import { applyTheme, loadTheme } from "./theme.js";
 import { Markdown } from "./markdown.jsx";
 import { StructuredUI } from "./StructuredUI.jsx";
 
@@ -512,6 +513,7 @@ function Settings({ session, onLogout, onUser }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [theme, setTheme] = useState(loadTheme);
 
   async function changePassword(event) {
     event.preventDefault();
@@ -536,6 +538,23 @@ function Settings({ session, onLogout, onUser }) {
   return (
     <section className="list">
       <h1>Настройки</h1>
+      <p className="muted">Тема</p>
+      <div className="segment">
+        {[
+          ["light", "Светлая"],
+          ["dark", "Тёмная"],
+          ["system", "Системная"],
+        ].map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            className={theme === id ? "on" : ""}
+            onClick={() => setTheme(applyTheme(id))}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <p><strong>{user.login}</strong></p>
       <p className="muted">Роль: {user.role || "user"}</p>
       <p>Telegram: {user.telegram_linked ? `привязан${user.telegram_username ? ` (@${user.telegram_username})` : ""}` : "не привязан"}</p>

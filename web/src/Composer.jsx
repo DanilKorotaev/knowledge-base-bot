@@ -26,6 +26,12 @@ function pickRecorderMime() {
   return types.find((type) => window.MediaRecorder?.isTypeSupported?.(type)) || "";
 }
 
+function appendTranscription(current, segment) {
+  if (!current) return segment;
+  if (current.endsWith("\n")) return current + segment;
+  return `${current} ${segment}`;
+}
+
 function formatClock(seconds) {
   const value = Math.max(0, Math.floor(seconds));
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
@@ -152,12 +158,16 @@ export const Composer = forwardRef(function Composer({ disabled, status, onSend 
       body.append("audio", blob, name);
       body.append("client_transcription_id", crypto.randomUUID());
       const data = await api("/api/query/voice/transcribe", { method: "POST", body });
+      const transcription = (data.transcription || "").trim();
       setVoices((current) => [...current, {
         id: crypto.randomUUID(),
         blob,
         name,
-        transcription: data.transcription || "",
+        transcription,
       }]);
+      if (transcription) {
+        setText((current) => appendTranscription(current, transcription));
+      }
       setNote("");
     } catch (error) {
       setVoices((current) => [...current, {
@@ -213,7 +223,7 @@ export const Composer = forwardRef(function Composer({ disabled, status, onSend 
           ))}
           {voices.map((item) => (
             <div className="chip voice" key={item.id}>
-              <span>{item.transcription || "Голосовое"}</span>
+              <span>Голос</span>
               <button type="button" className="chip-x" aria-label="Убрать голосовое" onClick={() => setVoices((current) => current.filter((entry) => entry.id !== item.id))}><Icon name="close" /></button>
             </div>
           ))}
