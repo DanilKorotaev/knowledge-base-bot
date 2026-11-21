@@ -105,6 +105,71 @@ async def search_sessions(
     return {"sessions": items, "total": len(items)}
 
 
+@router.get("/telegram-focus")
+async def get_telegram_focus(
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """Сессия, в которой сейчас отвечает чат Telegram."""
+    from kb_app_api.telegram_link import telegram_linked
+
+    if not telegram_linked(user):
+        return {"session_id": None}
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    focused = await db.get_telegram_active_session_id(user["id"])
+    return {"session_id": str(focused) if focused else None}
+
+
+@router.post("/{session_id}/telegram-focus")
+async def set_telegram_focus(
+    session_id: str,
+    user: Annotated[dict[str, Any], Depends(get_api_user)],
+) -> dict[str, Any]:
+    """Сделать сессию основной для чата Telegram. Другие сессии приложения не закрываем."""
+    from kb_app_api.telegram_link import telegram_linked
+
+    if not telegram_linked(user):
+        raise APIError(
+            "link_required",
+            "Сначала привяжите Telegram",
+            status_code=409,
+        )
+    sid = parse_session_id(session_id)
+    session = await require_session_for_user(sid, user["id"])
+    if str(session.get("status") or "") == str(SessionStatus.DELETED):
+        raise APIError("conflict", "Удалённую сессию нельзя сделать основной", status_code=409)
+
+    from utils.db_helpers import get_db
+
+    db = await get_db()
+    previous = await db.get_active_session(user["id"])
+    if previous and int(previous["id"]) != sid:
+        await db.update_session(int(previous["id"]), status=str(SessionStatus.COMPLETED))
+    await db.update_session(sid, status=str(SessionStatus.ACTIVE))
+    await db.set_telegram_active_session_id(user["id"], sid)
+
+    title = session.get("display_title") or f"Сессия {sid}"
+    telegram_id = user.get("telegram_id")
+    if telegram_id:
+        try:
+            from miniapp.api.notify import send_chat_notification
+
+            await send_chat_notification(
+                int(telegram_id),
+                f"Этот чат теперь отвечает в сессии «{title}».",
+                parse_mode="",
+            )
+        except Exception:
+            pass
+
+    refreshed = await db.get_session(sid)
+    if not refreshed:
+        raise APIError("not_found", "Сессия не найдена", status_code=404)
+    count = await db.count_session_messages(sid)
+    return {"session": _serialize(refreshed, count), "session_id": str(sid)}
+
+
 @router.post("", status_code=201)
 async def create_session(
     user: Annotated[dict[str, Any], Depends(get_api_user)],

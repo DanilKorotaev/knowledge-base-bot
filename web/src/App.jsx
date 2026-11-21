@@ -85,7 +85,13 @@ export default function App() {
       </nav>
       <main className={`main ${wide && tab === "chats" ? "locked" : ""}`}>
         {tab === "chats" && (
-          <Chats wide={wide} openChat={openChat} onOpen={setOpenChat} onClose={() => setOpenChat(null)} />
+          <Chats
+            wide={wide}
+            telegram={session.mode === "telegram"}
+            openChat={openChat}
+            onOpen={setOpenChat}
+            onClose={() => setOpenChat(null)}
+          />
         )}
         {tab === "boards" && <BoardList surface="overview" />}
         {tab === "actions" && <BoardList surface="actions" />}
@@ -143,9 +149,13 @@ function Login({ error, onSuccess }) {
   );
 }
 
-function Chats({ wide, openChat, onOpen, onClose }) {
+function Chats({ wide, telegram, openChat, onOpen, onClose }) {
   const [archived, setArchived] = useState(false);
   const [sessions, setSessions] = useState([]);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [focusId, setFocusId] = useState(null);
   const [error, setError] = useState("");
 
   async function reload() {
@@ -160,6 +170,46 @@ function Chats({ wide, openChat, onOpen, onClose }) {
   }
 
   useEffect(() => { reload(); }, [archived]);
+
+  useEffect(() => {
+    if (!telegram) return undefined;
+    let cancel = false;
+    api("/api/sessions/telegram-focus")
+      .then((data) => {
+        if (!cancel) setFocusId(data.session_id || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancel = true;
+    };
+  }, [telegram]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setResults(null);
+      setSearching(false);
+      return undefined;
+    }
+    let cancel = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      api(`/api/sessions/search?q=${encodeURIComponent(q)}`)
+        .then((data) => {
+          if (!cancel) setResults(data.sessions || []);
+        })
+        .catch((err) => {
+          if (!cancel) setError(err.message);
+        })
+        .finally(() => {
+          if (!cancel) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
 
   async function create(useKnowledgeBase) {
     const data = await api("/api/sessions", {
@@ -176,25 +226,47 @@ function Chats({ wide, openChat, onOpen, onClose }) {
         <h1>Чаты</h1>
         <button type="button" className="primary" onClick={() => create(true)}>Новый</button>
       </div>
+      <input
+        className="search"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="ID или текст сообщения"
+        aria-label="Поиск чатов"
+      />
       <div className="segment">
         <button type="button" className={archived ? "" : "on"} onClick={() => setArchived(false)}>Сессии</button>
         <button type="button" className={archived ? "on" : ""} onClick={() => setArchived(true)}>Архив</button>
       </div>
       {error && <p className="error">{error}</p>}
       <div className="list">
-        {sessions.map((item) => (
+        {(results || sessions).map((item) => (
           <button key={item.id} type="button" className={`card ${openChat?.id === item.id ? "active" : ""}`} onClick={() => onOpen(item)}>
             <strong>{item.title}</strong>
-            <time>{formatWhen(item.updated_at)}{archived ? " · архив" : ""}</time>
+            <time>
+              {formatWhen(item.updated_at)}
+              {!results && archived ? " · архив" : ""}
+              {telegram && String(item.id) === String(focusId) ? " · в этом чате" : ""}
+            </time>
           </button>
         ))}
-        {!sessions.length && <p className="muted">Пока пусто.</p>}
+        {searching && <p className="muted">Ищем…</p>}
+        {!searching && results && !results.length && <p className="muted">Ничего не найдено.</p>}
+        {!searching && !results && !sessions.length && <p className="muted">Пока пусто.</p>}
       </div>
     </section>
   );
 
   const chat = openChat ? (
-    <ChatThread key={openChat.id} session={openChat} archived={archived} onClose={onClose} onChanged={reload} />
+    <ChatThread
+      key={openChat.id}
+      session={openChat}
+      archived={archived}
+      telegram={telegram}
+      focused={telegram && String(openChat.id) === String(focusId)}
+      onFocus={() => setFocusId(String(openChat.id))}
+      onClose={onClose}
+      onChanged={reload}
+    />
   ) : (
     <p className="muted pane">Выберите чат.</p>
   );
@@ -210,7 +282,7 @@ function kbEnabled(session) {
   return session.use_knowledge_base !== false;
 }
 
-function ChatThread({ session, archived, onClose, onChanged }) {
+function ChatThread({ session, archived, telegram, focused, onFocus, onClose, onChanged }) {
   const [messages, setMessages] = useState([]);
   const [title, setTitle] = useState(session.title || "");
   const [useKb, setUseKb] = useState(kbEnabled(session));
@@ -295,6 +367,18 @@ function ChatThread({ session, archived, onClose, onChanged }) {
     onClose();
   }
 
+  async function makeMain() {
+    setError("");
+    try {
+      await api(`/api/sessions/${session.id}/telegram-focus`, { method: "POST" });
+      onFocus();
+      onChanged();
+      setMenu(false);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   return (
     <section
       className={`chat ${dragOver ? "drag-over" : ""}`}
@@ -340,6 +424,11 @@ function ChatThread({ session, archived, onClose, onChanged }) {
                 />
                 Использовать базу знаний
               </label>
+              {telegram && (
+                <button type="button" onClick={makeMain} disabled={focused}>
+                  {focused ? "Основная в чате" : "Сделать основной"}
+                </button>
+              )}
               <button type="button" onClick={toggleArchive}>{archived ? "Вернуть из архива" : "В архив"}</button>
             </div>
           )}
@@ -359,6 +448,9 @@ function ChatThread({ session, archived, onClose, onChanged }) {
             </header>
             <Markdown text={message.content} />
             <MessageAttachments attachments={message.attachments} />
+            {message.role !== "user" && message.related_changed_files?.length > 0 && (
+              <ChangedFiles files={message.related_changed_files} source={message.related_changed_files_source} />
+            )}
             {message.structured_ui && (
               <StructuredUI
                 document={message.structured_ui}
@@ -385,6 +477,56 @@ function ChatThread({ session, archived, onClose, onChanged }) {
       {error && <p className="error composer-error">{error}</p>}
       <Composer ref={composerRef} disabled={busy} status={busy ? "Отправка…" : ""} onSend={sendDraft} />
     </section>
+  );
+}
+
+const CHANGE_KIND = { created: "создан", modified: "изменён", deleted: "удалён" };
+
+function ChangedFiles({ files, source }) {
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+  const title = source === "recent" ? "Недавние изменённые файлы" : "Изменённые файлы в ответе";
+
+  async function openFile(file) {
+    setBusyId(file.id);
+    setError("");
+    try {
+      const link = await api("/api/files/open-link", {
+        method: "POST",
+        body: JSON.stringify({ file_id: file.id }),
+      });
+      const url = link.web_url;
+      if (!url) throw new Error("Не удалось открыть файл");
+      const telegram = window.Telegram?.WebApp;
+      if (telegram?.openLink) telegram.openLink(url);
+      else window.open(url, "_blank", "noopener");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <div className="changed-files">
+      <button type="button" className="changed-toggle" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span>{title}</span>
+        <span className="count">{files.length}</span>
+        <span className={`chevron ${open ? "open" : ""}`} aria-hidden="true">⌄</span>
+      </button>
+      {open && (
+        <div className="changed-list">
+          {files.map((file) => (
+            <button key={file.id} type="button" disabled={Boolean(busyId)} onClick={() => openFile(file)}>
+              <span className="path" title={file.path}>{file.path}</span>
+              <span className="kind">{CHANGE_KIND[file.change_kind] || file.change_kind}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="error">{error}</p>}
+    </div>
   );
 }
 

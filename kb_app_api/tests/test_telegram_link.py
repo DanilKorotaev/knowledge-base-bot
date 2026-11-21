@@ -252,6 +252,74 @@ class TestTelegramLink(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_telegram_focus_switches_chat_and_keeps_other_session(self) -> None:
+        import asyncio
+
+        from kb_app_api.telegram_link import accept_link_code
+        from utils.constants import SessionStatus
+        from utils.db_helpers import get_db
+
+        owner = self._register("tg-focus")
+        headers = {"Authorization": f"Bearer {owner['access_token']}"}
+        phone = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "С телефона"},
+        )
+        chat = self.client.post(
+            "/api/sessions",
+            headers=headers,
+            json={"title": "Для чата"},
+        )
+        self.assertEqual(phone.status_code, 201, phone.text)
+        self.assertEqual(chat.status_code, 201, chat.text)
+        phone_id = phone.json()["session"]["id"]
+        chat_id = chat.json()["session"]["id"]
+
+        denied = self.client.post(f"/api/sessions/{chat_id}/telegram-focus", headers=headers)
+        self.assertEqual(denied.status_code, 409, denied.text)
+
+        code = self.client.post("/api/auth/telegram/link", headers=headers).json()["code"]
+
+        async def _bind() -> None:
+            db = await get_db()
+            await accept_link_code(db, code, 717171, "focus")
+
+        asyncio.run(_bind())
+        import config
+
+        config.config.TELEGRAM_TOKEN = ""
+
+        focused = self.client.post(f"/api/sessions/{chat_id}/telegram-focus", headers=headers)
+        self.assertEqual(focused.status_code, 200, focused.text)
+        self.assertEqual(focused.json()["session_id"], chat_id)
+        current = self.client.get("/api/sessions/telegram-focus", headers=headers)
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["session_id"], chat_id)
+
+        async def _statuses() -> tuple[str, str]:
+            db = await get_db()
+            phone_row = await db.get_session(int(phone_id))
+            chat_row = await db.get_session(int(chat_id))
+            active = await db.get_active_session(int(phone_row["user_id"]))
+            self.assertEqual(int(active["id"]), int(chat_id))
+            return str(phone_row["status"]), str(chat_row["status"])
+
+        phone_status, chat_status = asyncio.run(_statuses())
+        self.assertEqual(phone_status, str(SessionStatus.ACTIVE))
+        self.assertEqual(chat_status, str(SessionStatus.ACTIVE))
+
+        switched = self.client.post(f"/api/sessions/{phone_id}/telegram-focus", headers=headers)
+        self.assertEqual(switched.status_code, 200, switched.text)
+
+        async def _after_switch() -> str:
+            db = await get_db()
+            return str((await db.get_session(int(chat_id)))["status"])
+
+        self.assertEqual(asyncio.run(_after_switch()), str(SessionStatus.COMPLETED))
+        again = self.client.get("/api/sessions/telegram-focus", headers=headers)
+        self.assertEqual(again.json()["session_id"], phone_id)
+
 
 @unittest.skipUnless(TestClient is not None, "fastapi required")
 class TestMiniAppVault(unittest.TestCase):

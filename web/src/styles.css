@@ -129,6 +129,7 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
 .hidden-nav .chat { flex: 1; }
 
 .page-head, .row { display: flex; gap: 0.6rem; align-items: center; justify-content: space-between; }
+.search { width: 100%; margin-top: 0.75rem; }
 .segment {
   display: inline-flex;
   gap: 2px;
@@ -217,6 +218,39 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
   background: var(--panel);
 }
 .bubble.user { margin-left: auto; background: var(--mine); color: var(--mine-ink); }
+.changed-files { margin-top: 0.55rem; }
+.changed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.changed-toggle .count {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--fill);
+}
+.changed-toggle .chevron { margin-left: auto; transition: transform 0.2s ease; }
+.changed-toggle .chevron.open { transform: rotate(180deg); }
+.changed-list { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.4rem; }
+.changed-list button {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  background: var(--fill);
+  color: var(--ink);
+  text-align: left;
+}
+.changed-list .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
+.changed-list .kind { flex: none; color: var(--muted); font-size: 0.72rem; }
+.changed-files .error { margin: 0.35rem 0 0; }
 .bubble header, .bubble time { color: inherit; opacity: 0.72; font-size: 0.75rem; }
 .bubble header { display: flex; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.2rem; }
 .composer-panel {

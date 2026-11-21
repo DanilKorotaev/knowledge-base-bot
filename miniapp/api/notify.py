@@ -33,8 +33,9 @@ async def send_chat_notification(telegram_id: int, text: str, parse_mode: str = 
     payload = {
         "chat_id": telegram_id,
         "text": text,
-        "parse_mode": parse_mode,
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     
     try:
         async with httpx.AsyncClient(timeout=10) as client:
