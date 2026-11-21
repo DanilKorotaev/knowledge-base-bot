@@ -41,3 +41,15 @@ table { width: 100%; border-collapse: collapse; margin-top: 0.75rem; font-size: 
 th, td { text-align: left; padding: 0.55rem 0.4rem; border-bottom: 1px solid var(--border); }
 .result { background: #0c1117; padding: 0.75rem; border-radius: 8px; overflow: auto; font-size: 0.85rem; }
 select.iso { min-width: 6rem; }
+label.check { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--text); }
+label.check input { width: auto; }
+.invite {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  background: #0c1117;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.invite a { color: var(--accent); word-break: break-all; }
+.invite .row { margin-top: 0.6rem; }
+td .ghost { margin-top: 0; padding: 0.35rem 0.6rem; font-size: 0.85rem; }

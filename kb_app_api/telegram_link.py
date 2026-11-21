@@ -51,12 +51,18 @@ def telegram_linked(user: dict[str, Any]) -> bool:
 
 
 def link_payload(code: str, *, purpose: str, expires_at: str) -> dict[str, Any]:
-    return {
+    from config import config
+
+    payload = {
         "code": code,
         "command": f"/link {code}",
         "purpose": purpose,
         "expires_at": expires_at,
     }
+    username = (config.TELEGRAM_BOT_USERNAME or "").strip().lstrip("@")
+    if username:
+        payload["url"] = f"https://t.me/{username}?start=link_{code}"
+    return payload
 
 
 async def issue_link_code(db: Any, user_id: int, *, purpose: str = "link") -> dict[str, Any]:

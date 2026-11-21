@@ -82,7 +82,7 @@
   async function loadUsers() {
     const res = await api("/api/admin/users");
     if (!res.ok) {
-      usersBody.innerHTML = `<tr><td colspan="6">Ошибка ${res.status}</td></tr>`;
+      usersBody.innerHTML = `<tr><td colspan="7">Ошибка ${res.status}</td></tr>`;
       return;
     }
     const data = await res.json();
@@ -100,9 +100,11 @@
           </select>
         </td>
         <td>${u.is_allowed ? "yes" : "no"}</td>
+        <td>${u.telegram_linked ? "привязан" : "нет"}</td>
         <td>
           <button type="button" class="ghost reset" data-id="${u.id}">Reset pwd</button>
           <button type="button" class="ghost toggle" data-id="${u.id}" data-allowed="${u.is_allowed}">${u.is_allowed ? "Disable" : "Enable"}</button>
+          <button type="button" class="ghost invite" data-id="${u.id}" data-login="${u.login}">Ссылка в Telegram</button>
         </td>`;
       usersBody.appendChild(tr);
     }
@@ -134,6 +136,57 @@
         await loadUsers();
       });
     });
+    usersBody.querySelectorAll("button.invite").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const res = await api(`/api/admin/users/${el.dataset.id}/telegram-invite`, {
+          method: "POST",
+          body: "{}",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          showInvite(null, data.detail || data.message || `Ошибка ${res.status}`);
+          return;
+        }
+        showInvite(data.telegram_invite, el.dataset.login);
+      });
+    });
+  }
+
+  function esc(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[ch]));
+  }
+
+  function showInvite(invite, loginOrError) {
+    const box = document.getElementById("invite-box");
+    if (!invite) {
+      box.hidden = false;
+      box.textContent = String(loginOrError || "Не удалось выдать ссылку");
+      return;
+    }
+    const url = invite.url || "";
+    const expires = invite.expires_at ? new Date(invite.expires_at).toLocaleString() : "";
+    box.hidden = false;
+    box.innerHTML = `
+      <p>Ссылка для <b>${esc(loginOrError)}</b>. Человек откроет бота и нажмёт «Да, привязать».</p>
+      <p><a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url || invite.command)}</a></p>
+      <p class="muted">Действует до ${esc(expires)}. Код: ${esc(invite.code)}</p>
+      <div class="row">
+        <button type="button" id="btn-copy-invite">Скопировать ссылку</button>
+      </div>`;
+    const copy = document.getElementById("btn-copy-invite");
+    if (copy) {
+      copy.addEventListener("click", async () => {
+        const text = url || invite.command;
+        try {
+          await navigator.clipboard.writeText(text);
+          copy.textContent = "Скопировано";
+        } catch (_) {
+          copy.textContent = text;
+        }
+      });
+    }
   }
 
   document.getElementById("btn-login").addEventListener("click", async () => {
@@ -181,10 +234,16 @@
       cursor_isolation: document.getElementById("new-isolation").value,
       must_change_password: true,
     };
+    if (document.getElementById("new-telegram").checked) body.invite_via = "telegram";
     const res = await api("/api/admin/users", { method: "POST", body: JSON.stringify(body) });
     const data = await res.json();
     createResult.hidden = false;
-    createResult.textContent = JSON.stringify(data, null, 2);
+    if (res.ok && data.user) {
+      createResult.textContent = `Создан ${data.user.login}. Временный пароль: ${data.user.temporary_password}`;
+      if (data.user.telegram_invite) showInvite(data.user.telegram_invite, data.user.login);
+    } else {
+      createResult.textContent = JSON.stringify(data, null, 2);
+    }
     if (res.ok) await loadUsers();
   });
 

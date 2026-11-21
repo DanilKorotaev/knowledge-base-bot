@@ -44,7 +44,11 @@
             </select>
           </label>
         </div>
-        <button id="btn-create" type="button">Создать (temp password)</button>
+        <label class="check">
+          <input id="new-telegram" type="checkbox" checked />
+          Сразу дать ссылку в Telegram
+        </label>
+        <button id="btn-create" type="button">Создать</button>
         <pre id="create-result" class="result" hidden></pre>
       </div>
 
@@ -70,11 +74,13 @@
               <th>Role</th>
               <th>Isolation</th>
               <th>Allowed</th>
+              <th>Telegram</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="users-body"></tbody>
         </table>
+        <div id="invite-box" class="invite" hidden></div>
       </div>
     </section>
   </div>
