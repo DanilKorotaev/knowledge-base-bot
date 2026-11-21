@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api, loadAuth, saveAuth } from "./api.js";
+import { Composer, MessageAttachments } from "./Composer.jsx";
 import { Markdown } from "./markdown.jsx";
 import { StructuredUI } from "./StructuredUI.jsx";
 
@@ -210,14 +211,15 @@ function kbEnabled(session) {
 
 function ChatThread({ session, archived, onClose, onChanged }) {
   const [messages, setMessages] = useState([]);
-  const [text, setText] = useState("");
   const [title, setTitle] = useState(session.title || "");
   const [useKb, setUseKb] = useState(kbEnabled(session));
   const [menu, setMenu] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dragOver, setDragOver] = useState(false);
   const scroller = useRef(null);
+  const composerRef = useRef(null);
 
   useEffect(() => {
     let cancel = false;
@@ -247,24 +249,29 @@ function ChatThread({ session, archived, onClose, onChanged }) {
     if (node && !loading) node.scrollTop = node.scrollHeight;
   }, [messages, loading]);
 
-  async function send(event) {
-    event.preventDefault();
-    const content = text.trim();
-    if (!content) return;
+  async function sendDraft({ text, files, voices }) {
     setBusy(true);
     setError("");
-    setText("");
+    const body = new FormData();
+    body.append("content", text || "");
+    body.append("use_knowledge_base", useKb ? "true" : "false");
+    body.append("client_message_id", crypto.randomUUID());
+    for (const file of files) body.append("files", file, file.name);
+    if (voices.length) {
+      body.append("audio_transcriptions", JSON.stringify(voices.map((voice) => voice.transcription || "")));
+      for (const voice of voices) body.append("audio", voice.blob, voice.name);
+    }
     try {
-      const data = await api(`/api/sessions/${session.id}/messages`, {
+      const data = await api(`/api/sessions/${session.id}/messages/compose`, {
         method: "POST",
         structuredUi: true,
-        body: JSON.stringify({ content, use_knowledge_base: useKb }),
+        body,
       });
       setMessages(data.messages || []);
       onChanged();
     } catch (err) {
       setError(err.message);
-      setText(content);
+      throw err;
     } finally {
       setBusy(false);
     }
@@ -288,7 +295,27 @@ function ChatThread({ session, archived, onClose, onChanged }) {
   }
 
   return (
-    <section className="chat">
+    <section
+      className={`chat ${dragOver ? "drag-over" : ""}`}
+      onDragEnter={(event) => {
+        if ([...(event.dataTransfer?.types || [])].includes("Files")) setDragOver(true);
+      }}
+      onDragOver={(event) => {
+        if ([...(event.dataTransfer?.types || [])].includes("Files")) {
+          event.preventDefault();
+          setDragOver(true);
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setDragOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragOver(false);
+        composerRef.current?.addFiles(event.dataTransfer?.files);
+      }}
+    >
+      {dragOver && <div className="drop-overlay">Отпустите файлы</div>}
       <header className="chat-bar">
         <button type="button" className="icon" onClick={onClose} aria-label="Назад">←</button>
         <h2>{title}</h2>
@@ -330,6 +357,7 @@ function ChatThread({ session, archived, onClose, onChanged }) {
               <time>{formatWhen(message.created_at)}</time>
             </header>
             <Markdown text={message.content} />
+            <MessageAttachments attachments={message.attachments} />
             {message.structured_ui && (
               <StructuredUI
                 document={message.structured_ui}
@@ -353,11 +381,8 @@ function ChatThread({ session, archived, onClose, onChanged }) {
           </article>
         ))}
       </div>
-      {error && <p className="error">{error}</p>}
-      <form className="composer" onSubmit={send}>
-        <textarea rows={3} value={text} onChange={(event) => setText(event.target.value)} placeholder={busy ? "Агент отвечает…" : "Сообщение"} disabled={busy} />
-        <button type="submit" className="primary" disabled={busy}>Отправить</button>
-      </form>
+      {error && <p className="error composer-error">{error}</p>}
+      <Composer ref={composerRef} disabled={busy} status={busy ? "Отправка…" : ""} onSend={sendDraft} />
     </section>
   );
 }

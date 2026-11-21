@@ -145,7 +145,7 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
 .metric-line b { font-size: 0.92rem; font-variant-numeric: tabular-nums; font-weight: 650; }
 .chip { color: var(--muted); font-size: 0.75rem; }
 
-.chat { width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.chat { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .chat-pane .chat { flex: 1; }
 .chat-bar {
   display: flex;
@@ -201,15 +201,110 @@ label.check { flex-direction: row; align-items: center; gap: 0.55rem; color: var
 .bubble.user { margin-left: auto; background: var(--mine); color: #fff; }
 .bubble header, .bubble time { color: inherit; opacity: 0.72; font-size: 0.75rem; }
 .bubble header { display: flex; justify-content: space-between; gap: 0.8rem; margin-bottom: 0.2rem; }
-.composer {
+.composer-panel {
+  position: relative;
   display: flex;
-  gap: 0.45rem;
-  align-items: flex-end;
-  padding: 0.55rem 0.7rem calc(0.55rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--line);
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.35rem 0.55rem calc(0.45rem + env(safe-area-inset-bottom));
+  padding: 0.45rem 0.55rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--panel);
 }
-.composer textarea { flex: 1; min-height: 42px; }
-.composer button { height: 42px; }
+.composer-panel textarea {
+  min-height: 38px;
+  max-height: 140px;
+  background: transparent;
+  padding: 0.35rem 0.4rem;
+}
+.composer-tools { display: flex; align-items: center; gap: 0.15rem; min-height: 36px; }
+.composer-tools .spacer { flex: 1; }
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+.composer-send {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--bg);
+}
+.composer-send:disabled { background: var(--fill); color: var(--muted); }
+.composer-status, .composer-error { margin: 0 0.7rem; font-size: 0.82rem; color: var(--muted); }
+.composer-error { color: var(--danger); }
+.composer-panel.recording { border-color: var(--danger); }
+.rec-dot {
+  width: 8px;
+  height: 8px;
+  margin: 0 0.35rem;
+  border-radius: 50%;
+  background: var(--danger);
+}
+.attach-menu {
+  position: absolute;
+  left: 8px;
+  bottom: 52px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 0.35rem;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.attach-menu button { text-align: left; color: var(--ink); }
+.chips { display: flex; gap: 0.4rem; overflow-x: auto; padding: 0.1rem; }
+.chip {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 180px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 1.6rem 0.35rem 0.45rem;
+  border-radius: 12px;
+  background: var(--fill);
+  font-size: 0.82rem;
+}
+.chip img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--ink);
+}
+.chip-x svg { width: 14px; height: 14px; }
+.drop-overlay {
+  position: absolute;
+  inset: 0.4rem;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--ink);
+  font-weight: 650;
+}
+.msg-files { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.35rem; }
+.msg-files img { max-width: 240px; }
+.msg-files audio { width: min(280px, 100%); }
+.msg-files a { color: inherit; }
 
 .md { line-height: 1.45; overflow-wrap: anywhere; }
 .md p, .md ul, .md ol, .md pre, .md h3, .md h4, .md h5 { margin: 0.35rem 0; }

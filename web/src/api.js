@@ -57,3 +57,23 @@ export async function api(path, options = {}, session = loadAuth()) {
   }
   return data;
 }
+
+export async function apiBlob(path, session = loadAuth()) {
+  const headers = {};
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  let response = await fetch(path, { headers });
+  if (response.status === 401 && session?.refresh_token) {
+    const refreshed = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh_token }),
+    });
+    if (refreshed.ok) {
+      const next = await refreshed.json();
+      saveAuth({ ...session, ...next, mode: session.mode });
+      return apiBlob(path, { ...session, ...next });
+    }
+  }
+  if (!response.ok) throw new Error(`Ошибка ${response.status}`);
+  return response.blob();
+}
