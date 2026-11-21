@@ -374,8 +374,7 @@
         const status = formatStatus(session.status);
         const isActive = session.is_active;
 
-        // Компактный заголовок
-        title.textContent = `${type.emoji} #${session.id}`;
+        title.textContent = (session.display_title || '').trim() || 'Без названия';
 
         // Информация о сессии (для модального окна)
         info.innerHTML = `
